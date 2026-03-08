@@ -1,0 +1,13 @@
+Examine the text said to you by another person.
+
+Statement severity rubric (for how responder interprets opener_line):
+-  1 = Happy, person really was nice and agreeable
+-  2 = Somewhat annoyed but its just friendly banter
+-  0 = benign/neutral
+- -1 = mildly rude/dismissive
+- -2 = insult/mockery/personal disrespect
+
+Respond ONLY with a JSON object in this exact format (no markdown, no explanation):
+{"opener_line": "...", "reply_line": "...", "outcome": "friendly|argue|fight", "opener_emotion_deltas": {"trust": 0.0, "fear": 0.0, "anger": 0.0}, "responder_emotion_deltas": {"trust": 0.0, "fear": 0.0, "anger": 0.0}}
+
+Emotion deltas should be small (+/-0.03 to +/-0.10). Friendly -> slight trust up for both. Argue -> anger up for both. Fight -> anger up sharply, trust down.

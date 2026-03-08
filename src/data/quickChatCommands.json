@@ -1,0 +1,10 @@
+[
+  { "label": "Don't let the flywheels drop below 20%",     "text": "don't let the flywheels drop below 20%" },
+  { "label": "Kill chickens and craft arrows",              "text": "kill chickens and craft arrows" },
+  { "label": "Keep the furnace stocked, put extra in storage", "text": "keep the furnace stocked and put extra in storage" },
+  { "label": "Follow me",                                   "text": "follow me" },
+  { "label": "Just stand there",                            "text": "just stand there" },
+  { "label": "Gather wood",                                 "text": "gather wood" },
+  { "label": "Keep the flywheel spinning",                  "text": "keep the flywheel spinning" },
+  { "label": "Deposit everything into the crate",           "text": "deposit everything into the crate" }
+]

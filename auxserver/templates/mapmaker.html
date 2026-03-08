@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Pro Tile Mapper</title>
+    <link rel="stylesheet" href="/static/mapmaker.css" />
+  </head>
+  <body oncontextmenu="return false;">
+    <div class="toolbar">
+      <section>
+        <strong>MAP</strong>
+        <input type="text" id="mapName" value="level_01" />
+        <button id="saveBtn">Save</button>
+        <button id="loadBtn">Load</button>
+      </section>
+
+      <section>
+        <strong>TOOLS</strong>
+        <button
+          class="tool-btn active"
+          id="btnPaint"
+          onclick="setTool('paint')"
+        >
+          🖌️ Paint
+        </button>
+        <button class="tool-btn" id="btnFlood" onclick="setTool('flood')">
+          🪣 Dump
+        </button>
+        <button class="tool-btn" id="btnLine" onclick="setTool('line')">
+          📏 Line
+        </button>
+      </section>
+
+      <section>
+        <strong>GRID</strong>
+        W: <input type="number" id="gridW" value="40" min="1" /> H:
+        <input type="number" id="gridH" value="25" min="1" />
+        <button
+          id="btnGridToggle"
+          onclick="toggleGridColor()"
+          style="margin-left: 10px"
+        >
+          🔳 Grid: White
+        </button>
+      </section>
+
+      <button id="clearBtn">Clear All</button>
+      <div id="selection-display">Selected: None</div>
+    </div>
+
+    <div class="main-workspace">
+      <aside id="sidebar">
+        <div class="sidebar-content">
+          <h3>Tilesheet</h3>
+          <canvas id="sheetCanvas"></canvas>
+          <canvas id="zoom" width="320" height="320"></canvas>
+          <div id="info">col=-  row=-  frame=-  (px -, -)  COLS=-</div>
+          <div class="legend">
+            <strong>Shortcuts:</strong><br />
+            Scroll Map: Zoom In/Out<br />
+            Shift/Middle/Space + Drag: Pan map<br />
+            R-Drag Map: Erase (Paint tool)<br />
+            Line Tool: Click start, click end
+          </div>
+        </div>
+      </aside>
+
+      <div id="resizer"></div>
+
+      <main class="map-container">
+        <canvas id="mapCanvas"></canvas>
+      </main>
+    </div>
+
+    <script src="/static/mapmaker.js"></script>
+  </body>
+</html>

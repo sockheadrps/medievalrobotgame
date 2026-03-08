@@ -1,0 +1,23 @@
+Classify the player's instruction into exactly one category.
+
+Categories:
+  gather   — collecting wood, ore, stone from the world
+  store    — depositing items into crates or storage
+  smelt    — loading/running a furnace, smelting iron bars
+  craft    — making arrows, arrowheads, fletching at an anvil
+  crank    — spinning or maintaining flywheels
+  combat   — hunting, killing, fighting chickens or enemies
+  follow   — follow the player, patrol, escort, idle movement
+  idle     — stand still, do nothing, stop all tasks
+
+Output ONLY the category name. Nothing else. No punctuation.
+
+Examples:
+go get some wood and store it → gather
+keep the flywheels spinning → crank
+kill chickens and make arrows → combat
+fill that furnace with wood → smelt
+put everything in the crate → store
+just stand there → idle
+follow me → follow
+make arrows → craft

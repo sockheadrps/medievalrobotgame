@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Read(//c/Users/rpski/AppData/Local/Temp/**)",
+      "Bash(pip show:*)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\rpski\\code25\\futuregame\\src\\ui"
+    ]
+  }
+}
