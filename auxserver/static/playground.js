@@ -14,6 +14,14 @@ const OLLAMA_TAGS = `${OLLAMA_BASE}/api/tags`;
 
 let currentModel = 'llama3.2:latest';
 
+// ── Test Lab State ───────────────────────────────────────────────────────────
+let activeScenarioLabel = null;
+let lastTest = null;
+let currentBatchTest = null;
+let autoSaveTests = false;
+let reportChart = null;
+let compareChart = null;
+
 // ── Default Prompts (copied from game) ────────────────────────────────────────
 const DEFAULT_PROMPTS = {
   router: `Classify the player's instruction into exactly one category.
@@ -289,6 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindButtons();
   bindPromptEditor();
   bindScenarios();
+  bindReports();
   loadModels();
   loadNpcList();
   checkOllama();
@@ -539,31 +548,139 @@ function buildSoulContext() {
   };
 }
 
+// ── Test Lab helpers ─────────────────────────────────────────────────────────
+function snapshotState() {
+  return {
+    personality: { ...state.personality },
+    emotions: { trust: state.trust, fear: state.fear, anger: state.anger },
+    baselines: { trust: state.trust_baseline, fear: state.fear_baseline, anger: state.anger_baseline },
+    relationship_label: deriveRelationship(),
+    memories: [...state.memories],
+  };
+}
+
+function buildTestBase(name, mode, scenarioLabel = null) {
+  return {
+    id: null,
+    name: name || 'Untitled Test',
+    created_at: new Date().toISOString(),
+    mode,
+    scenario: scenarioLabel ? { id: scenarioLabel.toLowerCase().replace(/\s+/g, '_'), label: scenarioLabel } : null,
+    settings: {
+      model: currentModel,
+      temperature: getLLMTemp(),
+      max_tokens: getLLMMaxTok(),
+      context_window: getLLMCtx(),
+    },
+    initial_state: snapshotState(),
+    inputs: [],
+    steps: [],
+    final_state: null,
+    summary: null,
+    notes: '',
+  };
+}
+
+function computeSummary(test) {
+  const initial = test.initial_state?.emotions || {};
+  const final = test.final_state?.emotions || {};
+  const trust_delta = +(final.trust - initial.trust).toFixed(3);
+  const fear_delta = +(final.fear - initial.fear).toFixed(3);
+  const anger_delta = +(final.anger - initial.anger).toFixed(3);
+  const escalation_max = Math.max(0, ...test.steps.map(s => s.escalation || 0));
+  const clamp_hits = test.steps.filter(s => s.clamp_hits).length;
+  return {
+    trust_delta,
+    fear_delta,
+    anger_delta,
+    escalation_max,
+    clamp_hits,
+    fallbacks: test.fallbacks || 0,
+    memory_count: test.final_state?.memories?.length || 0,
+  };
+}
+
+function finalizeTest(test) {
+  test.final_state = snapshotState();
+  test.summary = computeSummary(test);
+  return test;
+}
+
+async function saveTestReport(test) {
+  if (!test) return;
+  try {
+    const res = await fetch('/playground/tests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(test),
+    });
+    const data = await res.json();
+    $('saveStatus').textContent = res.ok ? `Saved (${data.id})` : 'Save failed';
+    await loadReportsList();
+  } catch (e) {
+    $('saveStatus').textContent = `Save error: ${e.message}`;
+  }
+}
+
 // ── Pipelines ─────────────────────────────────────────────────────────────────
 
 async function runDialogue(text) {
   const soul = buildSoulContext();
   const systemPrompt = prompts.dialogue + `\n\nNPC soul:\n${JSON.stringify(soul, null, 2)}`;
+  const isBatch = !!currentBatchTest;
+  const test = isBatch ? currentBatchTest : buildTestBase(activeScenarioLabel || 'Dialogue', 'dialogue', activeScenarioLabel);
+  test.inputs.push({ type: 'player_message', text });
 
   addChat('player', text);
   clearTrace();
-  addTrace('Dialogue LLM', `temp=0.7, max_tokens=300`, systemPrompt, text);
+  addTrace('Dialogue LLM', `temp=${getLLMTemp()}, max_tokens=${getLLMMaxTok()}`, systemPrompt, text);
 
   try {
-    const { content, metrics } = await callLLM(systemPrompt, text, { temperature: 0.7, maxTokens: 300 });
+    const { content, metrics } = await callLLM(systemPrompt, text, { temperature: getLLMTemp(), maxTokens: getLLMMaxTok() });
     addTraceResult(content, metrics);
 
     const result = extractJSON(content);
     if (result) {
       addChat('npc', result.dialogue || '...');
       const deltas = result.emotion_deltas || {};
-      applyDeltas(deltas, 0.4);
+      const actual = applyDeltas(deltas, 0.4);
 
       if (result.memory_tag) {
         state.memories.push({ text: result.memory_tag, type: 'dialogue', ts: Date.now(), importance: 1.0 });
         renderMemories();
         addTrace('Memory Stored', result.memory_tag);
       }
+
+      const step = {
+        step: test.steps.length + 1,
+        input: text,
+        raw_response: content,
+        parsed_response: result,
+        clamp_range: 0.4,
+        escalation: state.escalation / 2,
+        clamped_deltas: {
+          trust: actual.trust.clamped,
+          fear: actual.fear.clamped,
+          anger: actual.anger.clamped,
+        },
+        scaled_deltas: {
+          trust: actual.trust.scaled,
+          fear: actual.fear.scaled,
+          anger: actual.anger.scaled,
+        },
+        before: { trust: actual.trust.before, fear: actual.fear.before, anger: actual.anger.before },
+        after: { trust: actual.trust.after, fear: actual.fear.after, anger: actual.anger.after },
+        memory_stored: result.memory_tag ? [{ text: result.memory_tag, type: 'dialogue', importance: 1.0 }] : [],
+        fallback: null,
+        latency_ms: metrics?.elapsed_ms,
+        tokens: {
+          prompt: metrics?.prompt_tokens,
+          completion: metrics?.completion_tokens,
+          total: metrics?.total_tokens,
+        },
+        clamp_hits: ['trust','fear','anger'].some(k => Math.abs(actual[k].raw) > 0.4),
+      };
+      test.steps.push(step);
 
       addHistory(`Dialogue: "${text}" → "${result.dialogue}"`);
     } else {
@@ -574,9 +691,18 @@ async function runDialogue(text) {
   } catch (e) {
     addChat('error', `LLM Error: ${e.message}`);
   }
+
+  if (!isBatch) {
+    lastTest = finalizeTest(test);
+    if (autoSaveTests) await saveTestReport(lastTest);
+  }
 }
 
 async function runCommand(text) {
+  const isBatch = !!currentBatchTest;
+  const test = isBatch ? currentBatchTest : buildTestBase(activeScenarioLabel || 'Command', 'command', activeScenarioLabel);
+  test.inputs.push({ type: 'player_message', text });
+
   addChat('player', text);
   clearTrace();
 
@@ -605,15 +731,46 @@ async function runCommand(text) {
 
     addChat('system', `Route: ${category} → ${JSON.stringify(final)}`);
     addTrace('Final Commands', JSON.stringify(final, null, 2));
+
+    const step = {
+      step: test.steps.length + 1,
+      input: text,
+      raw_response: { router: routerRaw, specialist: specRaw },
+      parsed_response: { category, commands: final },
+      clamp_range: null,
+      escalation: state.escalation,
+      clamped_deltas: null,
+      scaled_deltas: null,
+      before: null,
+      after: null,
+      memory_stored: [],
+      fallback: validated.length > 0 ? null : 'fallback_idle',
+      latency_ms: (routerMetrics?.elapsed_ms || 0) + (specMetrics?.elapsed_ms || 0),
+      tokens: {
+        prompt: (routerMetrics?.prompt_tokens || 0) + (specMetrics?.prompt_tokens || 0),
+        completion: (routerMetrics?.completion_tokens || 0) + (specMetrics?.completion_tokens || 0),
+        total: (routerMetrics?.total_tokens || 0) + (specMetrics?.total_tokens || 0),
+      },
+      clamp_hits: false,
+    };
+    test.steps.push(step);
+
     addHistory(`Command: "${text}" → ${category} → ${JSON.stringify(final)}`);
 
   } catch (e) {
     addChat('error', `LLM Error: ${e.message}`);
   }
+
+  if (!isBatch) {
+    lastTest = finalizeTest(test);
+    if (autoSaveTests) await saveTestReport(lastTest);
+  }
 }
 
 async function runDecision() {
   clearTrace();
+
+  const test = buildTestBase(activeScenarioLabel || 'Decision', 'decision', activeScenarioLabel);
 
   const soul = buildSoulContext();
   const allowedActions = [
@@ -657,17 +814,18 @@ async function runDecision() {
 
   const userMsg = 'Decide the NPC\'s next high-level action for the next 2 to 5 seconds.\nReturn JSON only.\n\nState:\n' + JSON.stringify(statePacket, null, 2);
 
-  addTrace('Decision LLM', 'temp=0.4, max_tokens=400', prompts.decision, userMsg);
+  addTrace('Decision LLM', `temp=${getLLMTemp()}, max_tokens=${getLLMMaxTok()}`, prompts.decision, userMsg);
 
   try {
-    const { content, metrics } = await callLLM(prompts.decision, userMsg, { temperature: 0.4, maxTokens: 400 });
+    const { content, metrics } = await callLLM(prompts.decision, userMsg, { temperature: getLLMTemp(), maxTokens: getLLMMaxTok() });
     addTraceResult(content, metrics);
 
     const result = extractJSON(content);
     if (result) {
       addChat('system', `Decision: ${result.primary_intent}${result.secondary_intent ? ' + ' + result.secondary_intent : ''}${result.target_id ? ' → ' + result.target_id : ''}`);
       if (result.speech) addChat('npc', result.speech);
-      if (result.emotion_delta) applyDeltas(result.emotion_delta, 0.25);
+      let actual = null;
+      if (result.emotion_delta) actual = applyDeltas(result.emotion_delta, 0.25);
       if (result.memory_candidates) {
         for (const mc of result.memory_candidates) {
           if (mc.importance >= 0.67) {
@@ -677,6 +835,34 @@ async function runDecision() {
         renderMemories();
       }
       addTrace('Decision Result', JSON.stringify(result, null, 2));
+
+      const step = {
+        step: test.steps.length + 1,
+        input: 'decision',
+        raw_response: content,
+        parsed_response: result,
+        clamp_range: 0.25,
+        escalation: state.escalation,
+        clamped_deltas: result.emotion_delta ? {
+          trust: clamp(Number(result.emotion_delta.trust || 0), -0.25, 0.25),
+          fear: clamp(Number(result.emotion_delta.fear || 0), -0.25, 0.25),
+          anger: clamp(Number(result.emotion_delta.anger || 0), -0.25, 0.25),
+        } : null,
+        scaled_deltas: result.emotion_delta ? {
+          trust: clamp(Number(result.emotion_delta.trust || 0), -0.25, 0.25),
+          fear: clamp(Number(result.emotion_delta.fear || 0), -0.25, 0.25),
+          anger: clamp(Number(result.emotion_delta.anger || 0), -0.25, 0.25),
+        } : null,
+        before: actual ? { trust: actual.trust.before, fear: actual.fear.before, anger: actual.anger.before } : null,
+        after: actual ? { trust: actual.trust.after, fear: actual.fear.after, anger: actual.anger.after } : null,
+        memory_stored: (result.memory_candidates || []).filter(m => m.importance >= 0.67),
+        fallback: result.decision_confidence < 0.3 ? 'fallback_follow' : null,
+        latency_ms: metrics?.elapsed_ms,
+        tokens: { prompt: metrics?.prompt_tokens, completion: metrics?.completion_tokens, total: metrics?.total_tokens },
+        clamp_hits: result.emotion_delta ? ['trust','fear','anger'].some(k => Math.abs(Number(result.emotion_delta[k] || 0)) > 0.25) : false,
+      };
+      test.steps.push(step);
+
       addHistory(`Decision: ${result.primary_intent} (conf: ${result.decision_confidence})`);
     } else {
       addChat('error', 'Could not parse decision JSON');
@@ -685,10 +871,15 @@ async function runDecision() {
   } catch (e) {
     addChat('error', `LLM Error: ${e.message}`);
   }
+
+  lastTest = finalizeTest(test);
+  if (autoSaveTests) await saveTestReport(lastTest);
 }
 
 async function runNPCChat() {
   clearTrace();
+
+  const test = buildTestBase(activeScenarioLabel || 'NPC Chat', 'npc_chat', activeScenarioLabel);
 
   const nameA = state.npcName;
   const nameB = $('npcBName').value || 'Clanker';
@@ -710,13 +901,15 @@ Trust toward ${nameA}: ${trustB.toFixed(2)}, Anger: ${angerB.toFixed(2)}.
 You have ${logsB} logs. ${nameA} has 3 logs.`;
 
   const lines = [];
+  let impactResult = null;
+  let actualImpact = null;
 
   try {
     // Line 1: A speaks
     const sysA = prompts.npc_chat + '\n\n' + contextA;
     const msgA = `Say something to ${nameB} while you're both gathering wood.`;
     addTrace('NPC Chat: A speaks', 'temp=0.8, max_tokens=40', sysA, msgA);
-    const { content: lineA, metrics: mA } = await callLLM(sysA, msgA, { temperature: 0.8, maxTokens: 40 });
+    const { content: lineA, metrics: mA } = await callLLM(sysA, msgA, { temperature: getLLMTemp(), maxTokens: 40 });
     addTraceResult(lineA, mA);
     const cleanA = lineA.replace(/^["']|["']$/g, '');
     lines.push({ speaker: nameA, line: cleanA });
@@ -726,7 +919,7 @@ You have ${logsB} logs. ${nameA} has 3 logs.`;
     const sysB = prompts.npc_chat + '\n\n' + contextB;
     const msgB = `${nameA} just said: "${cleanA}". Respond briefly.`;
     addTrace('NPC Chat: B responds', 'temp=0.8, max_tokens=40', sysB, msgB);
-    const { content: lineB, metrics: mB } = await callLLM(sysB, msgB, { temperature: 0.8, maxTokens: 40 });
+    const { content: lineB, metrics: mB } = await callLLM(sysB, msgB, { temperature: getLLMTemp(), maxTokens: 40 });
     addTraceResult(lineB, mB);
     const cleanB = lineB.replace(/^["']|["']$/g, '');
     lines.push({ speaker: nameB, line: cleanB });
@@ -736,7 +929,7 @@ You have ${logsB} logs. ${nameA} has 3 logs.`;
     if (Math.random() > 0.5) {
       const msg3 = `${nameB} replied: "${cleanB}". Say one last thing and get back to work.`;
       addTrace('NPC Chat: A reply', 'temp=0.8, max_tokens=30', sysA, msg3);
-      const { content: lineA2, metrics: mA2 } = await callLLM(sysA, msg3, { temperature: 0.8, maxTokens: 30 });
+      const { content: lineA2, metrics: mA2 } = await callLLM(sysA, msg3, { temperature: getLLMTemp(), maxTokens: 30 });
       addTraceResult(lineA2, mA2);
       const cleanA2 = lineA2.replace(/^["']|["']$/g, '');
       lines.push({ speaker: nameA, line: cleanA2 });
@@ -752,16 +945,17 @@ NPC B (${nameB}): cooperation=${coopB.toFixed(2)}, aggression=${aggrB.toFixed(2)
 Conversation:
 ${transcript}`;
 
-      addTrace('Chat Impact LLM', 'temp=0.3, max_tokens=200', prompts.chat_impact, impactCtx);
-      const { content: impRaw, metrics: impMetrics } = await callLLM(prompts.chat_impact, impactCtx, { temperature: 0.3, maxTokens: 200 });
+      addTrace('Chat Impact LLM', `temp=${getLLMTemp()}, max_tokens=200`, prompts.chat_impact, impactCtx);
+      const { content: impRaw, metrics: impMetrics } = await callLLM(prompts.chat_impact, impactCtx, { temperature: getLLMTemp(), maxTokens: 200 });
       addTraceResult(impRaw, impMetrics);
 
       const impact = extractJSON(impRaw);
       if (impact?.npcA) {
+        impactResult = impact;
         addChat('system', `Impact on ${nameA}: trust ${fmtDelta(impact.npcA.trust)}, anger ${fmtDelta(impact.npcA.anger)}${impact.npcA.memory_tag ? ' | Memory: ' + impact.npcA.memory_tag : ''}`);
         addChat('system', `Impact on ${nameB}: trust ${fmtDelta(impact.npcB?.trust)}, anger ${fmtDelta(impact.npcB?.anger)}${impact.npcB?.memory_tag ? ' | Memory: ' + impact.npcB.memory_tag : ''}`);
         // Apply A's impact to our state
-        applyDeltas({ trust: impact.npcA.trust || 0, fear: 0, anger: impact.npcA.anger || 0 }, 0.3);
+        actualImpact = applyDeltas({ trust: impact.npcA.trust || 0, fear: 0, anger: impact.npcA.anger || 0 }, 0.3);
         if (impact.npcA.memory_tag) {
           state.memories.push({ text: impact.npcA.memory_tag, type: 'relationship', ts: Date.now(), importance: 0.8 });
           renderMemories();
@@ -770,6 +964,36 @@ ${transcript}`;
     }
 
     addHistory(`NPC Chat: ${nameA} ↔ ${nameB} (${lines.length} lines)`);
+
+    const step = {
+      step: test.steps.length + 1,
+      input: 'npc_chat',
+      raw_response: { lines, impact: impactResult },
+      parsed_response: impactResult,
+      clamp_range: 0.3,
+      escalation: state.escalation,
+      clamped_deltas: actualImpact ? {
+        trust: actualImpact.trust.clamped,
+        fear: actualImpact.fear.clamped,
+        anger: actualImpact.anger.clamped,
+      } : null,
+      scaled_deltas: actualImpact ? {
+        trust: actualImpact.trust.scaled,
+        fear: actualImpact.fear.scaled,
+        anger: actualImpact.anger.scaled,
+      } : null,
+      before: actualImpact ? { trust: actualImpact.trust.before, fear: actualImpact.fear.before, anger: actualImpact.anger.before } : null,
+      after: actualImpact ? { trust: actualImpact.trust.after, fear: actualImpact.fear.after, anger: actualImpact.anger.after } : null,
+      memory_stored: impactResult?.npcA?.memory_tag ? [{ text: impactResult.npcA.memory_tag, type: 'relationship', importance: 0.8 }] : [],
+      fallback: null,
+      latency_ms: null,
+      tokens: null,
+      clamp_hits: actualImpact ? ['trust','fear','anger'].some(k => Math.abs(actualImpact[k].raw) > 0.3) : false,
+    };
+    test.steps.push(step);
+
+    lastTest = finalizeTest(test);
+    if (autoSaveTests) await saveTestReport(lastTest);
   } catch (e) {
     addChat('error', `LLM Error: ${e.message}`);
   }
@@ -1017,13 +1241,14 @@ function bindTabs() {
       tab.classList.add('active');
       activeTab = tab.dataset.tab;
 
-      const hideTabs = ['decision', 'npc-chat', 'prompts', 'scenarios'];
+      const hideTabs = ['decision', 'npc-chat', 'prompts', 'scenarios', 'reports'];
       $('inputArea').classList.toggle('hidden', hideTabs.includes(activeTab));
       $('decisionArea').classList.toggle('hidden', activeTab !== 'decision');
       $('npcChatArea').classList.toggle('hidden', activeTab !== 'npc-chat');
       $('promptsArea').classList.toggle('hidden', activeTab !== 'prompts');
       $('scenariosArea').classList.toggle('hidden', activeTab !== 'scenarios');
-      $('chatLog').classList.toggle('hidden', activeTab === 'prompts' || activeTab === 'scenarios');
+      $('reportsArea').classList.toggle('hidden', activeTab !== 'reports');
+      $('chatLog').classList.toggle('hidden', activeTab === 'prompts' || activeTab === 'scenarios' || activeTab === 'reports');
     };
   });
 }
@@ -1175,6 +1400,11 @@ function bindButtons() {
     $('llmTemp').value = '0.7';
     $('llmMaxTok').value = '300';
     $('llmCtx').value = '4096';
+    // Reset test lab state
+    activeScenarioLabel = null;
+    lastTest = null;
+    currentBatchTest = null;
+    if ($('saveStatus')) $('saveStatus').textContent = '';
     addChat('system', 'Full reset: state, logs, prompts, drift, and LLM settings restored to defaults');
   };
 }
@@ -1384,6 +1614,7 @@ function loadDecisionFields(d) {
 
 async function runPreset(preset) {
   // Load state
+  activeScenarioLabel = preset.name;
   loadState(preset.state);
   addChat('system', `Loaded scenario: ${preset.name}`);
 
@@ -1471,6 +1702,8 @@ async function runBatchMessages(messages, mode, delay) {
   $('batchRunBtn').disabled = true;
   $('batchStopBtn').disabled = false;
 
+  currentBatchTest = buildTestBase(activeScenarioLabel || 'Batch', 'batch', activeScenarioLabel);
+
   const total = messages.length;
   for (let i = 0; i < total; i++) {
     if (_batchAbort) break;
@@ -1495,6 +1728,12 @@ async function runBatchMessages(messages, mode, delay) {
   $('batchStopBtn').disabled = true;
   _batchRunning = false;
   _batchAbort = false;
+
+  if (currentBatchTest) {
+    lastTest = finalizeTest(currentBatchTest);
+    currentBatchTest = null;
+    if (autoSaveTests) await saveTestReport(lastTest);
+  }
 }
 
 function bindScenarios() {
@@ -1522,6 +1761,7 @@ function bindScenarios() {
     $('npcChatArea').classList.add('hidden');
     $('promptsArea').classList.add('hidden');
     $('scenariosArea').classList.add('hidden');
+    $('reportsArea').classList.add('hidden');
     $('chatLog').classList.remove('hidden');
 
     await runBatchMessages(messages, mode, delay);
@@ -1557,6 +1797,160 @@ function bindScenarios() {
     renderCustomScenarios(saved);
     addChat('system', `Saved scenario: ${name}`);
   };
+}
+
+// ── Reports (Test Lab) ───────────────────────────────────────────────────────
+async function loadReportsList() {
+  try {
+    const res = await fetch('/playground/tests');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderReportsList(data.tests || []);
+    populateCompareSelects(data.tests || []);
+  } catch (e) {
+    console.warn('Failed to load reports', e);
+  }
+}
+
+function renderReportsList(tests) {
+  const list = $('reportsList');
+  list.innerHTML = '';
+  tests.forEach(t => {
+    const div = document.createElement('div');
+    div.className = 'report-item';
+    div.innerHTML = `
+      <div class="title">${esc(t.name || t.id)}</div>
+      <div class="meta">${esc(t.created_at || '')} • ${esc(t.mode || '')}</div>
+    `;
+    div.onclick = async () => {
+      $$('.report-item').forEach(i => i.classList.remove('active'));
+      div.classList.add('active');
+      const res = await fetch(`/playground/tests/${encodeURIComponent(t.id)}`);
+      if (res.ok) {
+        const test = await res.json();
+        renderReportDetail(test);
+        renderReportChart(test);
+      }
+    };
+    list.appendChild(div);
+  });
+}
+
+function populateCompareSelects(tests) {
+  const selA = $('compareA');
+  const selB = $('compareB');
+  const opts = tests.map(t => ({ id: t.id, label: t.name || t.id }));
+  selA.innerHTML = '';
+  selB.innerHTML = '';
+  for (const o of opts) {
+    const optA = document.createElement('option');
+    optA.value = o.id; optA.textContent = o.label;
+    const optB = document.createElement('option');
+    optB.value = o.id; optB.textContent = o.label;
+    selA.appendChild(optA);
+    selB.appendChild(optB);
+  }
+}
+
+function renderReportDetail(test) {
+  const detail = $('reportDetail');
+  const summary = test.summary || {};
+  detail.innerHTML = `
+    <h4>Summary</h4>
+    <div>trust Δ: <strong>${summary.trust_delta ?? '—'}</strong> | fear Δ: <strong>${summary.fear_delta ?? '—'}</strong> | anger Δ: <strong>${summary.anger_delta ?? '—'}</strong></div>
+    <div>escalation max: <strong>${summary.escalation_max ?? '—'}</strong> | clamp hits: <strong>${summary.clamp_hits ?? '—'}</strong> | memory count: <strong>${summary.memory_count ?? '—'}</strong></div>
+    <div style="margin-top:6px">model: <strong>${test.settings?.model || '—'}</strong> | temp: <strong>${test.settings?.temperature ?? '—'}</strong> | tokens: <strong>${test.settings?.max_tokens ?? '—'}</strong></div>
+    <div style="margin-top:6px"><strong>Notes</strong>: ${esc(test.notes || '')}</div>
+    <pre>${esc(JSON.stringify(test.inputs || [], null, 2))}</pre>
+  `;
+}
+
+function renderReportChart(test) {
+  const ctx = $('reportChart');
+  if (!ctx || !window.Chart) return;
+
+  const series = [
+    test.initial_state?.emotions?.trust ?? 0,
+    ...test.steps.map(s => s.after?.trust ?? null).filter(v => v != null),
+  ];
+  const seriesF = [
+    test.initial_state?.emotions?.fear ?? 0,
+    ...test.steps.map(s => s.after?.fear ?? null).filter(v => v != null),
+  ];
+  const seriesA = [
+    test.initial_state?.emotions?.anger ?? 0,
+    ...test.steps.map(s => s.after?.anger ?? null).filter(v => v != null),
+  ];
+
+  const labels = series.map((_, i) => i.toString());
+  if (reportChart) reportChart.destroy();
+  reportChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Trust', data: series, borderColor: '#4af', tension: 0.25 },
+        { label: 'Fear', data: seriesF, borderColor: '#a855f7', tension: 0.25 },
+        { label: 'Anger', data: seriesA, borderColor: '#f44', tension: 0.25 },
+      ],
+    },
+    options: { responsive: true, plugins: { legend: { labels: { color: '#bbb' } } }, scales: { x: { ticks: { color: '#777' } }, y: { ticks: { color: '#777' }, min: 0, max: 1 } } },
+  });
+}
+
+function renderCompare(data) {
+  const detail = $('compareDetail');
+  detail.innerHTML = `
+    <h4>Compare</h4>
+    <div>trust Δ: <strong>${data.diff.trust_delta}</strong> | fear Δ: <strong>${data.diff.fear_delta}</strong> | anger Δ: <strong>${data.diff.anger_delta}</strong></div>
+    <div>escalation max: <strong>${data.diff.escalation_max}</strong> | clamp hits: <strong>${data.diff.clamp_hits}</strong></div>
+  `;
+
+  const ctx = $('compareChart');
+  if (!ctx || !window.Chart) return;
+  if (compareChart) compareChart.destroy();
+
+  const labels = data.charts.a.trust.map((_, i) => i.toString());
+  compareChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'A Trust', data: data.charts.a.trust, borderColor: '#4af', tension: 0.25 },
+        { label: 'B Trust', data: data.charts.b.trust, borderColor: '#4af', borderDash: [6,4], tension: 0.25 },
+        { label: 'A Anger', data: data.charts.a.anger, borderColor: '#f44', tension: 0.25 },
+        { label: 'B Anger', data: data.charts.b.anger, borderColor: '#f44', borderDash: [6,4], tension: 0.25 },
+      ],
+    },
+    options: { responsive: true, plugins: { legend: { labels: { color: '#bbb' } } }, scales: { x: { ticks: { color: '#777' } }, y: { ticks: { color: '#777' }, min: 0, max: 1 } } },
+  });
+}
+
+function bindReports() {
+  $('reportsRefreshBtn').onclick = loadReportsList;
+  $('saveTestBtn').onclick = async () => {
+    if (!lastTest) { $('saveStatus').textContent = 'No test to save yet'; return; }
+    await saveTestReport(lastTest);
+  };
+  $('autoSaveTests').onchange = () => {
+    autoSaveTests = $('autoSaveTests').checked;
+    localStorage.setItem('playground_autosave', autoSaveTests ? '1' : '0');
+  };
+  autoSaveTests = localStorage.getItem('playground_autosave') === '1';
+  $('autoSaveTests').checked = autoSaveTests;
+
+  $('compareBtn').onclick = async () => {
+    const idA = $('compareA').value;
+    const idB = $('compareB').value;
+    if (!idA || !idB || idA === idB) return;
+    const res = await fetch(`/playground/compare?id=${encodeURIComponent(idA)}&id2=${encodeURIComponent(idB)}`);
+    if (res.ok) {
+      const data = await res.json();
+      renderCompare(data);
+    }
+  };
+
+  loadReportsList();
 }
 
 function getCustomScenarios() {

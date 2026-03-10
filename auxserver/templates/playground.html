@@ -120,6 +120,7 @@
           <button class="tab" data-tab="npc-chat">NPC Chat</button>
           <button class="tab" data-tab="prompts">Prompts</button>
           <button class="tab" data-tab="scenarios">Scenarios</button>
+          <button class="tab" data-tab="reports">Reports</button>
         </div>
 
         <div id="chatLog" class="chat-log"></div>
@@ -234,6 +235,33 @@
           </div>
         </div>
 
+        <!-- Reports -->
+        <div id="reportsArea" class="reports-area hidden">
+          <div class="reports-sidebar">
+            <div class="reports-actions">
+              <button id="reportsRefreshBtn">Refresh</button>
+            </div>
+            <div id="reportsList" class="reports-list"></div>
+          </div>
+          <div class="reports-main">
+            <div class="reports-toolbar">
+              <button id="saveTestBtn">Save Last Test</button>
+              <label class="chk"><input type="checkbox" id="autoSaveTests" /> Auto-save</label>
+              <span id="saveStatus"></span>
+            </div>
+            <div class="reports-compare">
+              <label>Compare</label>
+              <select id="compareA"></select>
+              <select id="compareB"></select>
+              <button id="compareBtn">Compare</button>
+            </div>
+            <div id="reportDetail" class="report-detail"></div>
+            <canvas id="reportChart" height="180"></canvas>
+            <div id="compareDetail" class="compare-detail"></div>
+            <canvas id="compareChart" height="180"></canvas>
+          </div>
+        </div>
+
         <!-- NPC Chat: pick second NPC -->
         <div id="npcChatArea" class="input-area hidden">
           <h4>NPC B (other NPC)</h4>
@@ -306,6 +334,7 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="/static/playground.js"></script>
   </body>
 </html>

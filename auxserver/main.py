@@ -18,6 +18,7 @@ from api.maps import router as maps_router
 from api.soul import router as soul_router
 from api.ws import router as ws_router
 from api.accounts import router as accounts_router
+from api.playground_tests import router as playground_tests_router
 from core.config import STATIC_DIR, TEMPLATES_DIR, DEV_MODE, templates
 from services.database import init_db, migrate_json_files, ensure_dev_accounts
 from services.game_state import game
@@ -51,6 +52,7 @@ app.include_router(soul_router)
 app.include_router(maps_router)
 app.include_router(ws_router)
 app.include_router(accounts_router)
+app.include_router(playground_tests_router)
 
 
 @app.get("/health")
