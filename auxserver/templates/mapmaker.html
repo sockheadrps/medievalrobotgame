@@ -14,33 +14,35 @@
         <button id="loadBtn">Load</button>
       </section>
 
-      <section>
+      <section id="mapToolsSection">
         <strong>TOOLS</strong>
-        <button
-          class="tool-btn active"
-          id="btnPaint"
-          onclick="setTool('paint')"
-        >
-          🖌️ Paint
+        <button class="tool-btn active" id="btnPaint" onclick="setTool('paint')">
+          Paint
         </button>
         <button class="tool-btn" id="btnFlood" onclick="setTool('flood')">
-          🪣 Dump
+          Fill
         </button>
         <button class="tool-btn" id="btnLine" onclick="setTool('line')">
-          📏 Line
+          Line
+        </button>
+      </section>
+
+      <section id="gridSection">
+        <strong>GRID</strong>
+        W: <input type="number" id="gridW" value="40" min="1" /> H:
+        <input type="number" id="gridH" value="25" min="1" />
+        <button id="btnGridToggle" onclick="toggleGridColor()" style="margin-left: 10px">
+          Grid: White
         </button>
       </section>
 
       <section>
-        <strong>GRID</strong>
-        W: <input type="number" id="gridW" value="40" min="1" /> H:
-        <input type="number" id="gridH" value="25" min="1" />
-        <button
-          id="btnGridToggle"
-          onclick="toggleGridColor()"
-          style="margin-left: 10px"
-        >
-          🔳 Grid: White
+        <strong>MODE</strong>
+        <button class="mode-btn active" id="btnModeMap" onclick="setEditorMode('map')">
+          Map
+        </button>
+        <button class="mode-btn" id="btnModeSprite" onclick="setEditorMode('sprite')">
+          Sprite
         </button>
       </section>
 
@@ -55,6 +57,30 @@
           <canvas id="sheetCanvas"></canvas>
           <canvas id="zoom" width="320" height="320"></canvas>
           <div id="info">col=-  row=-  frame=-  (px -, -)  COLS=-</div>
+
+          <div id="spriteEditorPanel" class="hidden">
+            <h3>Sprite Maker</h3>
+            <div class="sprite-controls">
+              <button id="spriteNewBtn">New Blank</button>
+              <button id="spriteFromTileBtn">Use Selected Tile</button>
+              <button id="spriteSaveBtn">Save Sprite</button>
+              <button id="spriteLoadSavedBtn">Load Saved</button>
+            </div>
+            <div class="sprite-controls">
+              <label for="spriteColor">Color</label>
+              <input type="color" id="spriteColor" value="#ff0066" />
+              <button id="spriteEraserBtn">Eraser: Off</button>
+              <button id="spriteClearBtn">Clear</button>
+            </div>
+            <div class="sprite-controls">
+              <select id="spriteList"></select>
+              <button id="spriteUseSavedBtn">Use Saved Sprite</button>
+            </div>
+            <canvas id="spriteEditorCanvas" width="256" height="256"></canvas>
+            <canvas id="spritePreviewCanvas" width="128" height="128"></canvas>
+            <div id="spriteInfo">Tip: pick a sheet tile, then click "Use Selected Tile".</div>
+          </div>
+
           <div class="legend">
             <strong>Shortcuts:</strong><br />
             Scroll Map: Zoom In/Out<br />

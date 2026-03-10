@@ -1,34 +1,93 @@
 import Phaser from 'phaser';
-import { TILE_SIZE, SHEET_KEY, RESOURCE_FRAME } from '../constants.js';
+import { TILE_SIZE, SHEET_KEY, RESOURCE_FRAME, LOG1_KEY, LOG2_KEY, LOG3_KEY } from '../constants.js';
 
-// A resource item sitting on the ground, ejected from the end of a conveyor.
-// The player can walk over it to pick it up (proximity-based, checked each frame).
+const LOG_KEYS = [null, LOG1_KEY, LOG2_KEY, LOG3_KEY]; // index by amount (1-3)
+
+// A resource item sitting on the ground.
+// If placed=true (intentionally dropped for fence building), sits flat on the ground.
+// If placed=false (loot drop), bobs to indicate pickup.
 export class GroundItem extends Phaser.GameObjects.Container {
-  constructor(scene, x, y, resource, amount = 1) {
+  constructor(scene, x, y, resource, amount = 1, placed = false) {
     super(scene, x, y);
     scene.add.existing(this);
-    this.setDepth(2);
+    this.setDepth(placed ? 1 : 2); // placed items below player, loot above
 
     this.resource = resource;
     this.amount   = amount;
+    this._placed  = placed;
 
     // Register with scene so update() can check for pickup
     if (scene.groundItems) scene.groundItems.push(this);
 
-    // Use the actual spritesheet frame for the resource
-    const frame = RESOURCE_FRAME[resource] ?? 0;
-    const sprite = scene.add.image(0, 0, SHEET_KEY, frame).setScale(1.2);
+    // Use custom log sprites for Wood/log, fallback to spritesheet
+    const isLog = resource === 'Wood' || resource === 'log';
+    const logKey = isLog ? (LOG_KEYS[Math.min(amount, 3)] || LOG1_KEY) : null;
+
+    let sprite;
+    if (logKey && scene.textures.exists(logKey)) {
+      sprite = scene.add.image(0, 0, logKey).setScale(TILE_SIZE / 16);
+    } else {
+      const frame = RESOURCE_FRAME[resource] ?? 0;
+      sprite = scene.add.image(0, 0, SHEET_KEY, frame).setScale(1.2);
+    }
+    this._sprite = sprite;
     this.add(sprite);
 
-    // Subtle bob tween so it's obvious on the ground
-    scene.tweens.add({
-      targets: sprite,
-      y: -3,
-      duration: 600,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
+    // Only bob for loot drops, not placed logs
+    if (!placed) {
+      scene.tweens.add({
+        targets: sprite,
+        y: -3,
+        duration: 600,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    }
+
+    // Placed logs can be left-clicked to pick up 1 at a time
+    if (placed) {
+      this.setSize(TILE_SIZE, TILE_SIZE);
+      this.setInteractive({ useHandCursor: true });
+      this.on('pointerdown', () => this._onPickupClick());
+      this.on('pointerover', () => sprite.setTint(0xffee88));
+      this.on('pointerout', () => sprite.clearTint());
+    }
+  }
+
+  _onPickupClick() {
+    const scene = this.scene;
+    if (!scene) return;
+    const player = scene.player;
+    if (!player || scene._playerDead) return;
+
+    const d = Phaser.Math.Distance.Between(player.x, player.y, this.x, this.y);
+    if (d > TILE_SIZE * 1.5) {
+      const text = scene.add.text(this.x, this.y - TILE_SIZE / 2, 'Too far!', {
+        fontSize: '10px', color: '#ff4444', backgroundColor: '#00000088',
+        padding: { x: 3, y: 2 },
+      }).setOrigin(0.5, 1).setDepth(20);
+      scene.time.delayedCall(1000, () => text.destroy());
+      return;
+    }
+
+    const conn = scene._conn;
+    if (conn?.connected && this._serverId) {
+      conn.send({ type: 'pickup_placed', item_id: this._serverId });
+    }
+  }
+
+  /** Update the visual when the amount changes (log stacking). */
+  updateAmount(newAmount) {
+    if (newAmount === this.amount) return;
+    this.amount = newAmount;
+
+    const isLog = this.resource === 'Wood' || this.resource === 'log';
+    const logKey = isLog ? (LOG_KEYS[Math.min(newAmount, 3)] || LOG1_KEY) : null;
+
+    if (logKey && this.scene?.textures.exists(logKey)) {
+      this._sprite?.setTexture(logKey);
+    }
   }
 
   // Returns { resource, amount } if player is close enough, and destroys self. Otherwise null.

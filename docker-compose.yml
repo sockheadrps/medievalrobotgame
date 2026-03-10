@@ -1,0 +1,28 @@
+services:
+  futuregame:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: futuregame
+    restart: unless-stopped
+    expose:
+      - "8001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DEV_MODE=${DEV_MODE:-1}
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:latest}
+      - NUM_CTX=${NUM_CTX:-4096}
+    networks:
+      - npm_network
+      - default
+
+networks:
+  npm_network:
+    external: true
+    name: nginx-proxy-network
+  default:
+    driver: bridge

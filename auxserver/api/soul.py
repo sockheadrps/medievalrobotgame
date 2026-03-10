@@ -1,37 +1,24 @@
 from fastapi import APIRouter
 
-from schemas.soul import AggressionMemoryRequest, DialogueRequest, EncounterRequest, QuipRequest, ThoughtRequest
-from services.soul_service import (
-    generate_dialogue,
-    generate_encounter,
-    generate_quip,
-    generate_thought,
-    log_violent_memory,
-)
+from schemas.soul import NPCSaveRequest
+from services.soul_service import load_npc, list_npcs, save_npc
 
 router = APIRouter()
 
 
-@router.post("/npc_dialogue")
-async def npc_dialogue(request: DialogueRequest):
-    return await generate_dialogue(request)
+@router.post("/npc_save")
+async def npc_save(request: NPCSaveRequest):
+    return save_npc(request)
 
 
-@router.post("/npc_thought")
-async def npc_thought(request: ThoughtRequest):
-    return await generate_thought(request)
+@router.get("/npc_load/{npc_id}")
+async def npc_load(npc_id: str):
+    data = load_npc(npc_id)
+    if data is None:
+        return {"found": False}
+    return {"found": True, "data": data}
 
 
-@router.post("/npc_quip")
-async def npc_quip(request: QuipRequest):
-    return await generate_quip(request)
-
-
-@router.post("/npc_encounter")
-async def npc_encounter(request: EncounterRequest):
-    return await generate_encounter(request)
-
-
-@router.post("/npc_memory_log")
-async def npc_memory_log(request: AggressionMemoryRequest):
-    return await log_violent_memory(request)
+@router.get("/npc_list")
+async def npc_list():
+    return {"npcs": list_npcs()}

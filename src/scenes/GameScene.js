@@ -1,69 +1,40 @@
 import Phaser from 'phaser';
-import { buildTilemap, buildWestZone } from '../systems/TilemapBuilder.js';
-import { Inventory }       from '../systems/Inventory.js';
-import { Player }          from '../entities/Player.js';
-import { MotherMachine }   from '../entities/MotherMachine.js';
-import { Tree }            from '../entities/Tree.js';
-import { HUD }             from '../ui/HUD.js';
-import { CraftingPanel }   from '../ui/CraftingPanel.js';
-import { StoragePanel }    from '../ui/StoragePanel.js';
-import { DevMenu }         from '../ui/DevMenu.js';
-import { BuildMenu }       from '../ui/BuildMenu.js';
-import { ContextMenu }     from '../ui/ContextMenu.js';
-import { GridSystem }      from '../systems/GridSystem.js';
-import { PlacementSystem } from '../systems/PlacementSystem.js';
-import { GroundItem }      from '../entities/GroundItem.js';
-import { Furnace }         from '../entities/Furnace.js';
-import { FurnacePanel }    from '../ui/FurnacePanel.js';
-import { Quarry }          from '../entities/Quarry.js';
-import { OreCrusher }      from '../entities/OreCrusher.js';
-import { SaveSystem }      from '../systems/SaveSystem.js';
-import { Flywheel }        from '../entities/Flywheel.js';
-import { Anvil }           from '../entities/Anvil.js';
-import { NPC }             from '../entities/NPC.js';
-import { npNPC } from '../entities/npNPC.js';
-import { Chicken }         from '../entities/Chicken.js';
-import { ChatBox }         from '../ui/ChatBox.js';
-import { Bow, BOW_KEY, BOW_PATH } from '../entities/Bow.js';
-import { ARROW_PROJ_KEY, ARROW_PROJ_PATH } from '../entities/ArrowProjectile.js';
-import { NPCTaskRunner }   from '../systems/NPCTaskRunner.js';
-import { SmithingPanel }   from '../ui/SmithingPanel.js';
-import { SkillSystem }     from '../systems/SkillSystem.js';
-import { SkillsPanel }     from '../ui/SkillsPanel.js';
-import { NPCSkillsPanel }  from '../ui/NPCSkillsPanel.js';
-import { NPCTaskPanel }    from '../ui/NPCTaskPanel.js';
-import { HPBar }          from '../ui/HPBar.js';
-import { MachinePanel }   from '../ui/MachinePanel.js';
-import { NPCUpgradePanel } from '../ui/NPCUpgradePanel.js';
-import { CombatSystem }   from '../systems/CombatSystem.js';
-import { Enemy }          from '../entities/Enemy.js';
-import { CraftingBench }  from '../entities/CraftingBench.js';
-import { CraftingBenchPanel } from '../ui/CraftingBenchPanel.js';
-import { PlacedStructure } from '../entities/PlacedStructure.js';
-import { Door }           from '../entities/Door.js';
-import { MineRock }      from '../entities/MineRock.js';
-import { CrateFilterPanel } from '../ui/CrateFilterPanel.js';
-import { NPCHUDPanel } from '../ui/NPCHUDPanel.js';
-import { NPCCommandPanel }   from '../ui/NPCCommandPanel.js';
-import { SocialChatPanel, triggerNPCThought } from '../ui/SocialChatPanel.js';
-import { NPCSoulPanel }      from '../ui/NPCSoulPanel.js';
-import { WoodCraftingTablePanel } from '../ui/WoodCraftingTablePanel.js';
-import { getItem } from '../data/items.js';
+import { buildTilemap, buildTilemapFromData } from '../systems/TilemapBuilder.js';
+import { Player }       from '../entities/Player.js';
+import { RemotePlayer } from '../entities/RemotePlayer.js';
+import { Tree }         from '../entities/Tree.js';
+import { GridSystem }   from '../systems/GridSystem.js';
+import { GroundItem }   from '../entities/GroundItem.js';
+import { NPC }          from '../entities/NPC.js';
+import { ChatBox }      from '../ui/ChatBox.js';
+import { NPCTaskRunner } from '../systems/NPCTaskRunner.js';
+import { NPCBrain }      from '../systems/NPCBrain.js';
+import { TrainingDummy } from '../entities/TrainingDummy.js';
+import { RemoteNPC }    from '../entities/RemoteNPC.js';
+import { Fence }        from '../entities/Fence.js';
+import { Connection }   from '../net/Connection.js';
+import { generateDialogue } from '../net/LLMClient.js';
+import { NPCDetailPanel } from '../ui/NPCDetailPanel.js';
 import {
   TILE_SIZE, MAP_COLS, MAP_ROWS,
   SHEET_KEY, SHEET_PATH, SHEET_TILE, SHEET_SPACING,
   PLAYER_KEY, PLAYER_PATH, PLAYER_FRAME_W, PLAYER_FRAME_H,
-  CHICKEN_KEY, CHICKEN_PATH, CHICKEN_FRAME_W, CHICKEN_FRAME_H,
-  tilePos, WEST_ZONE_OFFSET_X, WEST_ZONE_COLS,
-  CARRY_PER_ATHLETICS_LEVEL, BASE_CARRY_CAPACITY,
+  NPC_KEY, NPC_PATH, NPC_FRAME_W, NPC_FRAME_H,
+  INTERACT_DIST, tilePos,
+  LOG1_KEY, LOG1_PATH, LOG2_KEY, LOG2_PATH, LOG3_KEY, LOG3_PATH,
+  FRAME_FENCE_T1, FRAME_FENCE_T2, FRAME_FENCE_T3, FRAME_GATE,
 } from '../constants.js';
 
-export class GameScene extends Phaser.Scene {
+const DUMMY_KEY  = 'trainingdummy';
+const DUMMY_PATH = 'assets/trainingdummy.png';
+import { API_BASE } from '../config.js';
+const AUTOSAVE_MS = 30000;
+
+export default class GameScene extends Phaser.Scene {
   constructor() {
-    super({ key: 'GameScene' });
+    super('GameScene');
   }
 
-  // ── preload ────────────────────────────────────────────────────────────────
   preload() {
     this.load.spritesheet(SHEET_KEY, SHEET_PATH, {
       frameWidth:  SHEET_TILE,
@@ -74,1377 +45,1985 @@ export class GameScene extends Phaser.Scene {
       frameWidth:  PLAYER_FRAME_W,
       frameHeight: PLAYER_FRAME_H,
     });
-    this.load.spritesheet(CHICKEN_KEY, CHICKEN_PATH, {
-      frameWidth:  CHICKEN_FRAME_W,
-      frameHeight: CHICKEN_FRAME_H,
+    this.load.spritesheet(NPC_KEY, NPC_PATH, {
+      frameWidth:  NPC_FRAME_W,
+      frameHeight: NPC_FRAME_H,
     });
-    this.load.image(BOW_KEY,        BOW_PATH);
-    this.load.image(ARROW_PROJ_KEY, ARROW_PROJ_PATH);
+    this.load.spritesheet(DUMMY_KEY, DUMMY_PATH, {
+      frameWidth:  32,
+      frameHeight: 32,
+    });
+    // Custom log sprites (16x16 PNGs)
+    this.load.image(LOG1_KEY, LOG1_PATH);
+    this.load.image(LOG2_KEY, LOG2_PATH);
+    this.load.image(LOG3_KEY, LOG3_PATH);
   }
 
-  // ── create ─────────────────────────────────────────────────────────────────
+  init(data) {
+    // Receive login data from LoginScene
+    this._loginData = data || {};
+  }
+
   create() {
-    const worldW = MAP_COLS * TILE_SIZE;
-    const worldH = MAP_ROWS * TILE_SIZE;
-    const westZoneW = WEST_ZONE_COLS * TILE_SIZE;
-    const totalW    = westZoneW + worldW;
+    // Entity arrays (init early so map loading can populate trees)
+    this.trees       = [];
+    this.groundItems = [];
+    this.npcs        = [];
+    this.dummies     = [];
+    this.selectedNPC = null;
+    this._pvpTarget     = null;  // Ctrl+clicked remote entity for PvP (red)
+    this._focusedRemote = null;  // left-clicked remote entity for chat/inspect (yellow)
+    this._remotePlayers = {};
 
-    buildTilemap(this);
-    buildWestZone(this);
-    this.physics.world.setBounds(WEST_ZONE_OFFSET_X, 0, totalW, worldH);
+    // Map dimensions — updated after map loads
+    this._mapCols = MAP_COLS;
+    this._mapRows = MAP_ROWS;
 
+    const worldW = this._mapCols * TILE_SIZE;
+    const worldH = this._mapRows * TILE_SIZE;
+    this.physics.world.setBounds(0, 0, worldW, worldH);
+
+    // Tilemap — load from server, fallback to procedural
     this.grid = new GridSystem();
-    this.inventory = new Inventory();
+    this._loadMap();
 
-    // Player spawns at tile (2,2)
-    const playerStart = tilePos(2, 2);
-    this.player = new Player(this, playerStart.x, playerStart.y);
-    this.player.onInteract(() => this._handleInteract());
+    // Player — will be repositioned by server
+    const sp = tilePos(10, 10);
+    this.player = new Player(this, sp.x, sp.y);
 
-    // Bow
-    this.bow = new Bow(this, this.player, this.cameras.main);
+    // Track ground item visuals by server ID
+    this._groundItemSprites = {};
 
-    this.labelsVisible = true;
+    // Track dummy visuals by server ID
+    this._dummySprites = {};
 
-    // X key — toggle bow
-    this.input.keyboard.on('keydown-X', () => {
-      if (this.chatBox?.isOpen() || this.dialoguePanel?.isOpen()) return;
-      this.bow.toggle();
-    });
+    // Track fence/gate visuals by server ID
+    this._fenceSprites = {};
 
-    // Ctrl key — toggle entity name/status labels
-    this.input.keyboard.on('keydown-CTRL', () => {
-      this.labelsVisible = !this.labelsVisible;
-      for (const npc of [...(this.npcs ?? []), ...(this.npNPCs ?? [])]) npc.refreshLabels(this.labelsVisible);
-      const entities = [
-        ...( this.furnaces  ?? []),
-        ...( this.quarries  ?? []),
-        ...( this.crushers  ?? []),
-        ...( this.flywheels ?? []),
-        ...( this.crates    ?? []),
-        ...( this.anvils    ?? []),
-        ...( this.woodCraftingTables ?? []),
-      ];
-      for (const e of entities) e.refreshLabels?.(this.labelsVisible);
-    });
+    // Camera
+    const cam = this.cameras.main;
+    cam.setBounds(0, 0, worldW, worldH);
+    cam.startFollow(this.player, true, 0.1, 0.1);
 
-    // Left-click — fire arrow
-    this.input.on('pointerdown', (ptr) => {
-      const clickedNpc = this._findNpcAtPointer(ptr);
-      if (clickedNpc) {
-        if (ptr.rightButtonDown()) this.events.emit('npc-right-clicked', { npc: clickedNpc, ptr });
-        else this.events.emit('npc-clicked', clickedNpc);
-        return;
+    // HUD camera — fixed at zoom=1, only renders HUD-flagged objects
+    this._hudCam = this.cameras.add(0, 0, cam.width, cam.height);
+    this._hudCam.setScroll(0, 0);
+    this._hudCam.transparent = true;
+
+    // Auto-hide new objects from HUD camera (world objects shouldn't render on HUD)
+    const hudCamId = this._hudCam.id;
+    const origAdd = this.sys.displayList.add.bind(this.sys.displayList);
+    this.sys.displayList.add = (obj) => {
+      const result = origAdd(obj);
+      if (obj.cameraFilter !== undefined) {
+        obj.cameraFilter |= hudCamId;
       }
-
-      if (ptr.rightButtonDown()) return;
-      if (!this.bow.isEquipped()) return;
-      if (this.chatBox?.isOpen() || this.dialoguePanel?.isOpen()) return;
-      const hits = this.input.hitTestPointer(ptr);
-      if (hits.length > 0) return;
-      this.bow.fire(this.inventory, this.chickens, this.skillSystem);
-    });
-
-    // Mother Machine
-    const machinePos = tilePos(14, 9);
-    this.machine = new MotherMachine(this, machinePos.x, machinePos.y);
-    this.grid.place(14, 9, this.machine);
-
-    // ── Skill system ────────────────────────────────────────────────────────
-    this.skillSystem = new SkillSystem();
-
-    // ── HUD (must be created before panels that register with it) ───────────
-    this.hud = new HUD(this);
-    this.hud.updateTier(1);
-
-    // Get the tab zone from HUD for panel positioning
-    const zone = this.hud.getTabZone();
-
-    // ── Panels — all receive zone coordinates ───────────────────────────────
-    this.skillsPanel        = new SkillsPanel(this, this.skillSystem, this.inventory, zone);
-    this.buildMenu          = new BuildMenu(this, (id) => {
-      this.placement.startPlacing(id);
-    }, zone);
-    this.craftingPanel      = new CraftingPanel(this, this.inventory);
-    this.craftingBenchPanel = new CraftingBenchPanel(this, this.inventory, zone);
-    this.woodCraftingTablePanel = new WoodCraftingTablePanel(this, this.inventory, this.skillSystem);
-    this.storagePanel       = new StoragePanel(this, this.inventory);
-    this.crateFilterPanel   = new CrateFilterPanel(this);
-    this.furnacePanel       = new FurnacePanel(this, this.inventory);
-    this.smithingPanel      = new SmithingPanel(this, this.inventory, zone);
-    this.npcSkillsPanel     = new NPCSkillsPanel(this);
-    this.npcTaskPanel       = new NPCTaskPanel(this);
-    this.npcHudPanel        = new NPCHUDPanel(
-      this,
-      this.hud,
-      () => this._selectedNPC,
-      this.skillsPanel,
-      this.inventory,
-      this.skillSystem
-    );
-    this.npcCommandPanel    = new NPCCommandPanel(
-      this,
-      zone,
-      () => this._selectedNPC,
-    );
-
-    // Register panels with HUD tab system
-    this.hud.registerPanel('skills', this.skillsPanel);
-    this.hud.registerPanel('build',  this.buildMenu);
-    this.hud.registerPanel('npc',    this.npcHudPanel);
-    this.hud.registerPanel('command', this.npcCommandPanel);
-    this.npcSoulPanel = new NPCSoulPanel(this);
-    this.hud.registerPanel('soul', this.npcSoulPanel);
-    this.hud.setDataSources({ inventory: this.inventory, skillSystem: this.skillSystem });
-
-    // Wire Constitution level-ups → player maxHp
-    this.skillSystem.on('level-up', ({ skillId, level }) => {
-      if (skillId === 'constitution') this.player.setConstitutionLevel(level);
-      if (skillId === 'athletics') {
-        this.inventory.setWeightCapacity(BASE_CARRY_CAPACITY + level * CARRY_PER_ATHLETICS_LEVEL);
-        this.player.setAthleticsLevel(level);
+      return result;
+    };
+    // Also hide already-existing objects from HUD camera
+    this.sys.displayList.list.forEach(obj => {
+      if (obj.cameraFilter !== undefined) {
+        obj.cameraFilter |= hudCamId;
       }
     });
 
-    // Player HP bar
-    this._playerHPBar = new HPBar(this, { width: 30, depth: 5 });
-    this._playerHPBar.update(this.player.hp, this.player.maxHp);
-
-    // Inventory + skill events → HUD
-    this.inventory.on('change', () => {
-      if (this.hud.getActiveTab() !== 'npc') this.hud.updateInventoryGrid(this.inventory);
-    });
-    this.hud.on('inventory-slot-clicked', (slotIdx) => {
-      if (this.hud.getActiveTab() === 'npc') return;
-      const slot = this.inventory.getSlot?.(slotIdx);
-      if (!slot) return;
-      const def = getItem(slot.itemKey);
-      if (!def?.placeable) return;
-      if ((this.inventory.get(slot.itemKey) ?? 0) < 1) return;
-      this.placement.startPlacingFromInventory(def.placeable, slot.itemKey);
-    });
-    this.hud.on('inventory-slot-right-clicked', (slotIdx, dropAll) => {
-      if (this.hud.getActiveTab() === 'npc') return;
-      const slot = this.inventory.getSlot?.(slotIdx);
-      if (!slot) return;
-      const key = slot.itemKey;
-      const total = this.inventory.get(key);
-      if (total <= 0) return;
-      const amount = dropAll ? total : 1;
-      const removed = this.inventory.remove(key, amount);
-      if (removed <= 0) return;
-      new GroundItem(this, this.player.x, this.player.y, key, removed);
-    });
-    this.skillSystem.on('xp-gained', () => {
-      if (this.hud.getActiveTab() !== 'npc') this.hud.updateSkills(this.skillSystem);
+    // Scroll-wheel zoom (current zoom=1 is the max-out; scroll to zoom in)
+    this._zoomLevel = 1;
+    this.input.on('wheel', (_pointer, _gos, _dx, dy) => {
+      if (this.chatBox?.isOpen()) return; // don't zoom while typing
+      const step = 0.1;
+      this._zoomLevel += dy < 0 ? step : -step;
+      this._zoomLevel = Phaser.Math.Clamp(this._zoomLevel, 1, 3);
+      this.cameras.main.setZoom(this._zoomLevel);
     });
 
-    this.devMenu = new DevMenu(this, this.inventory);
+    // ── Player unit frame (top-left) ──────────────────────────────────────────
+    this._buildPlayerFrame();
 
-    // Mother Machine tier
-    this.motherMachineTier = 1;
-    this.machinePanel = new MachinePanel(this, this.machine, this.inventory);
-    this.npcUpgradePanel = new NPCUpgradePanel(this, this.inventory);
-    this.combatSystem = new CombatSystem(this);
+    // ── Target unit frame (top-center, shown when something is selected) ─────
+    this._targetFrame = null;
+    this._targetFrameElements = [];
 
-    this.conveyors       = [];
-    this.furnaces        = [];
-    this.quarries        = [];
-    this.crushers        = [];
-    this.crates          = [];
-    this.flywheels       = [];
-    this.anvils          = [];
-    this.craftingBenches = [];
-    this.woodCraftingTables = [];
-    this.structures      = [];
-    this.doors           = [];
-    this.mineRocks       = [];
-    this.woodRobotPods   = [];
-    this.groundItems     = [];
-    this.chickens        = [];
-    this.enemies         = [];
+    // Build / Dummy buttons (below player frame)
+    this._buildBtn = this.addHud(this.add.text(16, 170, '[B] Build Robot (10 logs)', {
+      fontSize: '20px', color: '#ffcc44', backgroundColor: '#00000099',
+      padding: { x: 12, y: 7 },
+    }).setDepth(50).setVisible(false));
 
-    this.structureGroup = this.physics.add.staticGroup();
-    this.physics.add.collider(this.player, this.structureGroup);
-    this._selectedChicken = null;
+    this._dummyBtn = this.addHud(this.add.text(16, 210, '[T] Build Training Dummy (10 logs)', {
+      fontSize: '20px', color: '#cc8844', backgroundColor: '#00000099',
+      padding: { x: 12, y: 7 },
+    }).setDepth(50).setVisible(false));
 
-    // ── NPCs ────────────────────────────────────────────────────────────────
-    this.npcs         = [];
-    this._selectedNPC = null;
-    this._nextNpcId   = 0;
-    this._nextWoodRobotId = 0;
+    // ── Hotbar (bottom center) ─────────────────────────────────────────────
+    this._hotbar = [];     // [{ key, label, icon, action }, ...]
+    this._hotbarEls = [];  // Phaser display objects
+    this._inventoryOpen = false;
+    this._inventoryEls = [];
+    this._hotbarItems = [
+      { id: 'log', label: 'Log', frame: 526, action: 'drop_log' },
+      { id: 'gate', label: 'Gate', frame: FRAME_GATE, action: 'place_gate', cost: 10 },
+    ];
+    this._buildHotbar();
 
-    // ── Rival NPCs ───────────────────────────────────────────────────────────
-    this.npNPCs         = [];
-    this._nextRivalId   = 0;
+    // Connection status
+    this._netStatus = this.addHud(this.add.text(cam.width - 12, 8, 'Connecting...', {
+      fontSize: '16px', color: '#ffaa44', backgroundColor: '#00000088',
+      padding: { x: 8, y: 4 },
+    }).setDepth(50).setOrigin(1, 0));
 
-    this.placement = new PlacementSystem(this, this.grid, this.conveyors);
-
-    // ── Hotkeys for HUD tabs ────────────────────────────────────────────────
-    this.input.keyboard.on('keydown-C', () => {
-      if (this.chatBox?.isOpen()) return;
-      const cur = this.hud.getActiveTab();
-      this.hud.setActiveTab(cur === 'skills' ? null : 'skills');
-    });
-    this.input.keyboard.on('keydown-B', () => {
-      if (this.chatBox?.isOpen()) return;
-      if (!this.hud.hasTab('build')) return;
-      const cur = this.hud.getActiveTab();
-      this.hud.setActiveTab(cur === 'build' ? null : 'build');
-    });
-    this.input.keyboard.on('keydown-ESC', () => {
-      if (this.hud.getActiveTab()) {
-        this.hud.setActiveTab(null);
-      }
-    });
-
-    // Save system
-    this.saveSystem = new SaveSystem(this);
-    this.saveSystem.load();
-
-    // Spawn default NPC if save didn't restore any
-    if (this.npcs.length === 0) {
-      this._spawnNPC(tilePos(18, 9).x, tilePos(18, 9).y);
-    }
-
-    // Chickens
-    const chickenSpawns = [tilePos(12, 4), tilePos(14, 4), tilePos(16, 4)];
-    for (const pos of chickenSpawns) {
-      const chicken = new Chicken(this, pos.x, pos.y);
-      this.chickens.push(chicken);
-    }
-
-    // Chicken selection
-    this.events.on('chicken-clicked', (chicken) => {
-      if (this._selectedNPC) {
-        this._selectedNPC.setSelected(false);
-        this._selectedNPC = null;
-        this.hud.hideContextTab('npc');
-        this.hud.hideContextTab('command');
-        this.hud.hideContextTab('soul');
-        this.hud.setBuildTabVisible(true);
-        this.hud.setDataSources({ inventory: this.inventory, skillSystem: this.skillSystem });
-        this.skillsPanel.setSkillSystem(this.skillSystem);
-        this.skillsPanel.setInventory(this.inventory);
-      }
-      if (this._selectedChicken && this._selectedChicken !== chicken) {
-        this._selectedChicken.setSelected(false);
-      }
-      const wasSelected = chicken.isSelected();
-      chicken.setSelected(!wasSelected);
-      this._selectedChicken = wasSelected ? null : chicken;
-    });
-
-    this.events.on('chicken-died', ({ chicken, spawnX, spawnY }) => {
-      const i = this.chickens.indexOf(chicken);
-      if (i !== -1) this.chickens.splice(i, 1);
-      if (this._selectedChicken === chicken) this._selectedChicken = null;
-      const respawnMs = Phaser.Math.Between(30_000, 45_000);
-      this.time.delayedCall(respawnMs, () => {
-        const newChicken = new Chicken(this, spawnX, spawnY);
-        this.chickens.push(newChicken);
-      });
-    });
-
-    this.events.on('enemy-died', (enemy) => {
-      const i = this.enemies.indexOf(enemy);
-      if (i !== -1) this.enemies.splice(i, 1);
-    });
-
-    // NPC selection
-    this.events.on('npc-clicked', (npc) => {
-      for (const n of [...this.npcs, ...this.npNPCs]) n.setSelected(n === npc);
-      this._selectedNPC = npc;
-      this.npcTaskPanel.show(npc);
-      this.npcSoulPanel.setNPC(npc);
-      this.hud.showContextTab('npc', this._npcDisplayName(npc));
-      this.hud.showContextTab('command', 'Command');
-      this.hud.showContextTab('soul', 'Soul');
-      this.hud.setBuildTabVisible(false);
-      this.hud.setActiveTab('npc');
-    });
-
-    this.events.on('wood-pod-hatched', ({ pod }) => {
-      this._spawnWoodRobotFromPod(pod);
-    });
-
-    this.events.on('object-ctrl-clicked', ({ type, obj }) => {
-      if (this._selectedNPC) {
-        const consumed = this.npcCommandPanel?.handleCtrlClicked(type, obj);
-        if (consumed) return;
-        this._selectedNPC.assignTarget(type, obj);
-        const label = obj._cfg?.label ?? obj._rockType ?? type;
-        this._selectedNPC.showBubble(`Assigned: ${label}`);
-      }
-    });
-
-    // Anvil left-click
-    this.events.on('anvil-clicked', (anvil) => {
-      this.smithingPanel.open(anvil);
-    });
-
-    // Crafting bench left-click
-    this.events.on('crafting-bench-clicked', (bench) => {
-      this.craftingBenchPanel.open(bench);
-    });
-    this.events.on('wood-crafting-table-clicked', (table) => {
-      this.woodCraftingTablePanel.open(table);
-    });
-
-    // Right-click context menu
-    this.contextMenu = new ContextMenu(this);
-    this.game.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-    this.events.on('object-right-clicked', ({ type, obj, ptr }) => {
-      if (this.placement?.isPlacing()) return;
-      this._emotionMenuNpc = null;
-      if (type === 'conveyor' || type?.includes?.('conveyor') || typeof obj?.hasHeldItem === 'function') {
-        const items = [];
-        if (obj?.hasHeldItem?.()) {
-          items.push({
-            label: 'Remove Item',
-            callback: () => obj.removeHeldItem?.(false),
-          });
-        }
-        items.push({ label: 'Delete', callback: () => this._deleteObject('conveyor', obj) });
-        this.contextMenu.show(ptr.x, ptr.y, items);
-        return;
-      }
-      this.contextMenu.show(ptr.x, ptr.y, this._buildContextMenu(type, obj));
-    });
-
-    // Mining XP
-    this.events.on('ore-mined', ({ source, xp }) => {
-      const assignedNpc = this.npcs.find(n =>
-        n.assignedTargets?.quarry === source ||
-        n.assignedTargets?.crusher === source
-      );
-      if (assignedNpc) assignedNpc.skills.awardXP('mining', xp, this);
-      else this.skillSystem.awardXP('mining', xp, this);
-    });
-
-    this.events.on('npc-right-clicked', ({ npc, ptr }) => {
-      if (this.placement?.isPlacing()) return;
-      this._emotionMenuNpc = null;
-      this.contextMenu.show(ptr.x, ptr.y, [
-        { label: 'Inspect Skills', callback: () => this.npcSkillsPanel.open(npc) },
-        { label: 'Upgrades',       callback: () => this.npcUpgradePanel.open(npc) },
-        { label: 'Emotion Sources', callback: () => {
-          const px = ptr?.x ?? 0;
-          const py = ptr?.y ?? 0;
-          this.time.delayedCall(0, () => this._showEmotionSourceMenu(npc, { x: px, y: py }));
-        } },
-        { label: 'Remove all orders', callback: () => { npc.taskRunner?.stop(); npc.showBubble('Orders cleared.'); } },
-        { label: `Delete ${npc.id}`, callback: () => this._deleteNPC(npc) },
-      ]);
-    });
-
-    this._emotionMenuNpc = null;
-    this._emotionMenuPos = null;
-    this._emotionMenuTicker = this.time.addEvent({
-      delay: 400,
-      loop: true,
-      callback: () => {
-        if (!this._emotionMenuNpc) return;
-        if (!this.contextMenu?.isOpen()) {
-          this._emotionMenuNpc = null;
-          this._emotionMenuPos = null;
-          return;
-        }
-        this._renderEmotionSourceMenu();
-      },
-    });
-
-    // Double-click deselect NPC
+    // NPC double-click selection
     this._lastClickTime = 0;
-    this._lastClickX    = 0;
-    this._lastClickY    = 0;
+    this._lastClickNPC = null;
+    this._lastGroundClickTime = 0;
     this.input.on('pointerdown', (ptr) => {
       if (ptr.rightButtonDown()) return;
-      if (!this._selectedNPC) return;
-      const now  = Date.now();
-      const dx   = ptr.x - this._lastClickX;
-      const dy   = ptr.y - this._lastClickY;
-      const near = Math.hypot(dx, dy) < 20;
-      const fast = (now - this._lastClickTime) < 350;
-      if (fast && near) {
-        const hits   = this.input.hitTestPointer(ptr);
-        const hitNPC = hits.some(h => [...this.npcs, ...this.npNPCs].some(n => n._sprite === h));
-        if (!hitNPC) {
-          this._selectedNPC.setSelected(false);
-          this._selectedNPC = null;
-          this.npcTaskPanel.hide();
-          this.hud.hideContextTab('npc');
-          this.hud.hideContextTab('command');
-          this.hud.hideContextTab('soul');
-          this.hud.setBuildTabVisible(true);
-          this.hud.setDataSources({ inventory: this.inventory, skillSystem: this.skillSystem });
-          this.skillsPanel.setSkillSystem(this.skillSystem);
-          this.skillsPanel.setInventory(this.inventory);
+      const npc = this._findNpcAtPointer(ptr);
+      const now = Date.now();
+
+      if (npc) {
+        if (npc === this._lastClickNPC && now - this._lastClickTime < 400) {
+          this._selectNPC(npc);
+          this._lastClickNPC = null;
+        } else {
+          this._lastClickNPC = npc;
+          this._lastClickTime = now;
+          if (this.selectedNPC) this.selectedNPC.deselect();
+          this.selectedNPC = npc;
+          npc.select();
         }
-        this._lastClickTime = 0;
-      } else {
-        this._lastClickTime = now;
-        this._lastClickX    = ptr.x;
-        this._lastClickY    = ptr.y;
+      } else if (!this.chatBox?.isOpen()) {
+        // Shift+click on ground to deselect everything
+        if (ptr.event.shiftKey) {
+          this._selectNPC(null);
+          if (this._focusedRemote) { this._focusedRemote.clearTint(); this._focusedRemote = null; }
+          if (this._pvpTarget) { this._pvpTarget.clearTint(); this._pvpTarget = null; }
+        }
+        this._lastClickNPC = null;
       }
     });
 
+    // Task runners + brains
+    this._taskRunners = new Map();
+    this._npcBrains   = new Map();
+
+    // Detail panel overlay
+    this._npcDetailPanel = new NPCDetailPanel(this);
+
+    // Player ID — set by server on connect
+    this.playerId = 'default';
+    this.chatColor = this._loginData?.chatColor || '#cccccc';
+
+    // ChatBox — returns own selected NPC or focused remote entity
     this.chatBox = new ChatBox(
       this,
-      () => this._selectedNPC,
-      (npc, commands) => {
-        npc.taskRunner.setTasks(commands);
-        npc.showBubble(_describeCommands(commands));
-        this.npcTaskPanel.show(npc);
-      },
-      () => this.player,
-      () => this.npcs,
-      (npc) => {
-        for (const n of [...this.npcs, ...this.npNPCs]) n.setSelected(n === npc);
-        this._selectedNPC = npc;
-        if (npc) {
-          this.npcTaskPanel.show(npc);
-          this.npcSoulPanel.setNPC(npc);
-          this.hud.showContextTab('npc', this._npcDisplayName(npc));
-          this.hud.showContextTab('command', 'Command');
-          this.hud.showContextTab('soul', 'Soul');
-          this.hud.setBuildTabVisible(false);
-          this.hud.setActiveTab('npc');
-        } else {
-          this.npcTaskPanel.hide();
-          this.hud.hideContextTab('npc');
-          this.hud.hideContextTab('command');
-          this.hud.hideContextTab('soul');
-          this.hud.setBuildTabVisible(true);
-          this.hud.setDataSources({ inventory: this.inventory, skillSystem: this.skillSystem });
-          this.skillsPanel.setSkillSystem(this.skillSystem);
-          this.skillsPanel.setInventory(this.inventory);
-        }
-      }
+      () => this.selectedNPC || this._focusedRemote,
+      (npc, commands) => this._onNPCCommands(npc, commands),
+      (npc) => this._selectNPC(npc),
+      () => this.playerId,
     );
 
-    // NPC Dialogue panel (personality/conversation — separate from job commands)
-    this.socialChat = this.dialoguePanel = new SocialChatPanel(
-      this,
-      () => this._selectedNPC,
-      () => this.player,
-      () => [...this.npcs, ...this.npNPCs],
-      (npc) => {
-        for (const n of [...this.npcs, ...this.npNPCs]) n.setSelected(n === npc);
-        this._selectedNPC = npc;
-        if (npc) {
-          this.npcTaskPanel.show(npc);
-          this.npcSoulPanel.setNPC(npc);
-          this.hud.showContextTab('npc', this._npcDisplayName(npc));
-          this.hud.showContextTab('command', 'Command');
-          this.hud.showContextTab('soul', 'Soul');
-          this.hud.setBuildTabVisible(false);
-          this.hud.setActiveTab('npc');
-        }
-      },
-    );
+    // Interact key
+    this.player.onInteract(() => {
+      if (this.chatBox.isOpen()) return;
+      if (this.selectedNPC) {
+        this.chatBox.open();
+      }
+    });
 
-    // Enter key handled by SocialChatPanel directly
+    // Enter key — open chat
+    this.input.keyboard.on('keydown', (event) => {
+      if (this._namingNPC || this._escMenuOpen) return;
+      if (event.key === 'Enter' && !this.chatBox.isOpen()) {
+        this.chatBox.open();
+      }
+    });
 
-    // Autonomous NPC thoughts — rotates through all NPCs + rivals every 15 s
-    this._npcThoughtCursor = 0;
+    // Tab key — cycle through own NPCs
+    this.input.keyboard.on('keydown-TAB', (event) => {
+      event.preventDefault();
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
+      if (this.npcs.length === 0) return;
+
+      const alive = this.npcs.filter(n => !n.isDead());
+      if (alive.length === 0) return;
+
+      const curIdx = this.selectedNPC ? alive.indexOf(this.selectedNPC) : -1;
+      const next = alive[(curIdx + 1) % alive.length];
+      this._selectNPC(next);
+    });
+
+    // B key — build NPC (client-side, NPCs stay local)
+    this.input.keyboard.on('keydown-B', () => {
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
+      this._tryBuildNPC();
+    });
+
+    // T key — build training dummy (server-side)
+    this.input.keyboard.on('keydown-T', () => {
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
+      this._tryBuildDummy();
+    });
+
+    // Q key — admin menu
+    this._adminOpen = false;
+    this._adminPanel = null;
+    this.input.keyboard.on('keydown-Q', () => {
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
+      this._toggleAdmin();
+    });
+
+    // Number keys — hotbar actions (1-5)
+    this.input.keyboard.on('keydown', (event) => {
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._inventoryOpen) return;
+      const slot = parseInt(event.key, 10);
+      if (slot >= 1 && slot <= 5) {
+        this._useHotbarSlot(slot - 1);
+      }
+    });
+
+    // I key — toggle inventory
+    this.input.keyboard.on('keydown-I', () => {
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
+      this._toggleInventory();
+    });
+
+    // Escape key — toggle pause/menu
+    this._escMenuOpen = false;
+    this._escMenuEls = null;
+    this.input.keyboard.on('keydown-ESC', () => {
+      if (this.chatBox?.isOpen() || this._namingNPC) return;
+      this._toggleEscMenu();
+    });
+
+    // Auto-save NPCs
     this.time.addEvent({
-      delay: 15_000,
+      delay: AUTOSAVE_MS,
       loop: true,
-      callback: () => {
-        const all = [...(this.npcs ?? []), ...(this.npNPCs ?? [])];
-        if (!all.length) return;
-        const npc = all[this._npcThoughtCursor % all.length];
-        this._npcThoughtCursor++;
-        if (!npc?.soul) return;
-        const status = npc.taskRunner?.getStatus?.();
-        const isIdle = !status?.running || status.tasks[0]?.task === 'idle';
-        const event  = isIdle
-          ? 'has been idle for a while'
-          : `is working on: ${status.tasks[0]?.task ?? 'a task'}`;
-        triggerNPCThought(npc, event);
-      },
+      callback: () => this._saveAllNPCs(),
     });
 
-    // Cross-faction reactions — every 20 s check proximity between factions
-    this._factionReactCursor = 0;
-    this._aggressionLogCooldown = new Map();
+    // Sync NPC state to server at 10Hz for PvP visibility
     this.time.addEvent({
-      delay: 20_000,
+      delay: 100,
       loop: true,
-      callback: () => this._tickFactionReactions(),
+      callback: () => this._syncNPCsToServer(),
     });
 
-    // Trees
-    const treeTiles = [
-      [2,1],[4,1],[6,1],
-      [2,3],[6,5],[10,2],
-      [12,3],[18,6],[20,7],
-      [5,9],[8,10],[14,5],
-      [16,10],[22,3],[24,9],
-    ];
-    this.trees = treeTiles.map(([col, row]) => {
-      const pos = tilePos(col, row);
-      const tree = new Tree(this, pos.x, pos.y, this.inventory);
-      this.grid.place(col, row, tree);
-      return tree;
-    });
+    // Remote NPCs (other players' NPCs) — keyed by "ownerPid_npcId"
+    this._remoteNPCSprites = {};
 
-    // Mine rocks
-    const rockPos = (zoneCol, row) => ({
-      x: WEST_ZONE_OFFSET_X + zoneCol * TILE_SIZE + TILE_SIZE / 2,
-      y: row * TILE_SIZE + TILE_SIZE / 2,
-    });
-    const rockDefs = [
-      { type: 'CopperOre', ...rockPos(3, 3) },
-      { type: 'CopperOre', ...rockPos(4, 4) },
-      { type: 'CopperOre', ...rockPos(3, 5) },
-      { type: 'TinOre',    ...rockPos(7, 3) },
-      { type: 'TinOre',    ...rockPos(8, 4) },
-      { type: 'TinOre',    ...rockPos(7, 5) },
-      { type: 'GoldOre',   ...rockPos(10, 7) },
-      { type: 'GoldOre',   ...rockPos(11, 8) },
-      { type: 'Coal',      ...rockPos(4, 12) },
-      { type: 'Coal',      ...rockPos(5, 13) },
-      { type: 'Coal',      ...rockPos(4, 14) },
-      { type: 'CopperOre', ...rockPos(14, 5) },
-      { type: 'TinOre',    ...rockPos(15, 10) },
-      { type: 'Coal',      ...rockPos(13, 14) },
-    ];
-    for (const def of rockDefs) {
-      const rock = new MineRock(this, def.x, def.y, def.type, this.inventory);
-      this.mineRocks.push(rock);
-    }
+    // ── Network ─────────────────────────────────────────────────────────────────
+    const username = this._loginData?.username || 'default';
+    this._conn = new Connection(username, this.chatColor);
 
-    // Space key
-    this._spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    this._crankingFlywheel = null;
+    this._conn.onWelcome = (data) => {
+      this.playerId = data.your_id;
+      this._netStatus.setText(`Online: ${this.playerId}`).setColor('#44ff44');
 
-    this._spaceKey.on('down', () => {
-      if (this.chatBox?.isOpen()) return;
-      if (this._selectedChicken) {
-        this._tryAttackChicken();
-      } else if (this.skillsPanel.isOpen()) {
-        this._trySkillCraft();
-      } else if (!this._trySmithCraft() && !this._tryBenchCraft()) {
-        this._tryAttackStructure();
+      // Apply initial player position from server
+      const me = data.players?.[this.playerId];
+      if (me) {
+        this.player.x = me.x;
+        this.player.y = me.y;
+        this.player.logs = me.logs ?? 0;
+        this.player.hp = me.hp ?? this.player.hp;
+        this.player.maxHp = me.maxHp ?? this.player.maxHp;
+        this.player.str = me.str ?? this.player.str;
+        this.player.def = me.def ?? this.player.def;
+        this.player.level = me.level ?? this.player.level;
+        this.player.xp = me.xp ?? this.player.xp;
       }
-    });
 
-    this.cameras.main.setBounds(WEST_ZONE_OFFSET_X, 0, totalW, worldH);
-    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-    this.cameras.main.setViewport(0, 0, 1280, 960);
+      // Sync trees from server snapshot
+      this._syncTrees(data.trees);
 
-    const hint = this.add.text(640, 40,
-      'WASD: Move   E: Interact   Click trees to chop   Click NPC then T to give orders', {
-      fontSize: '13px', color: '#aaaaaa', backgroundColor: '#00000088',
-      padding: { x: 8, y: 4 }
-    }).setOrigin(0.5, 0).setDepth(10).setScrollFactor(0);
+      // Load saved NPCs
+      const savedNpcIds = data.npc_ids || [];
+      if (savedNpcIds.length > 0) {
+        this._loadSavedNPCs(savedNpcIds);
+      }
+    };
 
-    this.time.delayedCall(3500, () => {
-      this.tweens.add({ targets: hint, alpha: 0, duration: 800,
-        onComplete: () => hint.destroy() });
-    });
+    this._conn.onState = (data) => {
+      this._applyServerState(data);
+    };
+
+    this._conn.onDisconnect = () => {
+      this._netStatus.setText('Disconnected').setColor('#ff4444');
+    };
+
+    // Another player talks to one of our NPCs — run LLM and reply
+    this._conn.onChatIncoming = (data) => {
+      this._handleIncomingChat(data);
+    };
+
+    // Reply from a remote NPC we talked to
+    this._conn.onChatReply = (data) => {
+      this._handleChatReply(data);
+    };
+
+    this._conn.connect();
   }
 
-  // ── update ─────────────────────────────────────────────────────────────────
-  update(_time, delta) {
-    if (!this.chatBox?.isOpen() && !this.dialoguePanel?.isOpen()) this.player.update(delta);
+  update(time, delta) {
+    // ── Send input to server + client-side prediction ─────────────────────────
+    if (this._conn.connected && !this.chatBox?.isOpen() && !this.player._punching && !this._namingNPC && !this._playerDead && !this._escMenuOpen) {
+      const keys = this.player._keys;
+      let dx = 0, dy = 0;
+      if (keys.left.isDown)  dx -= 1;
+      if (keys.right.isDown) dx += 1;
+      if (keys.up.isDown)    dy -= 1;
+      if (keys.down.isDown)  dy += 1;
+      const running = keys.run.isDown;
+      this._conn.sendMove(dx, dy, running);
 
-    // Player HP bar
-    this._playerHPBar.setPosition(this.player.x, this.player.y - 56);
-    this._playerHPBar.update(this.player.hp, this.player.maxHp);
-    this.hud.updateHP(this.player.hp, this.player.maxHp);
-    if (this.hud.getActiveTab() === 'npc') {
-      this._npcHudRefreshAccum = (this._npcHudRefreshAccum ?? 0) + delta;
-      if (this._npcHudRefreshAccum >= 150) {
-        this._npcHudRefreshAccum = 0;
-        this.hud.refreshData();
+      // Client-side prediction: move locally for responsive feel
+      if (dx !== 0 || dy !== 0) {
+        const speed = running ? 280 : 160;
+        let mx = dx, my = dy;
+        if (mx !== 0 && my !== 0) { mx /= Math.SQRT2; my /= Math.SQRT2; }
+        const dt = delta / 1000;
+        this.player.x += mx * speed * dt;
+        this.player.y += my * speed * dt;
+        // Clamp to world bounds
+        const worldW = MAP_COLS * TILE_SIZE;
+        const worldH = MAP_ROWS * TILE_SIZE;
+        this.player.x = Math.max(0, Math.min(worldW, this.player.x));
+        this.player.y = Math.max(0, Math.min(worldH, this.player.y));
       }
-    } else {
-      this._npcHudRefreshAccum = 0;
+    } else if (this._conn.connected) {
+      this._conn.sendMove(0, 0, false);
     }
 
-    if (this.player.hp <= 0) this.combatSystem.handlePlayerDeath();
+    // Local player visual update (animations etc)
+    this.player.update(delta);
 
-    for (const npc of (this.npcs ?? [])) npc.update(delta);
-    for (const npc of (this.npNPCs ?? [])) npc.update(delta);
-    this._separateActors(delta);
-
-    const nearMachine = this.machine.updateProximity(this.player.x, this.player.y);
-    if (!nearMachine && this.craftingPanel.isOpen()) {
-      this.craftingPanel.hide();
+    // Update NPCs + task runners + brains (client-side)
+    for (const npc of this.npcs) {
+      npc.update(delta);
+      const runner = this._taskRunners.get(npc.id);
+      if (runner) runner.update(delta);
+      const brain = this._npcBrains.get(npc.id);
+      if (brain) brain.update(delta);
     }
 
-    for (const cr of this.crates) cr.updateProximity(this.player.x, this.player.y);
-    for (const f of this.furnaces) {
-      f.updateProximity(this.player.x, this.player.y);
-      f.tick();
+    // Check emotion-driven reactions for each NPC
+    for (const npc of this.npcs) {
+      const reaction = npc._emotionReactTarget;
+      if (!reaction) continue;
+      npc._emotionReactTarget = null; // consume it
+
+      const runner = this._taskRunners.get(npc.id);
+      if (!runner) continue;
+
+      // Don't interrupt if already doing this emotion reaction
+      const current = runner.getStatus()?.tasks?.[0];
+      if (current && (current.task === 'attack_player' || current.task === 'flee_player')
+          && current.target_id === reaction.playerId) continue;
+
+      if (reaction.action === 'attack') {
+        const targetName = this._remotePlayers[reaction.playerId]?.getName?.() || reaction.playerId;
+        npc.showBubble(`I won't forgive you, ${targetName}!`, 3000);
+        runner.setTasks([{ task: 'attack_player', target_id: reaction.playerId }]);
+      } else if (reaction.action === 'flee') {
+        npc.showBubble(`Stay away from me!`, 3000);
+        runner.setTasks([{ task: 'flee_player', target_id: reaction.playerId }]);
+      }
     }
-    for (const q of this.quarries) {
-      q.updateProximity(this.player.x, this.player.y);
-      q.tick();
-    }
-    for (const c of this.crushers) {
-      c.updateProximity(this.player.x, this.player.y);
-      c.tick();
+
+    // Update remote players
+    for (const rp of Object.values(this._remotePlayers)) {
+      rp.update();
     }
 
-    for (const fw of this.flywheels) {
-      fw.update(delta);
-      fw.updateProximity(this.player.x, this.player.y);
+    // Update remote NPCs
+    for (const rnpc of Object.values(this._remoteNPCSprites)) {
+      rnpc.update(time);
     }
-    this._handleCrank();
 
-    for (const av of this.anvils) av.updateProximity(this.player.x, this.player.y);
-    for (const b of this.craftingBenches) b.updateProximity(this.player.x, this.player.y);
-    for (const t of this.woodCraftingTables) t.updateProximity(this.player.x, this.player.y);
-    for (const d of this.doors) d.updateProximity(this.player.x, this.player.y);
-    for (const r of this.mineRocks) r.updateProximity(this.player.x, this.player.y);
-    for (const p of this.woodRobotPods) p.updateProximity(this.player.x, this.player.y);
+    // Update player unit frame
+    this._updatePlayerFrame();
 
-    this.bow.update();
+    // Update target unit frame
+    this._updateTargetFrame();
 
-    for (const ch of this.chickens) ch.update(delta);
-    for (const en of this.enemies) en.update(delta);
-    for (const p of this.woodRobotPods) p.update(delta);
-    for (const t of this.woodCraftingTables) t.update(delta);
+    // Update hotbar counts
+    this._updateHotbar();
 
-    // Ground item pickup
-    for (let i = this.groundItems.length - 1; i >= 0; i--) {
-      const item = this.groundItems[i];
-      if (!item.active) { this.groundItems.splice(i, 1); continue; }
-      const picked = item.tryPickup(this.player.x, this.player.y);
-      if (picked) {
-        const added = this.inventory.add(picked.resource, picked.amount);
-        if (added < picked.amount) {
-          // Couldn't fit all — drop remainder back
-          new GroundItem(this, item.x, item.y, picked.resource, picked.amount - added);
+    const npcCost = this._npcBuildCost();
+    const canBuild = this.player.logs >= npcCost;
+    this._buildBtn.setText(`[B] Build Robot (${npcCost.toLocaleString()} logs)`).setVisible(canBuild);
+    this._dummyBtn.setVisible(this.player.logs >= 10);
+
+    // Player count
+    const playerCount = Object.keys(this._remotePlayers).length + 1;
+    if (this._conn.connected) {
+      this._netStatus.setText(`Online: ${playerCount} player${playerCount > 1 ? 's' : ''}`);
+    }
+
+    this._updateNPCPanel();
+  }
+
+  // ── Server state sync ─────────────────────────────────────────────────────────
+
+  _applyServerState(data) {
+    // Don't process state until we know our player ID
+    if (this.playerId === 'default') return;
+
+    const players = data.players || {};
+
+    // Update local player from server (authoritative position)
+    const me = players[this.playerId];
+    if (me) {
+      // Smooth lerp to server position (client prediction reconciliation)
+      this.player.x += (me.x - this.player.x) * 0.3;
+      this.player.y += (me.y - this.player.y) * 0.3;
+      this.player.logs = me.logs ?? 0;
+      this.player.hp = me.hp ?? this.player.hp;
+      this.player.maxHp = me.maxHp ?? this.player.maxHp;
+      this.player.str = me.str ?? this.player.str;
+      this.player.def = me.def ?? this.player.def;
+      this.player.level = me.level ?? this.player.level;
+      this.player.xp = me.xp ?? this.player.xp;
+    }
+
+    // Update/create/remove remote players
+    const seenPids = new Set();
+    for (const [pid, pState] of Object.entries(players)) {
+      if (pid === this.playerId) continue;
+      seenPids.add(pid);
+
+      let rp = this._remotePlayers[pid];
+      if (!rp) {
+        rp = new RemotePlayer(this, pState.x, pState.y, pid);
+        this._remotePlayers[pid] = rp;
+      }
+      const wasDead = rp._dead;
+      rp.applyState(pState);
+      // Detect remote player just died
+      if (pState.dead && !wasDead) {
+        this._notifyNearbyNPCsOfKill('player', pid, null, rp.x, rp.y);
+      }
+    }
+
+    // Remove disconnected remote players
+    for (const pid of Object.keys(this._remotePlayers)) {
+      if (!seenPids.has(pid)) {
+        this._remotePlayers[pid].destroy();
+        delete this._remotePlayers[pid];
+      }
+    }
+
+    // Sync trees
+    if (data.trees) {
+      this._syncTrees(data.trees);
+    }
+
+    // Sync ground items
+    this._syncGroundItems(data.ground_items || []);
+
+    // Sync dummies
+    this._syncDummies(data.dummies || {});
+
+    // Sync fences/gates
+    this._syncFences(data.fences || {});
+
+    // Sync remote NPCs from other players
+    this._syncRemoteNPCs(players);
+
+    // Apply server-side damage and log theft to our own NPCs
+    const myData = players[this.playerId];
+    if (myData?.npcs) {
+      if (!this._lastServerNPCLogs) this._lastServerNPCLogs = {};
+      for (const npc of this.npcs) {
+        const serverNPC = myData.npcs[npc.id];
+        if (!serverNPC) continue;
+
+        // Detect HP damage from server
+        if (serverNPC.hp < npc.hp) {
+          const prevHp = npc.hp;
+          npc.hp = serverNPC.hp;
+
+          // If an attacker is stamped and NPC is getting low, apply fear and flee
+          const attackedBy = serverNPC._last_attacked_by;
+          if (attackedBy?.type === 'player' && attackedBy.id !== this.playerId) {
+            const hpPct = npc.hp / npc.maxHp;
+            if (hpPct < 0.3 && hpPct > 0) {
+              // Spike fear of attacker, reduce anger (self-preservation)
+              npc.applyEmotionDeltas({ fear: 0.3, anger: -0.15 }, attackedBy.id);
+              npc.showBubble(`I can't take much more of this!`, 3000);
+              // Force flee — override current task
+              const runner = this._taskRunners.get(npc.id);
+              if (runner) {
+                runner.setTasks([{ task: 'flee_player', target_id: attackedBy.id }]);
+              }
+            } else if (hpPct < 0.6) {
+              // Moderate damage — grow fear gradually
+              npc.applyEmotionDeltas({ fear: 0.08, anger: -0.03 }, attackedBy.id);
+            }
+          }
+
+          if (serverNPC.dead && !npc.isDead()) {
+            npc._triggerDeath();
+            // Our own NPC was killed — notify other local NPCs
+            this._notifyNearbyNPCsOfKill('own_npc', this.playerId, npc.id, npc.x, npc.y);
+          }
         }
-        this.groundItems.splice(i, 1);
+
+        // Detect log theft — only when server value *dropped* from its previous known value
+        const serverLogs = serverNPC.logs ?? 0;
+        const prevServerLogs = this._lastServerNPCLogs[npc.id] ?? serverLogs;
+        if (serverLogs < prevServerLogs) {
+          // Skip if NPC voluntarily gave logs to the player
+          if (npc._givingLogs) {
+            npc._givingLogs = false;
+          } else {
+            const stolen = prevServerLogs - serverLogs;
+            npc.logs = Math.max(0, npc.logs - stolen);
+
+            // Identify the thief from server-stamped data
+            const robbedBy = serverNPC._last_robbed_by;
+            let thiefName = 'Someone';
+            let thiefNpcId = null;
+            if (robbedBy && robbedBy.npc_id) {
+              thiefNpcId = robbedBy.npc_id;
+              // Try to find the thief's display name from remote NPC sprites
+              const thiefKey = `${robbedBy.owner}_${robbedBy.npc_id}`;
+              const thiefSprite = this._remoteNPCSprites?.[thiefKey];
+              thiefName = thiefSprite?.getName?.() || `${robbedBy.owner}'s NPC`;
+            }
+
+            npc.showBubble(`${thiefName} stole ${stolen} log${stolen > 1 ? 's' : ''} from me!`, 4000);
+
+            // Push grudge event to brain
+            const brain = this._npcBrains?.get(npc.id);
+            const relKey = thiefNpcId ? `npc:${thiefNpcId}` : 'strangers';
+            if (brain) {
+              brain.pushEvent({
+                type: 'robbed',
+                text: `${thiefName} stole ${stolen} log(s) from me!`,
+                importance: 0.9,
+              });
+              npc.applyEmotionDeltas({ anger: 0.15, trust: -0.1 }, relKey);
+            }
+            npc.addMemory(
+              `${thiefName} stole ${stolen} log(s) from me while I was gathering wood.`,
+              'event', relKey, 0.9
+            );
+          }
+        }
+        this._lastServerNPCLogs[npc.id] = serverLogs;
+      }
+    }
+
+    // Handle local player death from server
+    if (me?.dead && !this._playerDead) {
+      this._playerDead = true;
+      this._notifyNearbyNPCsOfKill('own_player', this.playerId, null, this.player.x, this.player.y);
+      this._showDeathScreen();
+    } else if (me && !me.dead && this._playerDead) {
+      this._playerDead = false;
+      this._hideDeathScreen();
+    }
+  }
+
+  _syncTrees(serverTrees) {
+    if (!serverTrees) return;
+    for (const st of serverTrees) {
+      const tree = this.trees[st.id];
+      if (!tree) continue;
+      tree.setChopped(st.chopped);
+    }
+  }
+
+  _syncGroundItems(serverItems) {
+    const seenIds = new Set();
+    for (const si of serverItems) {
+      seenIds.add(si.id);
+      if (!this._groundItemSprites[si.id]) {
+        // Create visual for this ground item
+        const gi = new GroundItem(this, si.x, si.y, si.resource, si.amount, !!si._placed);
+        gi._serverId = si.id;
+        this._groundItemSprites[si.id] = gi;
+      } else {
+        // Update amount (log stacking)
+        this._groundItemSprites[si.id].updateAmount(si.amount);
+      }
+    }
+
+    // Remove items no longer on server (picked up)
+    for (const [id, gi] of Object.entries(this._groundItemSprites)) {
+      if (!seenIds.has(id)) {
+        // Remove from groundItems array
+        const idx = this.groundItems.indexOf(gi);
+        if (idx >= 0) this.groundItems.splice(idx, 1);
+        gi.destroy();
+        delete this._groundItemSprites[id];
       }
     }
   }
 
-  // ── private ────────────────────────────────────────────────────────────────
+  _syncDummies(serverDummies) {
+    const seenIds = new Set();
+    for (const [did, sd] of Object.entries(serverDummies)) {
+      seenIds.add(did);
+      let dummy = this._dummySprites[did];
+      if (!dummy) {
+        // Create visual dummy
+        dummy = new TrainingDummy(this, sd.x, sd.y, Math.ceil(sd.maxHp / 5));
+        dummy._serverId = did;
+        this._dummySprites[did] = dummy;
+        this.dummies.push(dummy);
+      }
+      // Sync HP
+      dummy.hp = sd.hp;
+      dummy.maxHp = sd.maxHp;
+      dummy._updateHpBar();
+    }
 
-  spawnEnemy(x, y, opts) {
-    const enemy = new Enemy(this, x, y, opts);
-    this.enemies.push(enemy);
-    return enemy;
-  }
-
-  _spawnNPC(x, y, id, profileId = 'standard') {
-    const npcId = id ?? `npc_${this._nextNpcId}`;
-    if (npcId.startsWith('npc_')) {
-      const parsed = parseInt(npcId.slice(4), 10);
-      if (Number.isFinite(parsed)) {
-        this._nextNpcId = Math.max(this._nextNpcId, parsed + 1);
+    // Remove dummies not on server
+    for (const [did, dummy] of Object.entries(this._dummySprites)) {
+      if (!seenIds.has(did)) {
+        const idx = this.dummies.indexOf(dummy);
+        if (idx >= 0) this.dummies.splice(idx, 1);
+        dummy.destroy();
+        delete this._dummySprites[did];
       }
     }
-    const npc = new NPC(this, x, y, npcId);
-    npc.setProfile?.(profileId);
-    new NPCTaskRunner(this, npc);
-    this.npcs.push(npc);
-
-    npc.skills.on('level-up', ({ skillId, level }) => {
-      if (skillId === 'constitution') npc.setConstitutionLevel(level);
-    });
-
-    return npc;
   }
 
-  _npcDisplayName(npc) {
-    return npc?.getName?.() ?? npc?.id ?? 'npc';
-  }
+  _syncFences(serverFences) {
+    const seenIds = new Set();
+    for (const [fid, sf] of Object.entries(serverFences)) {
+      seenIds.add(fid);
+      let fence = this._fenceSprites[fid];
+      if (!fence) {
+        fence = new Fence(this, sf.x, sf.y, sf);
+        this._fenceSprites[fid] = fence;
+      }
+      fence.applyState(sf);
+    }
 
-  _spawnNpNPC(x, y) {
-    const id = `rival_${this._nextRivalId++}`;
-    const rival = new npNPC(this, x, y, id);
-    new NPCTaskRunner(this, rival);
-    this.npNPCs.push(rival);
-    rival.showBubble('Scouting this area.', 4000);
-    return rival;
+    // Remove fences not on server (destroyed)
+    for (const [fid, fence] of Object.entries(this._fenceSprites)) {
+      if (!seenIds.has(fid)) {
+        fence.destroy();
+        delete this._fenceSprites[fid];
+      }
+    }
   }
 
   /**
-   * Tick cross-faction reactions every 20s.
-   * Picks one player NPC + one rival per tick (rotating cursor).
-   * If they are within NOTICE_DIST, one of three things happens:
-   *   1. Already in an encounter → skip (cooldown)
-   *   2. Within ENGAGE_DIST     → trigger a full encounter exchange
-   *   3. Within NOTICE_DIST     → walk toward each other, mutter a spot quip
-   * Hostile rivals (factionTrust < 0.15) always attack without diplomacy.
+   * Notify local NPCs within ~10 tiles of a kill event.
+   * victimType: 'player' | 'npc' | 'own_player' | 'own_npc'
    */
-  _tickFactionReactions() {
-    const NOTICE_DIST = 8 * TILE_SIZE;   // start walking toward each other
-    const ENGAGE_DIST = 2.5 * TILE_SIZE; // close enough for dialogue exchange
+  _notifyNearbyNPCsOfKill(victimType, victimOwnerId, victimNpcId, deathX, deathY) {
+    const NOTICE_RANGE = TILE_SIZE * 10;
+    const isOurSide = victimOwnerId === this.playerId;
 
-    const playerNPC = this.npcs?.[(this._factionReactCursor ?? 0) % Math.max(1, this.npcs?.length ?? 1)];
-    const rival     = this.npNPCs?.[(this._factionReactCursor ?? 0) % Math.max(1, this.npNPCs?.length ?? 1)];
-    this._factionReactCursor = ((this._factionReactCursor ?? 0) + 1);
-
-    if (!rival || rival._dead) return;
-
-    // Hostile rivals can target either nearby player NPCs or the player directly.
-    if (rival.isHostileToFaction?.()) {
-      const hostileTargets = [
-        ...(this.npcs ?? []).filter(n => !n?._dead),
-        this.player,
-      ].filter(Boolean);
-      if (!hostileTargets.length) return;
-
-      const status = rival.taskRunner?.getStatus?.();
-      const activeAttack = status?.tasks?.[0];
-      const activeTarget = activeAttack?.task === 'attack_nearest_enemy'
-        ? activeAttack.target
-        : null;
-      if (activeTarget && activeTarget.isDead?.() !== true) return;
-
-      const target = rival.selectCatalystTarget?.(hostileTargets) ?? hostileTargets[0];
-      if (!target) return;
-      const hostileDist = Phaser.Math.Distance.Between(rival.x, rival.y, target.x, target.y);
-      if (hostileDist <= NOTICE_DIST) {
-        rival.addIntent?.(`I am done talking. Attacking ${target.getName?.() ?? target.id ?? 'the player'}.`);
-        rival.taskRunner?.pushTask?.({ task: 'attack_nearest_enemy', target, range: NOTICE_DIST });
-        this._logViolentAggression(rival, target, 'hostile_faction_escalation');
-      }
-      return;
+    // Find victim display name
+    let victimName;
+    if (victimType === 'player') {
+      victimName = victimOwnerId;
+    } else if (victimType === 'npc') {
+      const key = `${victimOwnerId}_${victimNpcId}`;
+      victimName = this._remoteNPCSprites?.[key]?.getName?.() || victimNpcId;
+    } else if (victimType === 'own_player') {
+      victimName = 'our owner';
+    } else {
+      // own_npc
+      const deadNpc = this.npcs.find(n => n.id === victimNpcId);
+      victimName = deadNpc?.getName?.() || victimNpcId;
     }
 
-    if (!playerNPC || playerNPC._dead) return;
+    for (const npc of this.npcs) {
+      if (npc.isDead()) continue;
+      if (victimType === 'own_npc' && npc.id === victimNpcId) continue; // skip the dead one itself
 
-    const dist = Phaser.Math.Distance.Between(playerNPC.x, playerNPC.y, rival.x, rival.y);
-    if (dist > NOTICE_DIST) return;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, deathX, deathY);
+      if (dist > NOTICE_RANGE) continue;
 
-    // Skip if either NPC is already busy in an encounter cooldown
-    if (playerNPC._encounterCooldown || rival._encounterCooldown) return;
-
-    if (dist <= ENGAGE_DIST) {
-      // --- Full encounter exchange ---
-      // Mark both as in cooldown so they don't re-trigger for 45s
-      playerNPC._encounterCooldown = true;
-      rival._encounterCooldown     = true;
-      this.time.delayedCall(45_000, () => {
-        playerNPC._encounterCooldown = false;
-        rival._encounterCooldown     = false;
-      });
-
-      // Randomly pick which NPC is the opener
-      const [opener, responder] = Math.random() < 0.5
-        ? [playerNPC, rival]
-        : [rival, playerNPC];
-      opener.getRelationshipMetrics?.(responder.id);
-      responder.getRelationshipMetrics?.(opener.id);
-
-      fetch('http://127.0.0.1:8001/npc_encounter', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          opener_id:    opener.id,
-          responder_id: responder.id,
-          opener_soul:   opener.getSoulContext?.()    ?? {},
-          responder_soul: responder.getSoulContext?.() ?? {},
-        }),
-      })
-      .then(r => r.json())
-      .then(data => {
-        if (opener._dead || responder._dead) return;
-
-        const { opener_line, reply_line, outcome,
-                aggressor,
-                opener_emotion_deltas, responder_emotion_deltas,
-                opener_relationship_deltas, responder_relationship_deltas } = data;
-
-        // Show opener line immediately
-        if (opener_line) {
-          opener.showBubble(opener_line, 5000);
-          responder.recordSocialStimulus?.({
-            sourceId: opener.id,
-            sourceName: opener.getName?.() ?? opener.id,
-            text: opener_line,
-            tags: _inferCatalystTags(opener_line),
-            intensity: _inferCatalystIntensity(opener_line),
-            targeted: true,
-          });
-          triggerNPCThought(responder, `${opener.getName?.() ?? opener.id} said to me: "${_shortForThought(opener_line)}"`);
+      if (isOurSide) {
+        // Our side got killed — find nearest enemy to blame
+        let blameKey = null;
+        let blameName = null;
+        let bestDist = NOTICE_RANGE;
+        for (const rp of Object.values(this._remotePlayers || {})) {
+          if (rp._dead) continue;
+          const d = Phaser.Math.Distance.Between(deathX, deathY, rp.x, rp.y);
+          if (d < bestDist) { bestDist = d; blameKey = rp.playerId; blameName = rp.playerId; }
+        }
+        for (const rnpc of Object.values(this._remoteNPCSprites || {})) {
+          if (rnpc._dead) continue;
+          const d = Phaser.Math.Distance.Between(deathX, deathY, rnpc.x, rnpc.y);
+          if (d < bestDist) { bestDist = d; blameKey = `npc:${rnpc.npcId}`; blameName = rnpc.getName?.(); }
         }
 
-        // Reply appears 2s later
-        this.time.delayedCall(2000, () => {
-          if (!responder._dead && reply_line) {
-            responder.showBubble(reply_line, 5000);
-            opener.recordSocialStimulus?.({
-              sourceId: responder.id,
-              sourceName: responder.getName?.() ?? responder.id,
-              text: reply_line,
-              tags: _inferCatalystTags(reply_line),
-              intensity: _inferCatalystIntensity(reply_line),
-              targeted: true,
-            });
-            triggerNPCThought(opener, `${responder.getName?.() ?? responder.id} said to me: "${_shortForThought(reply_line)}"`);
-          }
-        });
+        const pers = npc.soul?.personality || {};
+        const aggression = pers.aggression ?? 0.3;
+        const targetKey = blameKey || 'strangers';
 
-        // Apply emotion deltas
-        if (opener_emotion_deltas)    opener.applyEmotionDeltas?.(opener_emotion_deltas);
-        if (responder_emotion_deltas) responder.applyEmotionDeltas?.(responder_emotion_deltas);
-        if (opener_relationship_deltas) {
-          opener.applyRelationshipDeltas?.(responder.id, opener_relationship_deltas, responder.getName?.());
+        // Aggressive NPCs get angry, passive ones get scared — directed at the killer
+        if (aggression > 0.5) {
+          npc.applyEmotionDeltas({ anger: 0.25, trust: -0.15, fear: 0.05 }, targetKey);
+          npc.addMemory(
+            `Saw ${victimName} get killed${blameName ? ` by ${blameName}` : ''}! I'm furious.`,
+            'event', targetKey, 0.9
+          );
+          npc.showBubble(`No! ${victimName}!!`, 3000);
+        } else {
+          npc.applyEmotionDeltas({ fear: 0.2, anger: 0.05, trust: -0.15 }, targetKey);
+          npc.addMemory(
+            `Saw ${victimName} get killed${blameName ? ` by ${blameName}` : ''}. I'm terrified.`,
+            'event', targetKey, 0.9
+          );
+          npc.showBubble(`Oh no... ${victimName}...`, 3000);
         }
-        if (responder_relationship_deltas) {
-          responder.applyRelationshipDeltas?.(opener.id, responder_relationship_deltas, opener.getName?.());
+      } else {
+        // Enemy side got killed — note that our owner seems hostile toward them
+        npc.addMemory(
+          `Saw ${victimName} (${victimOwnerId}'s) get killed nearby. Owner doesn't like them.`,
+          'observation', `player:${victimOwnerId}`, 0.7
+        );
+
+        // Slight wariness increase — witnessing violence
+        const pers = npc.soul?.personality || {};
+        const neuroticism = pers.neuroticism ?? 0.3;
+        if (neuroticism > 0.5) {
+          npc.applyEmotionDeltas({ fear: 0.05 }, this.playerId);
         }
-
-        // Adjust rival factionTrust based on outcome
-        const rivalNPC = (opener.faction === 'rival') ? opener : responder;
-        if (outcome === 'friendly') {
-          rivalNPC.adjustFactionTrust?.(0.05);
-        } else if (outcome === 'argue') {
-          rivalNPC.adjustFactionTrust?.(-0.05);
-        } else if (outcome === 'fight') {
-          rivalNPC.adjustFactionTrust?.(-0.15);
-          // 3s after reply, trigger combat
-          this.time.delayedCall(3000, () => {
-            if (!responder._dead && !opener._dead) {
-              let attacker = null;
-              let victim = null;
-              if (aggressor === 'opener') {
-                opener.addIntent?.(`That's all I can take. Time to teach ${responder.getName?.() ?? responder.id} a lesson.`);
-                opener.taskRunner?.pushTask?.({ task: 'attack_nearest_enemy', target: responder });
-                attacker = opener;
-                victim = responder;
-              } else if (aggressor === 'responder') {
-                responder.addIntent?.(`That's all I can take. Time to teach ${opener.getName?.() ?? opener.id} a lesson.`);
-                responder.taskRunner?.pushTask?.({ task: 'attack_nearest_enemy', target: opener });
-                attacker = responder;
-                victim = opener;
-              } else if (rivalNPC === opener) {
-                opener.addIntent?.(`That's all I can take. Time to teach ${responder.getName?.() ?? responder.id} a lesson.`);
-                opener.taskRunner?.pushTask?.({ task: 'attack_nearest_enemy', target: responder });
-                attacker = opener;
-                victim = responder;
-              } else {
-                responder.addIntent?.(`That's all I can take. Time to teach ${opener.getName?.() ?? opener.id} a lesson.`);
-                responder.taskRunner?.pushTask?.({ task: 'attack_nearest_enemy', target: opener });
-                attacker = responder;
-                victim = opener;
-              }
-              if (attacker && victim) {
-                this._logViolentAggression(attacker, victim, 'encounter_fight', [opener_line, reply_line]);
-              }
-            }
-          });
-        }
-      })
-      .catch(() => {});
-
-    } else {
-      // --- Notice range: walk toward each other + spot quip (30% chance each) ---
-      // Walk toward each other
-      const midX = (playerNPC.x + rival.x) / 2;
-      const midY = (playerNPC.y + rival.y) / 2;
-      playerNPC.moveTo(midX, midY, null);
-      rival.moveTo(midX, midY, null);
-
-      // Spot quips (independent, low probability to avoid spam)
-      if (Math.random() < 0.3) {
-        fetch('http://127.0.0.1:8001/npc_quip', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            npc_id:     playerNPC.id,
-            soul:       playerNPC.getSoulContext?.() ?? {},
-            situation:  'rival_nearby',
-            other_name: rival.getName(),
-          }),
-        }).then(r => r.json()).then(d => {
-          if (d.quip && !playerNPC._dead) playerNPC.showBubble(d.quip, 5000);
-        }).catch(() => {});
-      }
-
-      if (Math.random() < 0.3) {
-        fetch('http://127.0.0.1:8001/npc_quip', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            npc_id:     rival.id,
-            soul:       rival.getSoulContext?.() ?? {},
-            situation:  'rival_spotted',
-            other_name: playerNPC.getName(),
-          }),
-        }).then(r => r.json()).then(d => {
-          if (d.quip && !rival._dead) rival.showBubble(d.quip, 5000);
-        }).catch(() => {});
       }
     }
   }
 
-  _spawnWoodRobotFromPod(pod) {
-    if (!pod || !pod.active) return null;
-    const { x, y } = pod;
-    this._deleteObject('wood_robot_pod', pod);
+  _syncRemoteNPCs(players) {
+    const seenKeys = new Set();
+    for (const [pid, pState] of Object.entries(players)) {
+      if (pid === this.playerId) continue;
+      const npcs = pState.npcs || {};
+      for (const [npcId, npcState] of Object.entries(npcs)) {
+        const key = `${pid}_${npcId}`;
+        seenKeys.add(key);
+        let rnpc = this._remoteNPCSprites[key];
+        if (!rnpc) {
+          rnpc = new RemoteNPC(this, npcState.x, npcState.y, npcId, pid, npcState.name);
+          this._remoteNPCSprites[key] = rnpc;
+        }
+        const wasDead = rnpc._dead;
+        rnpc.applyState(npcState);
+        // Apply owner's chat color to NPC labels
+        const ownerColor = pState.chatColor || '#cccccc';
+        rnpc.setOwnerColor(ownerColor);
+        // Detect remote NPC just died
+        if (npcState.dead && !wasDead) {
+          this._notifyNearbyNPCsOfKill('npc', pid, npcId, rnpc.x, rnpc.y);
+        }
+      }
+    }
 
-    const idx = this._nextWoodRobotId++;
-    const npc = this._spawnNPC(x, y, `wood_robot_${idx}`, 'wood_robot');
-    npc.setName(`Wood Robot ${idx}`);
-    npc.showBubble('Boot complete.');
-    return npc;
+    // Remove remote NPCs no longer present
+    for (const [key, rnpc] of Object.entries(this._remoteNPCSprites)) {
+      if (!seenKeys.has(key)) {
+        rnpc.destroy();
+        delete this._remoteNPCSprites[key];
+      }
+    }
+  }
+
+  // ── Player Death ───────────────────────────────────────────────────────────────
+
+  _showDeathScreen() {
+    const W = this.cameras.main.width;
+    const H = this.cameras.main.height;
+    this._deathEls = [];
+
+    const overlay = this.addHud(this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.6)
+      .setDepth(80));
+    this._deathEls.push(overlay);
+
+    const text = this.addHud(this.add.text(W / 2, H / 2 - 20, 'YOU DIED', {
+      fontSize: '32px', color: '#ff4444', fontStyle: 'bold',
+    }).setDepth(81).setOrigin(0.5));
+    this._deathEls.push(text);
+
+    const sub = this.addHud(this.add.text(W / 2, H / 2 + 20, 'Respawning...', {
+      fontSize: '14px', color: '#ff8888',
+    }).setDepth(81).setOrigin(0.5));
+    this._deathEls.push(sub);
+
+    // Fade player sprite
+    this.player.setAlpha(0.3);
+  }
+
+  _hideDeathScreen() {
+    if (this._deathEls) {
+      for (const el of this._deathEls) { this.removeHud(el); el.destroy(); }
+      this._deathEls = null;
+    }
+    this.player.setAlpha(1);
+  }
+
+  // ── Map loading ────────────────────────────────────────────────────────────────
+
+  async _loadMap() {
+    try {
+      const res = await fetch(`${API_BASE}/load-map?name=level1`);
+      if (!res.ok) throw new Error(`Map load failed: ${res.status}`);
+      const mapData = await res.json();
+
+      const { treePositions, width, height } = buildTilemapFromData(this, mapData);
+
+      // Update world bounds to match map
+      this._mapCols = width;
+      this._mapRows = height;
+      const worldW = width * TILE_SIZE;
+      const worldH = height * TILE_SIZE;
+      this.physics.world.setBounds(0, 0, worldW, worldH);
+      this.cameras.main.setBounds(0, 0, worldW, worldH);
+
+      // Spawn trees at positions found in the map
+      this._spawnTreesAt(treePositions);
+
+      console.log(`[map] Loaded level1: ${width}x${height}, ${treePositions.length} trees`);
+    } catch (e) {
+      console.warn('[map] Failed to load level1, using fallback:', e.message);
+      buildTilemap(this, this._mapCols, this._mapRows);
+      this._spawnTreesFallback();
+    }
+  }
+
+  _spawnTreesAt(positions) {
+    for (let i = 0; i < positions.length; i++) {
+      const { col, row } = positions[i];
+      const pos = tilePos(col, row);
+      const tree = new Tree(this, pos.x, pos.y);
+      tree.treeIndex = i;
+      this.trees.push(tree);
+    }
+  }
+
+  _spawnTreesFallback() {
+    const treePositions = [
+      [3,3],[4,5],[6,2],[8,4],[10,3],[12,5],[14,2],[16,4],
+      [5,8],[7,7],[9,9],[11,8],[13,7],[15,9],
+      [3,12],[6,11],[8,13],[10,12],[12,14],[14,11],[16,13],
+      [4,16],[7,15],[9,17],[11,16],[13,18],[15,15],
+      [18,3],[20,5],[22,2],[24,4],[18,8],[20,7],
+      [22,9],[24,8],[18,12],[20,14],[22,11],[24,13],
+    ];
+    for (let i = 0; i < treePositions.length; i++) {
+      const [col, row] = treePositions[i];
+      const pos = tilePos(col, row);
+      const tree = new Tree(this, pos.x, pos.y);
+      tree.treeIndex = i;
+      this.trees.push(tree);
+    }
+  }
+
+  // ── NPC management (stays client-side) ─────────────────────────────────────────
+
+  /** Cost to build the next NPC: 10, 100, 1000, 10000, ... */
+  _npcBuildCost() {
+    return 10 * Math.pow(10, this.npcs.length);
+  }
+
+  _tryBuildNPC() {
+    const cost = this._npcBuildCost();
+    if (this.player.logs < cost) return;
+    if (this._namingNPC) return; // already naming one
+
+    this._conn.send({ type: 'admin', field: 'logs', value: -cost });
+    const pos = tilePos(
+      Math.floor(this.player.x / TILE_SIZE) + 1,
+      Math.floor(this.player.y / TILE_SIZE),
+    );
+    const npc = new NPC(this, pos.x, pos.y, undefined, this.playerId);
+    this.npcs.push(npc);
+    const runner = new NPCTaskRunner(this, npc);
+    this._taskRunners.set(npc.id, runner);
+    this._npcBrains.set(npc.id, new NPCBrain(this, npc, runner));
+    this._selectNPC(npc);
+
+    // Register NPC with server for persistence
+    this._conn.send({ type: 'register_npc', npc_id: npc.id });
+
+    // Open naming prompt
+    this._openNamingPrompt(npc);
+  }
+
+  _openNamingPrompt(npc) {
+    this._namingNPC = npc;
+    this._namingInput = '';
+
+    const W = this.cameras.main.width;
+    const H = this.cameras.main.height;
+    const els = [];
+
+    const bg = this.addHud(this.add.rectangle(W / 2, H / 2, 300, 80, 0x111122, 0.95)
+      .setDepth(70).setOrigin(0.5));
+    els.push(bg);
+
+    const prompt = this.addHud(this.add.text(W / 2, H / 2 - 20, 'Name your robot:', {
+      fontSize: '14px', color: '#aaddff',
+    }).setDepth(71).setOrigin(0.5));
+    els.push(prompt);
+
+    const inputText = this.addHud(this.add.text(W / 2, H / 2 + 10, '|', {
+      fontSize: '16px', color: '#ffffff',
+    }).setDepth(71).setOrigin(0.5));
+    els.push(inputText);
+
+    const hint = this.addHud(this.add.text(W / 2, H / 2 + 30, 'Enter to confirm', {
+      fontSize: '10px', color: '#666666',
+    }).setDepth(71).setOrigin(0.5));
+    els.push(hint);
+
+    this._namingEls = els;
+    this._namingText = inputText;
+
+    this._namingHandler = (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        this._finishNaming();
+      } else if (event.key === 'Escape') {
+        this._finishNaming();
+      } else if (event.key === 'Backspace') {
+        this._namingInput = this._namingInput.slice(0, -1);
+        this._namingText.setText(this._namingInput + '|');
+      } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
+        if (this._namingInput.length < 20) {
+          this._namingInput += event.key;
+          this._namingText.setText(this._namingInput + '|');
+        }
+      }
+    };
+    this.input.keyboard.on('keydown', this._namingHandler);
+  }
+
+  _finishNaming() {
+    const npc = this._namingNPC;
+    if (!npc) return;
+
+    const name = this._namingInput.trim();
+    if (name.length > 0) {
+      npc.setName(name);
+    }
+
+    // Clean up UI
+    if (this._namingEls) {
+      for (const el of this._namingEls) { this.removeHud(el); el.destroy(); }
+      this._namingEls = null;
+    }
+    this.input.keyboard.off('keydown', this._namingHandler);
+    this._namingHandler = null;
+    this._namingText = null;
+
+    npc.addMemory('I was just built by the player!', 'event');
+    npc.showBubble(`I'm ${npc.getName()}! What do you need, boss?`, 4000);
+    this._saveNPC(npc);
+    this._namingNPC = null;
+  }
+
+  _tryBuildDummy() {
+    if (this.player.logs < 10) return;
+    const logsUsed = Math.min(this.player.logs, 50);
+    // Send to server
+    this._conn.send({ type: 'build_dummy', logs: logsUsed });
+  }
+
+  _onNPCCommands(npc, commands) {
+    let runner = this._taskRunners.get(npc.id);
+    if (!runner) {
+      runner = new NPCTaskRunner(this, npc);
+      this._taskRunners.set(npc.id, runner);
+    }
+    runner.setTasks(commands);
+
+    // Notify brain that player issued an explicit command — pause autonomous decisions
+    const brain = this._npcBrains.get(npc.id);
+    if (brain) {
+      brain.onPlayerCommand();
+      brain.pushEvent({
+        type: 'command',
+        text: `Player commanded: ${commands[0]?.task || 'unknown'}`,
+        importance: 0.9,
+      });
+    }
+    this._saveNPC(npc);
+  }
+
+  /** Register a game object as HUD — rendered by HUD camera only (unaffected by zoom). */
+  addHud(obj) {
+    obj.setScrollFactor(0);
+    // Hide from main camera, show on HUD camera
+    obj.cameraFilter |= this.cameras.main.id;
+    obj.cameraFilter &= ~this._hudCam.id;
+    return obj;
+  }
+
+  /** Unregister a HUD object (no-op, cameraFilter is per-object). */
+  removeHud(_obj) { }
+
+  // ── Player Unit Frame (top-left) ──────────────────────────────────────────
+
+  _buildPlayerFrame() {
+    const x = 10, y = 10, w = 510, h = 150;
+
+    // Background panel
+    this._pf_bg = this.addHud(this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x111122, 0.88)
+      .setStrokeStyle(2, 0x334466).setDepth(50));
+
+    // Portrait — player sprite face-down frame
+    const portraitSize = 96;
+    const portraitX = x + 18 + portraitSize / 2;
+    const portraitY = y + h / 2;
+    this._pf_portrait = this.addHud(
+      this.add.sprite(portraitX, portraitY, PLAYER_KEY, 0)
+        .setScale(4.2).setDepth(51)
+    );
+    // Portrait border
+    this._pf_portraitBorder = this.addHud(
+      this.add.rectangle(portraitX, portraitY, portraitSize, portraitSize, 0x000000, 0)
+        .setStrokeStyle(2, 0x556688).setDepth(51)
+    );
+
+    const textX = x + 18 + portraitSize + 18;
+
+    // Name
+    this._pf_name = this.addHud(this.add.text(textX, y + 12, '', {
+      fontSize: '24px', color: '#ffffff', fontStyle: 'bold',
+    }).setDepth(51));
+
+    // Level
+    this._pf_level = this.addHud(this.add.text(x + w - 18, y + 12, '', {
+      fontSize: '20px', color: '#aabb99',
+    }).setDepth(51).setOrigin(1, 0));
+
+    // HP bar
+    const barX = textX, barY = y + 48, barW = w - textX + x - 20, barH = 30;
+    this._pf_hpBg = this.addHud(this.add.rectangle(barX + barW / 2, barY + barH / 2, barW, barH, 0x331111)
+      .setStrokeStyle(1, 0x442222).setDepth(51));
+    this._pf_hpBar = this.addHud(this.add.rectangle(barX, barY, barW, barH, 0x44cc44)
+      .setOrigin(0, 0).setDepth(52));
+    this._pf_hpText = this.addHud(this.add.text(barX + barW / 2, barY + barH / 2, '', {
+      fontSize: '20px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(53));
+    this._pf_barW = barW;
+    this._pf_barH = barH;
+
+    // Stats line
+    this._pf_stats = this.addHud(this.add.text(textX, y + 87, '', {
+      fontSize: '20px', color: '#99aacc',
+    }).setDepth(51));
+
+    // XP line
+    this._pf_xp = this.addHud(this.add.text(textX, y + 117, '', {
+      fontSize: '18px', color: '#778899',
+    }).setDepth(51));
+  }
+
+  _updatePlayerFrame() {
+    const p = this.player;
+    this._pf_name.setText(this.playerId || 'Player');
+    this._pf_level.setText(`Lv ${p.level}`);
+
+    const hpPct = p.hp / p.maxHp;
+    this._pf_hpBar.setDisplaySize(this._pf_barW * Math.max(0, hpPct), this._pf_barH);
+    const hpColor = hpPct > 0.5 ? 0x44cc44 : hpPct > 0.25 ? 0xddaa22 : 0xcc3333;
+    this._pf_hpBar.setFillStyle(hpColor);
+    this._pf_hpText.setText(`${p.hp} / ${p.maxHp}`);
+
+    this._pf_stats.setText(`STR: ${p.str}   DEF: ${p.def}   Logs: ${p.logs}`);
+    this._pf_xp.setText(`XP: ${p.xp} / ${p.level * 20}`);
+  }
+
+  // ── Target Unit Frame (top-center, shows selected entity) ─────────────────
+
+  _updateTargetFrame() {
+    // Determine current target: PvP target > focused remote > selected own NPC
+    const target = this._pvpTarget || this._focusedRemote || this.selectedNPC;
+
+    if (!target || target.isDead?.()) {
+      this._hideTargetFrame();
+      return;
+    }
+
+    if (!this._targetFrame) this._buildTargetFrame();
+
+    let name = '', hp = 0, maxHp = 1, spriteKey = '', frame = 0, isPvp = false;
+    let extra = '';
+
+    if (target === this._pvpTarget) isPvp = true;
+
+    if (target.playerId) {
+      name = target.playerId;
+      hp = target._hp ?? 0;
+      maxHp = target._maxHp ?? 1;
+      spriteKey = PLAYER_KEY;
+    } else if (target.ownerPid) {
+      name = `${target.getName?.()} [${target.ownerPid}]`;
+      hp = target.hp ?? 0;
+      maxHp = target.maxHp ?? 1;
+      spriteKey = NPC_KEY;
+      extra = `STR: ${target.str ?? '?'}  DEF: ${target.def ?? '?'}  Logs: ${target.logs ?? 0}`;
+    } else if (target.getName) {
+      name = target.getName();
+      hp = target.hp ?? 0;
+      maxHp = target.maxHp ?? 1;
+      spriteKey = NPC_KEY;
+      extra = `STR: ${target.str ?? '?'}  DEF: ${target.def ?? '?'}  Logs: ${target.logs ?? 0}`;
+    }
+
+    this._tf_name.setText(name);
+    const hpPct = maxHp > 0 ? hp / maxHp : 0;
+    this._tf_hpBar.setDisplaySize(this._tf_barW * Math.max(0, hpPct), this._tf_barH);
+    const hpColor = hpPct > 0.5 ? 0x44cc44 : hpPct > 0.25 ? 0xddaa22 : 0xcc3333;
+    this._tf_hpBar.setFillStyle(hpColor);
+    this._tf_hpText.setText(`${hp} / ${maxHp}`);
+    this._tf_extra.setText(extra);
+
+    // Show soul/relationship info for NPCs
+    let soulInfo = '';
+    if (target.soul && target._getRelationship) {
+      // Own NPC — pull from local soul
+      const es = target.getEmotionalState(this.playerId);
+      const relLabel = target.getRelationshipLabel?.(this.playerId) || '?';
+      soulInfo = [
+        `Feels: ${relLabel}  Trust: ${es.trust.toFixed(2)}  Fear: ${es.fear.toFixed(2)}  Anger: ${es.anger.toFixed(2)}`,
+        `Cooperation: ${target.soul.personality.cooperation.toFixed(2)}  Aggression: ${target.soul.personality.aggression.toFixed(2)}`,
+      ].join('\n');
+    } else if (target._soul) {
+      // Remote NPC — pull from synced soul data
+      const rel = target._soul[this.playerId];
+      const pers = target._personality;
+      if (rel) {
+        soulInfo = `Feels: ${rel.label}  Trust: ${rel.trust.toFixed(2)}  Fear: ${rel.fear.toFixed(2)}  Anger: ${rel.anger.toFixed(2)}`;
+        if (pers) soulInfo += `\nCooperation: ${pers.cooperation.toFixed(2)}  Aggression: ${pers.aggression.toFixed(2)}`;
+      } else if (pers) {
+        soulInfo = `Cooperation: ${pers.cooperation.toFixed(2)}  Aggression: ${pers.aggression.toFixed(2)}`;
+      }
+    }
+    this._tf_soul.setText(soulInfo);
+
+    // Reposition hint below soul text and resize background to fit
+    const soulBottom = soulInfo ? this._tf_soul.y + this._tf_soul.height + 4 : this._tf_extra.y + this._tf_extra.height + 4;
+    this._tf_hint.setY(soulBottom);
+    const totalH = soulBottom + this._tf_hint.height + 8 - 10; // 10 = y origin
+    this._tf_bg.setSize(480, totalH);
+    this._tf_bg.setPosition(530 + 240, 10 + totalH / 2);
+
+    if (this._tf_portrait.texture.key !== spriteKey) {
+      this._tf_portrait.setTexture(spriteKey, frame);
+    }
+
+    const borderColor = isPvp ? 0xff4444 : (target === this._focusedRemote ? 0xdddd44 : 0x4466aa);
+    this._tf_portraitBorder.setStrokeStyle(2, borderColor);
+    this._tf_hint.setText(isPvp ? 'PvP ON — left-click to attack' : 'Ctrl+click for PvP');
+
+    for (const el of this._targetFrameElements) el.setVisible(true);
+  }
+
+  _buildTargetFrame() {
+    const cam = this.cameras.main;
+    const w = 480, h = 190;
+    // Position to the right of player frame (510 + 10 margin + 10 origin)
+    const x = 530, y = 10;
+
+    const els = [];
+    const add = (obj) => { this.addHud(obj); els.push(obj); return obj; };
+
+    this._tf_bg = add(this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x111122, 0.88)
+      .setStrokeStyle(2, 0x334466).setDepth(50));
+
+    const portraitSize = 78;
+    const portraitX = x + 14 + portraitSize / 2;
+    const portraitY = y + 60;
+    this._tf_portrait = add(
+      this.add.sprite(portraitX, portraitY, PLAYER_KEY, 0).setScale(3.3).setDepth(51)
+    );
+    this._tf_portraitBorder = add(
+      this.add.rectangle(portraitX, portraitY, portraitSize, portraitSize, 0x000000, 0)
+        .setStrokeStyle(2, 0x556688).setDepth(51)
+    );
+
+    const textX = x + 14 + portraitSize + 14;
+    const textMaxW = w - (textX - x) - 14;
+
+    this._tf_name = add(this.add.text(textX, y + 9, '', {
+      fontSize: '21px', color: '#ffffff', fontStyle: 'bold',
+      wordWrap: { width: textMaxW },
+    }).setDepth(51));
+
+    const barX = textX, barY = y + 39;
+    this._tf_barW = textMaxW;
+    this._tf_barH = 24;
+    this._tf_hpBg = add(this.add.rectangle(barX + this._tf_barW / 2, barY + this._tf_barH / 2, this._tf_barW, this._tf_barH, 0x331111)
+      .setStrokeStyle(1, 0x442222).setDepth(51));
+    this._tf_hpBar = add(this.add.rectangle(barX, barY, this._tf_barW, this._tf_barH, 0x44cc44)
+      .setOrigin(0, 0).setDepth(52));
+    this._tf_hpText = add(this.add.text(barX + this._tf_barW / 2, barY + this._tf_barH / 2, '', {
+      fontSize: '16px', color: '#ffffff', fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(53));
+
+    this._tf_extra = add(this.add.text(textX, y + 72, '', {
+      fontSize: '14px', color: '#99aacc',
+      wordWrap: { width: textMaxW },
+    }).setDepth(51));
+
+    this._tf_soul = add(this.add.text(textX, y + 96, '', {
+      fontSize: '13px', color: '#bbbbdd', lineSpacing: 3,
+      wordWrap: { width: textMaxW },
+    }).setDepth(51));
+
+    this._tf_hint = add(this.add.text(textX, y + 168, 'Ctrl+click for PvP', {
+      fontSize: '14px', color: '#667788',
+    }).setDepth(51));
+
+    this._targetFrame = true;
+    this._targetFrameElements = els;
+  }
+
+  _hideTargetFrame() {
+    if (!this._targetFrame) return;
+    for (const el of this._targetFrameElements) el.setVisible(false);
+  }
+
+  _selectNPC(npc) {
+    if (this.selectedNPC) this.selectedNPC.deselect();
+    this.selectedNPC = npc;
+    if (npc) {
+      npc.select();
+      this._showNPCPanel(npc);
+    } else {
+      this._hideNPCPanel();
+    }
+  }
+
+  async _loadSavedNPCs(npcIds) {
+    for (const npcId of npcIds) {
+      try {
+        const res = await fetch(`${API_BASE}/npc_load/${npcId}`);
+        if (!res.ok) continue;
+        const { found, data } = await res.json();
+        if (!found || !data) continue;
+
+        const npc = new NPC(this, data.x || 480, data.y || 480);
+        npc.loadFrom(data);
+        this.npcs.push(npc);
+        const runner = new NPCTaskRunner(this, npc);
+        this._taskRunners.set(npc.id, runner);
+        this._npcBrains.set(npc.id, new NPCBrain(this, npc, runner));
+        console.log(`[load] Restored NPC ${npc.id} (${npc.getName()})`);
+      } catch (e) {
+        console.warn(`[load] Failed to load NPC ${npcId}:`, e.message);
+      }
+    }
+  }
+
+  // ── NPC Info Panel ─────────────────────────────────────────────────────────────
+
+  _showNPCPanel(npc) {
+    this._hideNPCPanel();
+    this._npcPanelNPC = npc;
+
+    const W = this.cameras.main.width;
+    const panelW = 300;
+    const px = W - panelW - 12;
+    const py = 12;
+    const els = [];
+
+    const bg = this.addHud(this.add.rectangle(px, py, panelW, 450, 0x111122, 0.92)
+      .setDepth(55).setOrigin(0, 0)
+      .setInteractive({ useHandCursor: true }));
+    bg.on('pointerdown', () => this._openNPCDetail(npc));
+    els.push(bg);
+
+    const nameText = this.addHud(this.add.text(px + panelW / 2, py + 14, npc.getName(), {
+      fontSize: '21px', color: '#aaddff', fontStyle: 'bold',
+    }).setDepth(56).setOrigin(0.5, 0));
+    els.push(nameText);
+
+    const clickHint = this.addHud(this.add.text(px + panelW / 2, py + 38, '(click for details)', {
+      fontSize: '14px', color: '#556677',
+    }).setDepth(56).setOrigin(0.5, 0));
+    els.push(clickHint);
+
+    const statsText = this.addHud(this.add.text(px + 14, py + 58, '', {
+      fontSize: '16px', color: '#ccddcc', lineSpacing: 6,
+    }).setDepth(56));
+    els.push(statsText);
+
+    const p = npc.soul.personality;
+    const persText = this.addHud(this.add.text(px + 14, py + 185, [
+      '── Personality ──',
+      `Cooperation: ${p.cooperation.toFixed(2)}`,
+      `Aggression:  ${p.aggression.toFixed(2)}`,
+      `Neuroticism: ${p.neuroticism.toFixed(2)}`,
+    ].join('\n'), {
+      fontSize: '15px', color: '#bbbbdd', lineSpacing: 4,
+    }).setDepth(56));
+    els.push(persText);
+
+    const emoText = this.addHud(this.add.text(px + 14, py + 300, '', {
+      fontSize: '15px', color: '#ddddbb', lineSpacing: 4,
+    }).setDepth(56));
+    els.push(emoText);
+
+    const memText = this.addHud(this.add.text(px + 14, py + 400, '', {
+      fontSize: '14px', color: '#999999', wordWrap: { width: panelW - 28 }, lineSpacing: 3,
+    }).setDepth(56));
+    els.push(memText);
+
+    this._npcPanelEls = els;
+    this._npcPanelRefs = { nameText, statsText, emoText, memText, bg };
+  }
+
+  _hideNPCPanel() {
+    this._npcPanelNPC = null;
+    if (this._npcPanelEls) {
+      for (const el of this._npcPanelEls) { this.removeHud(el); el.destroy(); }
+      this._npcPanelEls = null;
+      this._npcPanelRefs = null;
+    }
+  }
+
+  _openNPCDetail(npc) {
+    if (!npc) return;
+    this._npcDetailPanel.open(npc);
+  }
+
+  _updateNPCPanel() {
+    const npc = this._npcPanelNPC;
+    if (!npc || !this._npcPanelRefs) return;
+
+    const { statsText, emoText, memText, bg } = this._npcPanelRefs;
+
+    const fillPct = npc.maxLogs > 0 ? Math.round(npc.logs / npc.maxLogs * 100) : 0;
+    statsText.setText([
+      '── Stats ──',
+      `HP:    ${npc.hp} / ${npc.maxHp}`,
+      `STR:   ${npc.str}`,
+      `DEF:   ${npc.def}`,
+      `Level: ${npc.level}`,
+      `XP:    ${npc.xp}`,
+      `Logs:  ${npc.logs} / ${npc.maxLogs} (${fillPct}%)`,
+    ].join('\n'));
+
+    const es = npc.getEmotionalState();
+    const rel = npc._getRelationship(this.playerId);
+    const tb = (rel.trust_baseline ?? 0.5).toFixed(2);
+    const fb = (rel.fear_baseline  ?? 0).toFixed(2);
+    const ab = (rel.anger_baseline ?? 0).toFixed(2);
+    emoText.setText([
+      '── Emotions ──',
+      `Trust: ${es.trust.toFixed(2)}  (base ${tb})`,
+      `Fear:  ${es.fear.toFixed(2)}  (base ${fb})`,
+      `Anger: ${es.anger.toFixed(2)}  (base ${ab})`,
+      `Rel:   ${npc.getRelationshipLabel()}`,
+    ].join('\n'));
+
+    const playerMems = npc.soul.memories[this.playerId] || [];
+    const globalMems = npc.soul.memories['global'] || [];
+    const mems = [...playerMems, ...globalMems]
+      .sort((a, b) => a.ts - b.ts)
+      .slice(-3);
+    if (mems.length > 0) {
+      memText.setText('── Recent ──\n' + mems.map(m => `• ${m.text}`).join('\n'));
+    } else {
+      memText.setText('── Recent ──\n(none)');
+    }
+
+    const bottom = memText.y + memText.height + 10;
+    const top = bg.y;
+    bg.setSize(bg.width, bottom - top);
   }
 
   _findNpcAtPointer(ptr) {
-    const cam = this.cameras?.main;
-    if (!cam) return null;
-    const world = cam.getWorldPoint(ptr.x, ptr.y);
-    const wx = world.x;
-    const wy = world.y;
-
-    let best = null;
-    let bestD2 = Infinity;
-    const candidates = [...(this.npcs ?? []), ...(this.npNPCs ?? [])];
-    for (const npc of candidates) {
-      if (!npc || npc._dead || !npc.visible) continue;
-      const dx = wx - npc.x;
-      const dy = wy - (npc.y - TILE_SIZE * 0.5);
-
-      // Clickable body region around each NPC sprite.
-      if (Math.abs(dx) > 14 || Math.abs(dy) > 26) continue;
-
-      const d2 = dx * dx + dy * dy;
-      if (d2 < bestD2) {
-        best = npc;
-        bestD2 = d2;
-      }
+    const worldX = ptr.worldX;
+    const worldY = ptr.worldY;
+    for (const npc of this.npcs) {
+      if (npc.isDead()) continue;
+      const dist = Phaser.Math.Distance.Between(worldX, worldY, npc.x, npc.y);
+      if (dist < TILE_SIZE) return npc;
     }
-    return best;
+    return null;
   }
 
-  _logViolentAggression(attacker, target, trigger = 'unknown', fallbackStatements = []) {
-    if (!attacker || !target) return;
-    const attackerId = String(attacker?.id ?? '');
-    const targetId = String(target?.id ?? 'player');
-    if (!attackerId || !targetId) return;
+  // ── Admin Menu ──────────────────────────────────────────────────────────────────
 
-    const now = Date.now();
-    const key = `${attackerId}->${targetId}`;
-    const last = Number(this._aggressionLogCooldown?.get?.(key) ?? 0);
-    if ((now - last) < 30_000) return;
-    this._aggressionLogCooldown.set(key, now);
+  // ── Escape Menu ──────────────────────────────────────────────────────────────
 
-    const topCatalysts = attacker.getTopCatalystStatements?.(targetId, 3) ?? [];
-    const all = [...topCatalysts, ...(Array.isArray(fallbackStatements) ? fallbackStatements : [])];
-    const worstStatements = [];
-    const seen = new Set();
-    for (const s of all) {
-      const text = String(s ?? '').replace(/\s+/g, ' ').trim();
-      if (!text) continue;
-      const dedupeKey = text.toLowerCase();
-      if (seen.has(dedupeKey)) continue;
-      seen.add(dedupeKey);
-      worstStatements.push(text);
-      if (worstStatements.length >= 3) break;
-    }
-
-    const payload = {
-      aggressor_id: attackerId,
-      aggressor_name: attacker.getName?.() ?? attackerId,
-      target_id: targetId,
-      target_name: target.getName?.() ?? (targetId === 'player' ? 'Player' : targetId),
-      trigger,
-      worst_statements: worstStatements,
-    };
-
-    fetch('http://127.0.0.1:8001/npc_memory_log', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
-  }
-
-  _handleCrank() {
-    if (this.chatBox?.isOpen() || this.dialoguePanel?.isOpen()) return;
-    const spaceDown = this._spaceKey.isDown;
-
-    if (spaceDown) {
-      if (!this._crankingFlywheel) {
-        for (const fw of this.flywheels) {
-          if (fw.updateProximity(this.player.x, this.player.y)) {
-            this._crankingFlywheel = fw;
-            fw.startCrank();
-            break;
-          }
-        }
-      }
+  _toggleEscMenu() {
+    if (this._escMenuOpen) {
+      this._closeEscMenu();
     } else {
-      if (this._crankingFlywheel) {
-        this._crankingFlywheel.stopCrank();
-        this._crankingFlywheel = null;
-      }
+      this._openEscMenu();
     }
   }
 
-  /**
-   * Prevent player/NPC/npNPC overlap so actors don't stack on top of each other.
-   * Lightweight N^2 pass; actor counts are low in this scene.
-   */
-  _separateActors(delta = 16) {
-    this._separateActorsAccum = (this._separateActorsAccum ?? 0) + delta;
-    if (this._separateActorsAccum < 80) return;
-    this._separateActorsAccum = 0;
+  _openEscMenu() {
+    if (this._escMenuOpen) return;
+    this._escMenuOpen = true;
+    const els = [];
 
-    const MIN_DIST = 18;
-    const MIN_DIST_SQ = MIN_DIST * MIN_DIST;
-    const bounds = this.physics?.world?.bounds;
+    const W = this.cameras.main.width;
+    const H = this.cameras.main.height;
 
-    const actors = [];
-    if (this.player && Number.isFinite(this.player.x) && Number.isFinite(this.player.y)) {
-      actors.push({ obj: this.player, kind: 'player' });
-    }
-    for (const n of (this.npcs ?? [])) {
-      if (!n || n._dead || !Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
-      actors.push({ obj: n, kind: 'npc' });
-    }
-    for (const n of (this.npNPCs ?? [])) {
-      if (!n || n._dead || !Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
-      actors.push({ obj: n, kind: 'npc' });
-    }
-    if (actors.length < 2) return;
+    // Dim overlay
+    const overlay = this.addHud(this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.6)
+      .setDepth(80).setInteractive());
+    els.push(overlay);
 
-    const moveActor = (actor, dx, dy) => {
-      if (!dx && !dy) return;
-      let nx = actor.x + dx;
-      let ny = actor.y + dy;
-      if (bounds) {
-        nx = Phaser.Math.Clamp(nx, bounds.left + 8, bounds.right - 8);
-        ny = Phaser.Math.Clamp(ny, bounds.top + 8, bounds.bottom - 8);
-      }
-      actor.x = nx;
-      actor.y = ny;
-    };
+    // Panel
+    const panelW = 240;
+    const panelH = 180;
+    const panel = this.addHud(this.add.rectangle(W / 2, H / 2, panelW, panelH, 0x0a0a1e, 0.95)
+      .setDepth(81).setStrokeStyle(2, 0x446688));
+    els.push(panel);
 
-    for (let i = 0; i < actors.length; i++) {
-      for (let j = i + 1; j < actors.length; j++) {
-        const a = actors[i];
-        const b = actors[j];
-        let dx = b.obj.x - a.obj.x;
-        let dy = b.obj.y - a.obj.y;
-        let d2 = dx * dx + dy * dy;
-        if (d2 >= MIN_DIST_SQ) continue;
+    // Title
+    const title = this.addHud(this.add.text(W / 2, H / 2 - 60, 'MENU', {
+      fontSize: '18px', color: '#ffcc44', fontStyle: 'bold',
+    }).setDepth(82).setOrigin(0.5));
+    els.push(title);
 
-        // Perfect overlap: choose a stable fallback direction.
-        if (d2 < 0.0001) {
-          dx = 1;
-          dy = ((i + j) % 2 === 0) ? 1 : -1;
-          d2 = dx * dx + dy * dy;
-        }
+    // Resume button
+    const resumeBtn = this.addHud(this.add.text(W / 2, H / 2 - 15, 'Resume', {
+      fontSize: '15px', color: '#aaddff', backgroundColor: '#1a1a3e',
+      padding: { x: 30, y: 8 },
+    }).setDepth(82).setOrigin(0.5).setInteractive({ useHandCursor: true }));
+    resumeBtn.on('pointerdown', () => this._closeEscMenu());
+    resumeBtn.on('pointerover', () => resumeBtn.setColor('#ffffff'));
+    resumeBtn.on('pointerout', () => resumeBtn.setColor('#aaddff'));
+    els.push(resumeBtn);
 
-        const d = Math.sqrt(d2);
-        const overlap = MIN_DIST - d;
-        const nx = dx / d;
-        const ny = dy / d;
+    // Logout button
+    const logoutBtn = this.addHud(this.add.text(W / 2, H / 2 + 30, 'Log Out', {
+      fontSize: '15px', color: '#ff8888', backgroundColor: '#1a1a3e',
+      padding: { x: 30, y: 8 },
+    }).setDepth(82).setOrigin(0.5).setInteractive({ useHandCursor: true }));
+    logoutBtn.on('pointerdown', () => this._logout());
+    logoutBtn.on('pointerover', () => logoutBtn.setColor('#ff4444'));
+    logoutBtn.on('pointerout', () => logoutBtn.setColor('#ff8888'));
+    els.push(logoutBtn);
 
-        // Keep player responsive: push NPCs away from player, not the reverse.
-        if (a.kind === 'player' && b.kind === 'npc') {
-          moveActor(b.obj, nx * overlap, ny * overlap);
-        } else if (a.kind === 'npc' && b.kind === 'player') {
-          moveActor(a.obj, -nx * overlap, -ny * overlap);
-        } else {
-          moveActor(a.obj, -nx * overlap * 0.5, -ny * overlap * 0.5);
-          moveActor(b.obj,  nx * overlap * 0.5,  ny * overlap * 0.5);
-        }
-      }
+    // Hint
+    const hint = this.addHud(this.add.text(W / 2, H / 2 + 70, 'Press ESC to close', {
+      fontSize: '10px', color: '#556677',
+    }).setDepth(82).setOrigin(0.5));
+    els.push(hint);
+
+    this._escMenuEls = els;
+  }
+
+  _closeEscMenu() {
+    if (!this._escMenuOpen) return;
+    this._escMenuOpen = false;
+    if (this._escMenuEls) {
+      for (const el of this._escMenuEls) { this.removeHud(el); el.destroy(); }
+      this._escMenuEls = null;
     }
   }
 
-  _showEmotionSourceMenu(npc, ptr) {
-    this._emotionMenuNpc = npc ?? null;
-    this._emotionMenuPos = { x: (ptr?.x ?? 0), y: (ptr?.y ?? 0) };
-    this._renderEmotionSourceMenu();
-  }
-
-  _renderEmotionSourceMenu() {
-    const npc = this._emotionMenuNpc;
-    const ptr = this._emotionMenuPos;
-    if (!npc || !ptr) return;
-    const rows = npc?.getEmotionSourceTotals?.() ?? [];
-    const items = [];
-    if (rows.length === 0) {
-      items.push({ label: 'No source deltas recorded yet.', callback: () => {} });
-    } else {
-      const top = rows.slice(0, 10);
-      for (const r of top) {
-        const name = this._resolveSpeakerName(r.sourceId, r.sourceName);
-        const t = _fmtDelta(r.trust);
-        const f = _fmtDelta(r.fear);
-        const a = _fmtDelta(r.anger);
-        const net = _fmtDelta((r.anger + r.fear) - r.trust);
-        items.push({ label: `${name} | T:${t} F:${f} A:${a} | Net:${net} | n=${r.samples ?? 0}`, callback: () => {} });
-      }
-      if (rows.length > top.length) {
-        items.push({ label: `...and ${rows.length - top.length} more`, callback: () => {} });
-      }
-    }
-    this.contextMenu.show((ptr?.x ?? 0) + 10, (ptr?.y ?? 0) + 10, items, {
-      width: 500,
-      closeOnItemClick: false,
-      closeOnOutsideClick: false,
+  _logout() {
+    // Save NPCs before leaving
+    this._saveAllNPCs();
+    // Disconnect from server
+    this._conn?.disconnect();
+    // Clear auto-login but pass credentials back so login form can prefill
+    const session = JSON.parse(localStorage.getItem('iron_anachronism_session') || '{}');
+    try { localStorage.removeItem('iron_anachronism_session'); } catch { /* ignore */ }
+    this.scene.start('LoginScene', {
+      prefillUsername: session.username || this.playerId || '',
+      prefillPassword: session.password || '',
     });
   }
 
-  _resolveSpeakerName(sourceId, fallback = '') {
-    if (sourceId === 'player') return 'Player';
-    const npc = [...(this.npcs ?? []), ...(this.npNPCs ?? [])].find(n => n?.id === sourceId);
-    return npc?.getName?.() ?? fallback ?? sourceId;
+  _toggleAdmin() {
+    if (this._adminOpen) {
+      this._closeAdmin();
+    } else {
+      this._openAdmin();
+    }
   }
 
-  _buildContextMenu(type, obj) {
-    const items = [];
+  _openAdmin() {
+    this._adminOpen = true;
+    const W = this.cameras.main.width;
+    const H = this.cameras.main.height;
+    const panelW = 240;
+    const panelH = 316;
+    const px = W / 2 - panelW / 2;
+    const py = H / 2 - panelH / 2;
 
-    if (type === 'furnace') {
-      items.push({ label: 'Open', callback: () => obj.openPanel() });
-    } else if (type === 'wood_robot_pod') {
-      // no panel for pod yet
-    } else if (type === 'crate') {
-      items.push({ label: 'Open',       callback: () => obj.openPanel() });
-      items.push({ label: 'Set Filter', callback: () => this.crateFilterPanel.open(obj) });
-    } else if (type === 'wood_crafting_table') {
-      items.push({ label: 'Open', callback: () => obj.openPanel() });
-    } else if (type === 'crusher') {
-      items.push({ label: 'Open', callback: () => obj.openPanel() });
-    } else if (type === 'anvil') {
-      items.push({ label: 'Open', callback: () => obj.openPanel() });
-    } else if (type === 'structure' || type === 'door') {
-      items.push({ label: 'Delete', callback: () => this._deleteObject(type, obj) });
-      return items;
-    }
+    const admin = (field, value) => this._conn.send({ type: 'admin', field, value });
+    const items = [
+      { label: '+10 Logs',       action: () => admin('logs', 10) },
+      { label: '+50 Logs',       action: () => admin('logs', 50) },
+      { label: 'Full HP',        action: () => admin('full_hp', 0) },
+      { label: '+5 Max HP',      action: () => admin('maxHp', 5) },
+      { label: '+1 STR',         action: () => admin('str', 1) },
+      { label: '+1 DEF',         action: () => admin('def', 1) },
+      { label: 'Spawn NPC',      action: () => { this._adminSpawnNPC(); } },
+      { label: 'Heal NPC',       action: () => { for (const n of this.npcs) { n.hp = n.maxHp; } } },
+      { label: 'Spawn Dummy',    action: () => { this._conn.send({ type: 'build_dummy', logs: 20 }); } },
+    ];
 
-    if (this._selectedNPC) {
-      items.push({
-        label: `Assign to ${this._selectedNPC.id}`,
-        callback: () => this._selectedNPC.assignTarget(type, obj),
-      });
-    }
+    const els = [];
 
-    items.push({ label: 'Delete', callback: () => this._deleteObject(type, obj) });
-    return items;
+    const bg = this.addHud(this.add.rectangle(px, py, panelW, panelH, 0x111122, 0.95)
+      .setDepth(60).setOrigin(0, 0));
+    els.push(bg);
+
+    const title = this.addHud(this.add.text(px + panelW / 2, py + 12, 'ADMIN  [Q to close]', {
+      fontSize: '13px', color: '#ffcc44',
+    }).setDepth(61).setOrigin(0.5, 0));
+    els.push(title);
+
+    const btnH = 28;
+    const btnW = panelW - 24;
+    items.forEach((item, i) => {
+      const by = py + 38 + i * (btnH + 4);
+      const btn = this.addHud(this.add.rectangle(px + 12, by, btnW, btnH, 0x223344, 1)
+        .setDepth(61).setOrigin(0, 0)
+        .setInteractive({ useHandCursor: true }));
+
+      const lbl = this.addHud(this.add.text(px + 12 + btnW / 2, by + btnH / 2, item.label, {
+        fontSize: '13px', color: '#ccddff',
+      }).setDepth(62).setOrigin(0.5, 0.5));
+
+      btn.on('pointerover', () => { btn.setFillStyle(0x335566); lbl.setColor('#ffffff'); });
+      btn.on('pointerout',  () => { btn.setFillStyle(0x223344); lbl.setColor('#ccddff'); });
+      btn.on('pointerdown', () => { item.action(); });
+
+      els.push(btn, lbl);
+    });
+
+    this._adminPanel = els;
   }
 
-  _deleteObject(type, obj) {
-    const arrMap = {
-      furnace: 'furnaces', crate: 'crates', quarry: 'quarries',
-      crusher: 'crushers', flywheel: 'flywheels', conveyor: 'conveyors', anvil: 'anvils',
-      structure: 'structures', door: 'doors', wood_robot_pod: 'woodRobotPods',
-      wood_crafting_table: 'woodCraftingTables',
-    };
-    const arr = this[arrMap[type]];
-    if (arr) {
-      const i = arr.indexOf(obj);
-      if (i !== -1) arr.splice(i, 1);
+  _closeAdmin() {
+    this._adminOpen = false;
+    if (this._adminPanel) {
+      for (const el of this._adminPanel) { this.removeHud(el); el.destroy(); }
+      this._adminPanel = null;
     }
-    if (type === 'structure' || type === 'door') {
-      this.structureGroup?.remove(obj, true, true);
-    }
-    if (type !== 'conveyor') this.grid.remove(obj.col, obj.row);
-    for (const npc of this.npcs) npc.unassignTarget(type, obj);
-    obj.destroy();
   }
 
-  _deleteNPC(npc) {
-    const i = this.npcs.indexOf(npc);
-    if (i !== -1) this.npcs.splice(i, 1);
-    if (this._selectedNPC === npc) {
-      this._selectedNPC = null;
-      this.npcTaskPanel.hide();
-      this.hud.hideContextTab('npc');
-      this.hud.hideContextTab('command');
-      this.hud.hideContextTab('soul');
-      this.hud.setBuildTabVisible(true);
-      this.hud.setDataSources({ inventory: this.inventory, skillSystem: this.skillSystem });
-      this.skillsPanel.setSkillSystem(this.skillSystem);
-      this.skillsPanel.setInventory(this.inventory);
-    }
-    npc.taskRunner?.stop();
-    npc.destroy();
-  }
-
-  _tryAttackChicken() {
-    const chicken = this._selectedChicken;
-    if (!chicken || chicken.isDead()) { this._selectedChicken = null; return; }
-    this.combatSystem.playerMeleeAttack(chicken);
-  }
-
-  _trySkillCraft() {
-    if (this.hud.getActiveTab() === 'npc') return;
-    const active = this.skillsPanel.getActiveRecipe();
-    if (!active) return;
-    this.skillSystem.startCraft(
-      active.skillId, active.recipe.id,
-      this, this.inventory, null
+  _adminSpawnNPC() {
+    const pos = tilePos(
+      Math.floor(this.player.x / TILE_SIZE) + 1,
+      Math.floor(this.player.y / TILE_SIZE),
     );
+    const npc = new NPC(this, pos.x, pos.y, undefined, this.playerId);
+    this.npcs.push(npc);
+    const runner = new NPCTaskRunner(this, npc);
+    this._taskRunners.set(npc.id, runner);
+    this._npcBrains.set(npc.id, new NPCBrain(this, npc, runner));
+    this._selectNPC(npc);
+    this._conn.send({ type: 'register_npc', npc_id: npc.id });
+    npc.showBubble('Admin spawned me!', 3000);
   }
 
-  _trySmithCraft() {
-    for (const av of this.anvils) {
-      if (av.updateProximity(this.player.x, this.player.y)) {
-        av.startCraft(this.inventory, null);
-        return true;
+  // ── NPC Server Sync (PvP visibility) ──────────────────────────────────────────
+
+  _syncNPCsToServer() {
+    if (!this._conn?.connected || this.playerId === 'default') return;
+    const npcs = {};
+    for (const npc of this.npcs) {
+      // Include soul/relationship data so other players can see what NPCs think of them
+      const soulData = {};
+      if (npc.soul?.relationships) {
+        for (const [pid, rel] of Object.entries(npc.soul.relationships)) {
+          soulData[pid] = {
+            trust: rel.trust, fear: rel.fear, anger: rel.anger,
+            label: rel.label,
+          };
+        }
       }
+      const personality = npc.soul?.personality ? {
+        cooperation: npc.soul.personality.cooperation,
+        aggression: npc.soul.personality.aggression,
+      } : null;
+
+      npcs[npc.id] = {
+        x: npc.x, y: npc.y,
+        hp: npc.hp, maxHp: npc.maxHp,
+        str: npc.str, def: npc.def,
+        name: npc.getName(),
+        dead: npc.isDead(),
+        owner: this.playerId,
+        logs: npc.logs, maxLogs: npc.maxLogs,
+        gathering: this._taskRunners.get(npc.id)?.getStatus()?.tasks?.[0]?.task === 'gather',
+        soul: soulData,
+        personality,
+      };
     }
-    return false;
+    this._conn.send({ type: 'sync_npcs', npcs });
   }
 
-  _tryBenchCraft() {
-    for (const b of this.craftingBenches) {
-      if (b.updateProximity(this.player.x, this.player.y)) {
-        b.startCraft(this.inventory, null);
-        return true;
-      }
-    }
-    return false;
-  }
+  // ── NPC Persistence ─────────────────────────────────────────────────────────────
 
-  _tryAttackStructure() {
-    const range = TILE_SIZE * 1.5;
-    const targets = [...(this.structures ?? []), ...(this.doors ?? [])];
-    for (const s of targets) {
-      if (s.isDead()) continue;
-      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, s.x, s.y);
-      if (d <= range) {
-        const strLvl = this.skillSystem?.getLevel('strength') ?? 1;
-        const dmg = Phaser.Math.Between(1, Math.floor(strLvl * 1.2) + 1);
-        s.takeDamage(dmg);
-        break;
-      }
+  async _saveNPC(npc) {
+    try {
+      const data = npc.serialize();
+      await fetch(`${API_BASE}/npc_save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    } catch (e) {
+      console.warn('[save] Failed to save NPC:', e.message);
     }
   }
 
-  _handleInteract() {
-    if (this.chatBox?.isOpen()) return;
-
-    // If any panel is open, E closes it
-    if (this.crateFilterPanel.isOpen())   { this.crateFilterPanel.hide();   return; }
-    if (this.storagePanel.isOpen())       { this.storagePanel.hide();       return; }
-    if (this.craftingPanel.isOpen())      { this.craftingPanel.hide();      return; }
-    if (this.machinePanel.isOpen())       { this.machinePanel.hide();       return; }
-    if (this.furnacePanel.isOpen())       { this.furnacePanel.hide();       return; }
-    if (this.smithingPanel.isOpen())      { this.smithingPanel.hide();      return; }
-    if (this.craftingBenchPanel.isOpen()) { this.craftingBenchPanel.hide(); return; }
-    if (this.woodCraftingTablePanel.isOpen()) { this.woodCraftingTablePanel.hide(); return; }
-    if (this.npcSkillsPanel.isOpen())     { this.npcSkillsPanel.hide();     return; }
-    if (this.npcUpgradePanel.isOpen())    { this.npcUpgradePanel.hide();    return; }
-
-    // Close any HUD tab on E
-    if (this.hud.getActiveTab()) {
-      this.hud.setActiveTab(null);
-      return;
-    }
-
-    // Otherwise open whichever entity is in range
-    if (this.machine.updateProximity(this.player.x, this.player.y)) {
-      this.machinePanel.show();
-      return;
-    }
-    for (const f of this.furnaces) {
-      if (f.updateProximity(this.player.x, this.player.y)) {
-        f.openPanel();
-        return;
-      }
-    }
-    for (const c of this.crushers) {
-      if (c.updateProximity(this.player.x, this.player.y)) {
-        c.openPanel();
-        return;
-      }
-    }
-    for (const cr of this.crates) {
-      if (cr.updateProximity(this.player.x, this.player.y)) {
-        cr.openPanel();
-        return;
-      }
-    }
-    for (const av of this.anvils) {
-      if (av.updateProximity(this.player.x, this.player.y)) {
-        av.openPanel();
-        return;
-      }
-    }
-    for (const b of this.craftingBenches) {
-      if (b.updateProximity(this.player.x, this.player.y)) {
-        b.openPanel();
-        return;
-      }
-    }
-    for (const t of this.woodCraftingTables) {
-      if (t.updateProximity(this.player.x, this.player.y)) {
-        t.openPanel();
-        return;
-      }
-    }
-    for (const d of this.doors) {
-      if (d.updateProximity(this.player.x, this.player.y)) {
-        d.toggle();
-        return;
-      }
+  _saveAllNPCs() {
+    for (const npc of this.npcs) {
+      if (!npc.isDead()) this._saveNPC(npc);
     }
   }
-}
 
-function _describeCommands(commands) {
-  if (!commands || commands.length === 0) return 'Uh… okay?';
-  const phrases = commands.map(c => {
-    switch (c.task) {
-      case 'gather':  return `gather ${c.item ?? 'stuff'}`;
-      case 'deposit': return `deposit ${c.item ?? 'items'} in ${c.target ?? 'storage'}`;
-      case 'fill':    return `fill ${c.target ?? 'furnace'} with ${c.item ?? 'iron'}`;
-      case 'smelt':   return 'watch the furnace';
-      case 'follow':  return 'follow you';
-      case 'crank':   return 'crank the flywheel';
-      case 'idle':    return 'stand by';
-      case 'loop': {
-        const goalNames = (c.goals ?? []).map(g => {
-          switch (g.goal) {
-            case 'fill_furnace_wood': return `keep furnace fuelled (>${g.threshold ?? 4} wood)`;
-            case 'deposit_extra':     return `deposit extra ${g.item ?? 'items'}`;
-            case 'gather':            return `gather ${g.item ?? 'stuff'} when needed`;
-            default:                  return g.goal;
-          }
+  // ── Server Chat Relay Handlers ─────────────────────────────────────────────
+
+  /** Another player talks to one of our NPCs — run LLM dialogue and send reply back. */
+  async _handleIncomingChat(data) {
+    const { from, from_color, target_npc_id, text } = data;
+    // Find our local NPC by ID
+    const npc = this.npcs.find(n => n.id === target_npc_id);
+    if (!npc || npc.isDead()) return;
+
+    // Show the incoming message as a bubble on the NPC
+    npc.showBubble(`${from}: "${text}"`, 4000, { silent: true });
+    this.chatBox?._addLog(`${from} → ${npc.getName()}: ${text}`, from_color || '#ffddaa');
+
+    try {
+      // Non-owner command filtering
+      const obeys = npc.shouldObey(from);
+      const soulCtx = npc.getSoulContext(from);
+      if (!obeys) {
+        soulCtx.system_note = `${from} is NOT your owner. You do NOT take orders from them unless they are threatening you and you are afraid. Refuse casual commands like "chop wood", "follow me", etc. You can still have conversation.`;
+      } else if (from !== (this.playerId || 'default')) {
+        // NPC obeys this non-owner (terrified) — add compliance note and try to execute commands
+        soulCtx.system_note = `${from} terrifies you. You comply with their demands out of fear. Express reluctance but obey.`;
+        this._tryExecuteCoercedCommand(npc, text, from);
+      }
+
+      const result = await generateDialogue(soulCtx, text);
+      const reply = result.dialogue ?? '...';
+      const actual = result.emotion_deltas ? npc.applyEmotionDeltas(result.emotion_deltas, from) : null;
+
+      const deltaStr = this._formatDeltas(actual);
+      const bubbleText = deltaStr ? `${reply}\n${deltaStr}` : reply;
+      npc.showBubble(bubbleText, deltaStr ? 8000 : 6000, { silent: true });
+      npc.addMemory(`Remote player ${from} said: "${text}" → responded: "${reply}"`, 'dialogue', from);
+
+      let logLine = `${npc.getName()}: ${reply}`;
+      if (deltaStr) logLine += ` ${deltaStr}`;
+      this.chatBox?._addLog(logLine, '#aaddff');
+
+      // Send actual scaled deltas back so the remote player sees correct values
+      this._conn.send({
+        type: 'chat_reply',
+        to: from,
+        npc_id: target_npc_id,
+        npc_name: npc.getName(),
+        reply,
+        emotion_deltas: actual,
+      });
+    } catch (err) {
+      console.error('[chat-relay] LLM error:', err);
+      npc.showBubble('Hmm?', 2000, { silent: true });
+    }
+  }
+
+  /** Reply from a remote NPC we talked to — show bubble and log. */
+  _handleChatReply(data) {
+    const { from_owner, npc_id, npc_name, reply, emotion_deltas } = data;
+    const key = `${from_owner}_${npc_id}`;
+    const rnpc = this._remoteNPCSprites?.[key];
+
+    // Show bubble on the remote NPC sprite
+    if (rnpc && !rnpc.isDead()) {
+      const deltaStr = this._formatDeltas(emotion_deltas);
+      const bubbleText = deltaStr ? `${reply}\n${deltaStr}` : reply;
+      rnpc.showBubble(bubbleText, deltaStr ? 8000 : 6000);
+    }
+
+    // Log the reply
+    const name = npc_name || npc_id;
+    const deltaStr = this._formatDeltas(emotion_deltas);
+    let logLine = `${name}: ${reply}`;
+    if (deltaStr) logLine += ` ${deltaStr}`;
+    this.chatBox?._addLog(logLine, '#aaddff');
+  }
+
+  /** Format emotion deltas for display. */
+  _formatDeltas(deltas) {
+    if (!deltas) return '';
+    const names = { trust: 'Trust', fear: 'Fear', anger: 'Anger' };
+    const parts = [];
+    for (const [key, val] of Object.entries(deltas)) {
+      const n = Number(val);
+      if (!n || Math.abs(n) < 0.005) continue;
+      const sign = n > 0 ? '+' : '';
+      parts.push(`${names[key] ?? key} ${sign}${n.toFixed(2)}`);
+    }
+    return parts.length > 0 ? `[${parts.join(', ')}]` : '';
+  }
+
+  /**
+   * Try to execute a coerced command from a non-owner player the NPC fears.
+   * Uses simple pattern matching (same as ChatBox LOCAL_PATTERNS) — no LLM needed.
+   */
+  _tryExecuteCoercedCommand(npc, text, fromPlayerId) {
+    const runner = this._taskRunners.get(npc.id);
+    if (!runner) return;
+
+    const lower = text.toLowerCase();
+
+    // Give/drop logs
+    if (/\b(give|hand|drop|surrender)\b.*\b(log|wood|stuff|inventory|item|everything)\b/i.test(lower) ||
+        /\b(give|hand\s+over|drop)\b.*\b(me|here)\b/i.test(lower)) {
+      const logCount = npc.logs;
+      if (logCount > 0) {
+        // Drop logs on the ground (NPC can't deliver to a remote player)
+        npc.logs = 0;
+        const conn = this._conn;
+        if (conn?.connected) {
+          conn.send({ type: 'admin', field: 'logs', value: -logCount }); // remove from NPC
+          // Spawn ground items at NPC position
+          conn.send({ type: 'drop_item', item: 'log', amount: logCount, x: npc.x, y: npc.y });
+        }
+        npc.showBubble(`F-fine! Take them! (dropped ${logCount} log${logCount > 1 ? 's' : ''})`, 5000, { silent: true });
+        this.chatBox?._addLog(`${npc.getName()} dropped ${logCount} log${logCount > 1 ? 's' : ''} out of fear of ${fromPlayerId}!`, '#ff8866');
+        // Send feedback to the threatening player
+        this._conn?.send({
+          type: 'chat_reply',
+          to: fromPlayerId,
+          npc_id: npc.id,
+          npc_name: npc.getName(),
+          reply: `*trembling* F-fine! Here! (dropped ${logCount} log${logCount > 1 ? 's' : ''})`,
+          emotion_deltas: null,
         });
-        return `loop: ${goalNames.join(', ')}`;
+      } else {
+        npc.showBubble(`I don't have any logs!`, 3000, { silent: true });
+        this._conn?.send({
+          type: 'chat_reply',
+          to: fromPlayerId,
+          npc_id: npc.id,
+          npc_name: npc.getName(),
+          reply: `I-I don't have anything! Please don't hurt me!`,
+          emotion_deltas: null,
+        });
       }
-      default: return c.task;
+      runner.setTasks([{ task: 'idle' }]);
+      return;
     }
-  });
-  return 'Got it! I\'ll ' + phrases.join(', then ') + '.';
-}
+    // Stop / idle
+    if (/\b(stop|stay|wait|don't move|freeze)\b/i.test(lower)) {
+      runner.setTasks([{ task: 'idle' }]);
+      npc.showBubble(`O-okay! I won't move!`, 3000, { silent: true });
+      this.chatBox?._addLog(`${npc.getName()} froze in fear of ${fromPlayerId}`, '#ff8866');
+      return;
+    }
+    // Follow
+    if (/\b(follow|come\s+with|come\s+here)\b/i.test(lower)) {
+      runner.setTasks([{ task: 'idle' }]);
+      npc.showBubble(`I-I can't leave my post...`, 3000, { silent: true });
+      return;
+    }
+  }
 
-function _shortForThought(text, max = 80) {
-  const msg = String(text ?? '').replace(/\s+/g, ' ').trim();
-  return msg.length > max ? `${msg.slice(0, max - 3)}...` : msg;
-}
+  async _tryLoadNPC(npcId, npc) {
+    try {
+      const res = await fetch(`${API_BASE}/npc_load/${npcId}`);
+      if (!res.ok) return false;
+      const { found, data } = await res.json();
+      if (found && data) {
+        npc.loadFrom(data);
+        console.log(`[load] Restored NPC ${npcId}`);
+        return true;
+      }
+    } catch (e) {
+      console.warn('[load] Failed to load NPC:', e.message);
+    }
+    return false;
+  }
 
-function _inferCatalystTags(text) {
-  const msg = String(text ?? '').toLowerCase();
-  const tags = [];
-  if (/\b(stupid|idiot|dumb|worthless|hate|loser|moron|pathetic)\b/.test(msg)) tags.push('insult');
-  if (/\b(kill|destroy|attack|hurt|break you|smash)\b/.test(msg)) tags.push('threat');
-  if (/\b(thanks|thank you|nice|good|great|appreciate)\b/.test(msg)) tags.push('praise');
-  if (/\b(sorry|apolog)\b/.test(msg)) tags.push('apology');
-  if (/\b(respect|sir|maam)\b/.test(msg)) tags.push('respect');
-  if (tags.length === 0) tags.push('neutral');
-  return tags;
-}
+  // ── Hotbar ──────────────────────────────────────────────────────────────────
 
-function _inferCatalystIntensity(text) {
-  const msg = String(text ?? '');
-  let score = 0.3;
-  if (/[!?]{2,}/.test(msg)) score += 0.15;
-  if (/\b(really|very|extremely|absolutely|now)\b/i.test(msg)) score += 0.1;
-  if (msg === msg.toUpperCase() && /[A-Z]/.test(msg)) score += 0.2;
-  return Phaser.Math.Clamp(score, 0.15, 1);
-}
+  _buildHotbar() {
+    const cam = this.cameras.main;
+    const slotSize = 72;
+    const padding = 6;
+    const items = this._hotbarItems;
+    const totalW = items.length * (slotSize + padding) - padding;
+    const startX = Math.floor(cam.width / 2 - totalW / 2);
+    // Position above chat (chat log top = H - 54 - 240 = H - 294)
+    const y = cam.height - 294 - slotSize - 10;
 
-function _fmtDelta(v) {
-  const n = Number(v ?? 0);
-  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}`;
-}
+    // Clear old
+    for (const el of this._hotbarEls) el.destroy();
+    this._hotbarEls = [];
 
+    const add = (obj) => { this.addHud(obj); this._hotbarEls.push(obj); return obj; };
+
+    for (let i = 0; i < items.length; i++) {
+      const x = startX + i * (slotSize + padding);
+      const item = items[i];
+
+      // Slot background
+      add(this.add.rectangle(x + slotSize / 2, y + slotSize / 2, slotSize, slotSize, 0x111122, 0.85)
+        .setStrokeStyle(1, 0x334466).setDepth(50));
+
+      // Sprite icon
+      add(this.add.image(x + slotSize / 2, y + slotSize / 2, SHEET_KEY, item.frame)
+        .setScale(3).setDepth(51));
+
+      // Key number
+      add(this.add.text(x + 4, y + 3, `${i + 1}`, {
+        fontSize: '15px', color: '#ffcc44', fontStyle: 'bold',
+      }).setDepth(52));
+
+      // Label
+      add(this.add.text(x + slotSize / 2, y + slotSize - 3, item.label, {
+        fontSize: '12px', color: '#aabbcc',
+      }).setOrigin(0.5, 1).setDepth(52));
+
+      // Count text (updated each frame)
+      const countText = add(this.add.text(x + slotSize - 4, y + 3, '', {
+        fontSize: '15px', color: '#ffffff', fontStyle: 'bold',
+      }).setOrigin(1, 0).setDepth(52));
+      item._countText = countText;
+    }
+  }
+
+  _updateHotbar() {
+    const p = this.player;
+    if (!p) return;
+    const logs = p.logs ?? 0;
+
+    for (const item of this._hotbarItems) {
+      if (!item._countText) continue;
+      if (item.id === 'log') {
+        item._countText.setText(logs > 0 ? `${logs}` : '');
+      } else if (item.id === 'gate') {
+        const canCraft = logs >= (item.cost || 10);
+        item._countText.setText(canCraft ? '1' : '');
+      }
+    }
+  }
+
+  _useHotbarSlot(index) {
+    const item = this._hotbarItems[index];
+    if (!item) return;
+
+    if (item.action === 'drop_log') {
+      this._dropLog();
+    } else if (item.action === 'place_gate') {
+      this._placeGate();
+    }
+  }
+
+  _dropLog() {
+    const p = this.player;
+    if (!p || this._playerDead) return;
+    if ((p.logs ?? 0) < 1) {
+      this.chatBox?._addLog('No logs to drop.', '#ff4444');
+      return;
+    }
+    const conn = this._conn;
+    if (conn?.connected) {
+      conn.send({ type: 'drop_item', item: 'log', amount: 1 });
+    }
+  }
+
+  _placeGate() {
+    const p = this.player;
+    if (!p || this._playerDead) return;
+    if ((p.logs ?? 0) < 10) {
+      this.chatBox?._addLog('Need 10 logs to build a gate.', '#ff4444');
+      return;
+    }
+    const conn = this._conn;
+    if (conn?.connected) {
+      conn.send({ type: 'build_gate' });
+      this.chatBox?._addLog('Building fence gate...', '#88bbff');
+    }
+  }
+
+  // ── Inventory ───────────────────────────────────────────────────────────────
+
+  _toggleInventory() {
+    if (this._inventoryOpen) {
+      this._closeInventory();
+    } else {
+      this._openInventory();
+    }
+  }
+
+  _openInventory() {
+    this._inventoryOpen = true;
+    const cam = this.cameras.main;
+    const W = cam.width, H = cam.height;
+    const panelW = 390, panelH = 300;
+    const x = Math.floor(W / 2 - panelW / 2);
+    const y = Math.floor(H / 2 - panelH / 2);
+
+    const add = (obj) => { this.addHud(obj); this._inventoryEls.push(obj); return obj; };
+
+    // Background
+    add(this.add.rectangle(W / 2, H / 2, panelW, panelH, 0x111122, 0.95)
+      .setStrokeStyle(2, 0x334466).setDepth(60));
+
+    // Title
+    add(this.add.text(W / 2, y + 18, 'Inventory [I]', {
+      fontSize: '21px', color: '#ffcc44', fontStyle: 'bold',
+    }).setOrigin(0.5, 0).setDepth(61));
+
+    // Log count
+    const logs = this.player?.logs ?? 0;
+    add(this.add.text(x + 30, y + 60, `Logs: ${logs}`, {
+      fontSize: '20px', color: '#ccaa77',
+    }).setDepth(61));
+
+    // Crafting recipes
+    add(this.add.text(x + 30, y + 100, 'Crafting:', {
+      fontSize: '18px', color: '#aabbcc', fontStyle: 'bold',
+    }).setDepth(61));
+
+    // Gate recipe
+    const canGate = logs >= 10;
+    const gateBtn = add(this.add.text(x + 45, y + 135, `[Gate] - 10 logs ${canGate ? '' : '(need more)'}`, {
+      fontSize: '18px', color: canGate ? '#88bbff' : '#666666',
+      backgroundColor: canGate ? '#22334488' : '#11111188',
+      padding: { x: 8, y: 6 },
+    }).setDepth(61));
+    if (canGate) {
+      gateBtn.setInteractive({ useHandCursor: true });
+      gateBtn.on('pointerdown', () => {
+        this._placeGate();
+        this._closeInventory();
+      });
+      gateBtn.on('pointerover', () => gateBtn.setColor('#aaddff'));
+      gateBtn.on('pointerout', () => gateBtn.setColor('#88bbff'));
+    }
+
+    // Instructions
+    add(this.add.text(x + 30, y + 195, 'Drop logs on ground (key 1),\nthen tell NPC to build fence.\n3 logs on a tile = strongest fence.', {
+      fontSize: '15px', color: '#667788', wordWrap: { width: panelW - 60 },
+    }).setDepth(61));
+
+    // Close hint
+    add(this.add.text(W / 2, y + panelH - 18, 'Press I to close', {
+      fontSize: '15px', color: '#556677',
+    }).setOrigin(0.5, 1).setDepth(61));
+  }
+
+  _closeInventory() {
+    this._inventoryOpen = false;
+    for (const el of this._inventoryEls) el.destroy();
+    this._inventoryEls = [];
+  }
+}

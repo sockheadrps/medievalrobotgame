@@ -1,33 +1,37 @@
 // =========================
-// Tile Map Editor (Layered)
+// Tile Map Editor (Layered + Sprite Maker)
 // =========================
 
-const TILE = 16,
-  SPACING = 1,
-  SLOT = TILE + SPACING;
+const TILE = 16;
+const SPACING = 1;
+const SLOT = TILE + SPACING;
 
-let MAP_WIDTH = 40,
-  MAP_HEIGHT = 25;
+let MAP_WIDTH = 40;
+let MAP_HEIGHT = 25;
 
 // Zoom State
 let mapZoom = 2.0;
-const ZOOM_SPEED = 0.1,
-  MIN_ZOOM = 0.5,
-  MAX_ZOOM = 5.0;
+const ZOOM_SPEED = 0.1;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 5.0;
 
 // Tool State
 let activeTool = 'paint';
+let editorMode = 'map';
 let lineStart = null;
-let selectedTile = null;
+let selectedBrush = null; // { type:'sheet', col, row } | { type:'custom', id }
+let lastSheetSelection = null;
 
-// ✅ Layer State
-// 0 = ground (grass, floor), 1 = object (trees, props, walls), 2+ optional
+// Layer State
 let activeLayer = 0;
 
 let placedTiles = [];
+let customSprites = [];
+const customSpriteCanvases = new Map();
+let customSpriteIdCounter = 1;
 
-let isDrawing = false,
-  isErasing = false;
+let isDrawing = false;
+let isErasing = false;
 
 const img = new Image();
 img.src = '/static/Spritesheet/roguelikeSheet_transparent.png';
@@ -40,13 +44,34 @@ const mCanvas = document.getElementById('mapCanvas');
 const mCtx = mCanvas.getContext('2d');
 const mapContainer = document.querySelector('.map-container');
 const infoEl = document.getElementById('info');
+const selectionEl = document.getElementById('selection-display');
+
+// Sprite maker refs
+const spritePanelEl = document.getElementById('spriteEditorPanel');
+const spriteEditorCanvas = document.getElementById('spriteEditorCanvas');
+const spriteEditorCtx = spriteEditorCanvas.getContext('2d');
+const spritePreviewCanvas = document.getElementById('spritePreviewCanvas');
+const spritePreviewCtx = spritePreviewCanvas.getContext('2d');
+const spriteInfoEl = document.getElementById('spriteInfo');
+const spriteListEl = document.getElementById('spriteList');
+const spriteColorEl = document.getElementById('spriteColor');
+const spriteEraserBtn = document.getElementById('spriteEraserBtn');
+
+const spriteWorkCanvas = document.createElement('canvas');
+spriteWorkCanvas.width = TILE;
+spriteWorkCanvas.height = TILE;
+const spriteWorkCtx = spriteWorkCanvas.getContext('2d');
+
+let spritePenColor = '#ff0066';
+let spriteUseEraser = false;
+let spriteDrawing = false;
 
 let isGridWhite = true;
 let isPanning = false;
-let panStartX = 0,
-  panStartY = 0;
-let scrollStartX = 0,
-  scrollStartY = 0;
+let panStartX = 0;
+let panStartY = 0;
+let scrollStartX = 0;
+let scrollStartY = 0;
 let spacePanHeld = false;
 
 const SIDEBAR_MIN_PX = 200;
@@ -64,23 +89,390 @@ function applyMapZoom() {
   mCanvas.style.height = `${mCanvas.height * mapZoom}px`;
 }
 
+function brushToText(brush) {
+  if (!brush) return 'None';
+  if (brush.type === 'sheet') return `Sheet [${brush.col}, ${brush.row}]`;
+  if (brush.type === 'custom') return `Custom ${brush.id}`;
+  return 'None';
+}
+
+function updateSelectionDisplay() {
+  if (selectionEl) selectionEl.textContent = `Selected: ${brushToText(selectedBrush)}`;
+}
+
+function brushSignature(brush) {
+  if (!brush) return 'empty';
+  if (brush.type === 'sheet') return `sheet:${brush.col},${brush.row}`;
+  if (brush.type === 'custom') return `custom:${brush.id}`;
+  return 'empty';
+}
+
+function tileSignature(tile) {
+  if (!tile) return 'empty';
+  if (tile.customSpriteId) return `custom:${tile.customSpriteId}`;
+  if (Number.isFinite(tile.tileX) && Number.isFinite(tile.tileY)) {
+    return `sheet:${tile.tileX},${tile.tileY}`;
+  }
+  return 'empty';
+}
+
+function setSelectedSheetTile(col, row) {
+  lastSheetSelection = { col, row };
+  selectedBrush = { type: 'sheet', col, row };
+  updateSelectionDisplay();
+}
+
+function setSelectedCustomSprite(id) {
+  selectedBrush = { type: 'custom', id };
+  updateSelectionDisplay();
+}
+
+function nextCustomSpriteId() {
+  let id = `custom_${customSpriteIdCounter}`;
+  while (customSpriteCanvases.has(id)) {
+    customSpriteIdCounter += 1;
+    id = `custom_${customSpriteIdCounter}`;
+  }
+  customSpriteIdCounter += 1;
+  return id;
+}
+
+function buildCanvasFromPixels(pixels) {
+  if (!Array.isArray(pixels) || pixels.length !== TILE * TILE * 4) return null;
+  const c = document.createElement('canvas');
+  c.width = TILE;
+  c.height = TILE;
+  const ctx = c.getContext('2d');
+  const imgData = ctx.createImageData(TILE, TILE);
+  for (let i = 0; i < pixels.length; i++) {
+    const v = Number(pixels[i]);
+    imgData.data[i] = Number.isFinite(v) ? Math.max(0, Math.min(255, v)) : 0;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  return c;
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Failed to load image source: ${src}`));
+    image.src = src;
+  });
+}
+
+async function buildCanvasFromImageSource(src) {
+  const image = await loadImageElement(src);
+  const c = document.createElement('canvas');
+  c.width = TILE;
+  c.height = TILE;
+  c.getContext('2d').drawImage(image, 0, 0, TILE, TILE);
+  return c;
+}
+
+function canvasPixels(canvas) {
+  const ctx = canvas.getContext('2d');
+  return Array.from(ctx.getImageData(0, 0, TILE, TILE).data);
+}
+
+function customSpritesPayloadForSave() {
+  return Array.from(customSpriteCanvases.entries()).map(([id, canvas]) => ({
+    id,
+    pngDataUrl: canvas.toDataURL('image/png'),
+  }));
+}
+
+function refreshSpriteList() {
+  if (!spriteListEl) return;
+  spriteListEl.innerHTML = '';
+
+  if (customSprites.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No saved sprites';
+    spriteListEl.appendChild(opt);
+    return;
+  }
+
+  customSprites.forEach((s) => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.id;
+    spriteListEl.appendChild(opt);
+  });
+}
+
+function clearSpriteWork() {
+  spriteWorkCtx.clearRect(0, 0, TILE, TILE);
+  drawSpriteEditor();
+}
+
+function loadSheetSelectionToSpriteWork() {
+  const src = lastSheetSelection;
+  if (!src) {
+    if (spriteInfoEl) spriteInfoEl.textContent = 'Pick a sheet tile first.';
+    return;
+  }
+
+  spriteWorkCtx.clearRect(0, 0, TILE, TILE);
+  spriteWorkCtx.drawImage(
+    img,
+    src.col * SLOT,
+    src.row * SLOT,
+    TILE,
+    TILE,
+    0,
+    0,
+    TILE,
+    TILE
+  );
+  drawSpriteEditor();
+
+  if (spriteInfoEl) {
+    spriteInfoEl.textContent = `Loaded sheet tile [${src.col}, ${src.row}] into editor.`;
+  }
+}
+
+function saveSpriteFromWork() {
+  const id = nextCustomSpriteId();
+  const c = document.createElement('canvas');
+  c.width = TILE;
+  c.height = TILE;
+  c.getContext('2d').drawImage(spriteWorkCanvas, 0, 0);
+
+  customSpriteCanvases.set(id, c);
+  customSprites.push({ id });
+  refreshSpriteList();
+
+  if (spriteListEl) spriteListEl.value = id;
+  setSelectedCustomSprite(id);
+
+  if (spriteInfoEl) spriteInfoEl.textContent = `Saved ${id} and set it as active brush.`;
+}
+
+function loadSavedSpriteToWork(id) {
+  const c = customSpriteCanvases.get(id);
+  if (!c) return;
+  spriteWorkCtx.clearRect(0, 0, TILE, TILE);
+  spriteWorkCtx.drawImage(c, 0, 0);
+  drawSpriteEditor();
+  if (spriteInfoEl) spriteInfoEl.textContent = `Loaded ${id} into editor.`;
+}
+
+function drawSpriteEditor() {
+  const scale = Math.max(1, Math.floor(spriteEditorCanvas.width / TILE));
+  spriteEditorCtx.clearRect(0, 0, spriteEditorCanvas.width, spriteEditorCanvas.height);
+
+  // Checker background
+  for (let y = 0; y < TILE; y++) {
+    for (let x = 0; x < TILE; x++) {
+      spriteEditorCtx.fillStyle = (x + y) % 2 === 0 ? '#1a1a1a' : '#232323';
+      spriteEditorCtx.fillRect(x * scale, y * scale, scale, scale);
+    }
+  }
+
+  // Sprite pixels
+  spriteEditorCtx.imageSmoothingEnabled = false;
+  spriteEditorCtx.drawImage(spriteWorkCanvas, 0, 0, TILE * scale, TILE * scale);
+
+  // Pixel grid
+  spriteEditorCtx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+  spriteEditorCtx.lineWidth = 1;
+  for (let i = 0; i <= TILE; i++) {
+    const p = i * scale + 0.5;
+    spriteEditorCtx.beginPath();
+    spriteEditorCtx.moveTo(p, 0);
+    spriteEditorCtx.lineTo(p, TILE * scale);
+    spriteEditorCtx.stroke();
+
+    spriteEditorCtx.beginPath();
+    spriteEditorCtx.moveTo(0, p);
+    spriteEditorCtx.lineTo(TILE * scale, p);
+    spriteEditorCtx.stroke();
+  }
+
+  // Preview
+  spritePreviewCtx.clearRect(0, 0, spritePreviewCanvas.width, spritePreviewCanvas.height);
+  spritePreviewCtx.imageSmoothingEnabled = false;
+  spritePreviewCtx.drawImage(
+    spriteWorkCanvas,
+    0,
+    0,
+    spritePreviewCanvas.width,
+    spritePreviewCanvas.height
+  );
+}
+
+function spritePixelFromEvent(e) {
+  const rect = spriteEditorCanvas.getBoundingClientRect();
+  const x = Math.floor(((e.clientX - rect.left) / rect.width) * TILE);
+  const y = Math.floor(((e.clientY - rect.top) / rect.height) * TILE);
+  return {
+    x: Math.max(0, Math.min(TILE - 1, x)),
+    y: Math.max(0, Math.min(TILE - 1, y)),
+  };
+}
+
+function paintSpritePixel(e, eraseOverride = null) {
+  const { x, y } = spritePixelFromEvent(e);
+  const erase = eraseOverride === null ? spriteUseEraser : eraseOverride;
+
+  if (erase) spriteWorkCtx.clearRect(x, y, 1, 1);
+  else {
+    spriteWorkCtx.fillStyle = spritePenColor;
+    spriteWorkCtx.fillRect(x, y, 1, 1);
+  }
+
+  drawSpriteEditor();
+}
+
+async function hydrateCustomSprites(items) {
+  customSprites = [];
+  customSpriteCanvases.clear();
+  customSpriteIdCounter = 1;
+
+  if (!Array.isArray(items)) {
+    if (selectedBrush?.type === 'custom') {
+      selectedBrush = null;
+      updateSelectionDisplay();
+    }
+    refreshSpriteList();
+    return;
+  }
+
+  for (const s of items) {
+    if (!s || typeof s.id !== 'string') continue;
+    let c = null;
+    if (Array.isArray(s.pixels)) {
+      c = buildCanvasFromPixels(s.pixels);
+    } else if (typeof s.pngUrl === 'string') {
+      try {
+        c = await buildCanvasFromImageSource(s.pngUrl);
+      } catch (_err) {
+        c = null;
+      }
+    } else if (typeof s.pngDataUrl === 'string') {
+      try {
+        c = await buildCanvasFromImageSource(s.pngDataUrl);
+      } catch (_err) {
+        c = null;
+      }
+    }
+    if (!c) continue;
+
+    customSprites.push({ id: s.id });
+    customSpriteCanvases.set(s.id, c);
+
+    const m = /_(\d+)$/.exec(s.id);
+    if (m) {
+      const n = Number.parseInt(m[1], 10);
+      if (Number.isFinite(n)) customSpriteIdCounter = Math.max(customSpriteIdCounter, n + 1);
+    }
+  }
+
+  refreshSpriteList();
+
+  if (selectedBrush?.type === 'custom' && !customSpriteCanvases.has(selectedBrush.id)) {
+    selectedBrush = null;
+    updateSelectionDisplay();
+  }
+}
+
+function initSpriteEditor() {
+  clearSpriteWork();
+  drawSpriteEditor();
+  refreshSpriteList();
+
+  document.getElementById('spriteNewBtn').addEventListener('click', () => {
+    clearSpriteWork();
+    if (spriteInfoEl) spriteInfoEl.textContent = 'Started a blank 16x16 sprite.';
+  });
+
+  document.getElementById('spriteClearBtn').addEventListener('click', () => {
+    clearSpriteWork();
+    if (spriteInfoEl) spriteInfoEl.textContent = 'Cleared sprite editor.';
+  });
+
+  document.getElementById('spriteFromTileBtn').addEventListener('click', loadSheetSelectionToSpriteWork);
+
+  document.getElementById('spriteSaveBtn').addEventListener('click', () => {
+    saveSpriteFromWork();
+  });
+
+  document.getElementById('spriteUseSavedBtn').addEventListener('click', () => {
+    const id = spriteListEl.value;
+    if (!id || !customSpriteCanvases.has(id)) return;
+    setSelectedCustomSprite(id);
+    if (spriteInfoEl) spriteInfoEl.textContent = `Selected ${id} as active brush.`;
+  });
+
+  document.getElementById('spriteLoadSavedBtn').addEventListener('click', () => {
+    const id = spriteListEl.value;
+    if (!id || !customSpriteCanvases.has(id)) return;
+    loadSavedSpriteToWork(id);
+  });
+
+  spriteColorEl.addEventListener('input', (e) => {
+    spritePenColor = e.target.value || '#ff0066';
+  });
+
+  spriteEraserBtn.addEventListener('click', () => {
+    spriteUseEraser = !spriteUseEraser;
+    spriteEraserBtn.textContent = spriteUseEraser ? 'Eraser: On' : 'Eraser: Off';
+  });
+
+  spriteEditorCanvas.addEventListener('mousedown', (e) => {
+    if (editorMode !== 'sprite') return;
+    e.preventDefault();
+    spriteDrawing = true;
+    paintSpritePixel(e, e.button === 2 ? true : null);
+  });
+
+  spriteEditorCanvas.addEventListener('mousemove', (e) => {
+    if (editorMode !== 'sprite' || !spriteDrawing) return;
+    paintSpritePixel(e);
+  });
+
+  spriteEditorCanvas.addEventListener('mouseup', () => {
+    spriteDrawing = false;
+  });
+
+  spriteEditorCanvas.addEventListener('mouseleave', () => {
+    spriteDrawing = false;
+  });
+
+  spriteEditorCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
 // --- Initialization ---
 img.onload = () => {
   sCanvas.width = img.width;
   sCanvas.height = img.height;
   sCtx.drawImage(img, 0, 0);
   zCtx.imageSmoothingEnabled = false;
+
+  initSpriteEditor();
   updateDimensions();
+  updateSelectionDisplay();
+};
+
+window.setEditorMode = function (mode) {
+  editorMode = mode === 'sprite' ? 'sprite' : 'map';
+
+  document.body.classList.toggle('sprite-mode', editorMode === 'sprite');
+
+  const mapBtn = document.getElementById('btnModeMap');
+  const spriteBtn = document.getElementById('btnModeSprite');
+  if (mapBtn) mapBtn.classList.toggle('active', editorMode === 'map');
+  if (spriteBtn) spriteBtn.classList.toggle('active', editorMode === 'sprite');
+
+  if (spritePanelEl) spritePanelEl.classList.toggle('hidden', editorMode !== 'sprite');
 };
 
 window.setTool = function (tool) {
   activeTool = tool;
-  document
-    .querySelectorAll('.tool-btn')
-    .forEach((b) => b.classList.remove('active'));
-  const btn = document.getElementById(
-    'btn' + tool.charAt(0).toUpperCase() + tool.slice(1)
-  );
+  document.querySelectorAll('.tool-btn').forEach((b) => b.classList.remove('active'));
+  const btn = document.getElementById('btn' + tool.charAt(0).toUpperCase() + tool.slice(1));
   if (btn) btn.classList.add('active');
   lineStart = null;
   renderMap();
@@ -89,11 +481,10 @@ window.setTool = function (tool) {
 window.toggleGridColor = function () {
   isGridWhite = !isGridWhite;
   const btn = document.getElementById('btnGridToggle');
-  if (btn) btn.textContent = isGridWhite ? '🔳 Grid: White' : '🔲 Grid: Black';
+  if (btn) btn.textContent = isGridWhite ? 'Grid: White' : 'Grid: Black';
   renderMap();
 };
 
-// ✅ Optional helper so you can switch layers via console or a future UI
 window.setLayer = function (layer) {
   const n = Number(layer);
   if (!Number.isFinite(n) || n < 0) return;
@@ -160,17 +551,7 @@ sCanvas.addEventListener('mousemove', (e) => {
   const sy = row * SLOT - viewSize / 2 + SLOT / 2;
 
   zCtx.clearRect(0, 0, zCanvas.width, zCanvas.height);
-  zCtx.drawImage(
-    img,
-    sx,
-    sy,
-    viewSize,
-    viewSize,
-    0,
-    0,
-    zCanvas.width,
-    zCanvas.height
-  );
+  zCtx.drawImage(img, sx, sy, viewSize, viewSize, 0, 0, zCanvas.width, zCanvas.height);
 
   zCtx.strokeStyle = '#f00';
   zCtx.lineWidth = 2;
@@ -187,47 +568,47 @@ sCanvas.addEventListener('mousedown', (e) => {
   const py = (e.clientY - rect.top) * scaleY;
   const cols = Math.floor(img.width / SLOT);
 
-  selectedTile = {
-    col: Math.floor(px / SLOT),
-    row: Math.floor(py / SLOT),
-  };
+  const col = Math.floor(px / SLOT);
+  const row = Math.floor(py / SLOT);
+  setSelectedSheetTile(col, row);
 
-  const frame = selectedTile.row * cols + selectedTile.col;
-
-  const sel = document.getElementById('selection-display');
-  if (sel) sel.textContent = `Selected: [${selectedTile.col}, ${selectedTile.row}]`;
-
+  const frame = row * cols + col;
   if (infoEl) {
-    infoEl.textContent = `col=${selectedTile.col}  row=${selectedTile.row}  frame=${frame}  (px ${selectedTile.col * SLOT}, ${selectedTile.row * SLOT})   COLS=${cols}`;
+    infoEl.textContent = `col=${col}  row=${row}  frame=${frame}  (px ${col * SLOT}, ${row * SLOT})   COLS=${cols}`;
   }
 });
 
 // --- Map Dimension Logic ---
 function updateDimensions() {
-  MAP_WIDTH = parseInt(document.getElementById('gridW').value) || 40;
-  MAP_HEIGHT = parseInt(document.getElementById('gridH').value) || 25;
+  MAP_WIDTH = parseInt(document.getElementById('gridW').value, 10) || 40;
+  MAP_HEIGHT = parseInt(document.getElementById('gridH').value, 10) || 25;
   mCanvas.width = MAP_WIDTH * TILE;
   mCanvas.height = MAP_HEIGHT * TILE;
   applyMapZoom();
   renderMap();
 }
 
-// --- Tools Logic (Paint, Dump, Line) ---
+// --- Tools Logic (Paint, Fill, Line) ---
 function getTileAt(x, y, layer = activeLayer) {
-  return placedTiles.find(
-    (t) => t.x === x && t.y === y && (t.layer ?? 0) === layer
-  );
+  return placedTiles.find((t) => t.x === x && t.y === y && (t.layer ?? 0) === layer);
 }
 
 function removeTileAt(x, y, layer = activeLayer) {
-  placedTiles = placedTiles.filter(
-    (t) => !(t.x === x && t.y === y && (t.layer ?? 0) === layer)
-  );
+  placedTiles = placedTiles.filter((t) => !(t.x === x && t.y === y && (t.layer ?? 0) === layer));
 }
 
-function setTileAt(x, y, tileX, tileY, layer = activeLayer) {
+function setTileAt(x, y, brush = selectedBrush, layer = activeLayer) {
+  if (!brush) return;
   removeTileAt(x, y, layer);
-  placedTiles.push({ x, y, tileX, tileY, layer });
+
+  if (brush.type === 'sheet') {
+    placedTiles.push({ x, y, tileX: brush.col, tileY: brush.row, layer });
+    return;
+  }
+
+  if (brush.type === 'custom') {
+    placedTiles.push({ x, y, customSpriteId: brush.id, layer });
+  }
 }
 
 function doPaint(gx, gy) {
@@ -237,18 +618,18 @@ function doPaint(gx, gy) {
     return;
   }
 
-  if (isDrawing && selectedTile) {
-    setTileAt(gx, gy, selectedTile.col, selectedTile.row, activeLayer);
+  if (isDrawing && selectedBrush) {
+    setTileAt(gx, gy, selectedBrush, activeLayer);
     renderMap();
   }
 }
 
 function floodFill(startX, startY) {
-  if (!selectedTile) return;
+  if (!selectedBrush) return;
 
   const target = getTileAt(startX, startY, activeLayer);
-  const targetType = target ? `${target.tileX},${target.tileY}` : 'empty';
-  const replacementType = `${selectedTile.col},${selectedTile.row}`;
+  const targetType = tileSignature(target);
+  const replacementType = brushSignature(selectedBrush);
   if (targetType === replacementType) return;
 
   const stack = [[startX, startY]];
@@ -258,23 +639,14 @@ function floodFill(startX, startY) {
     const [x, y] = stack.pop();
     const key = `${x},${y}`;
 
-    if (
-      x < 0 ||
-      y < 0 ||
-      x >= MAP_WIDTH ||
-      y >= MAP_HEIGHT ||
-      processed.has(key)
-    )
-      continue;
+    if (x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT || processed.has(key)) continue;
 
     const current = getTileAt(x, y, activeLayer);
-    const currentType = current ? `${current.tileX},${current.tileY}` : 'empty';
+    const currentType = tileSignature(current);
 
     if (currentType === targetType) {
       processed.add(key);
-
-      setTileAt(x, y, selectedTile.col, selectedTile.row, activeLayer);
-
+      setTileAt(x, y, selectedBrush, activeLayer);
       stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
     }
   }
@@ -283,22 +655,22 @@ function floodFill(startX, startY) {
 }
 
 function finalizeLine(endX, endY) {
-  if (!lineStart || !selectedTile) return;
+  if (!lineStart || !selectedBrush) return;
 
   const dx = Math.abs(endX - lineStart.x);
   const dy = Math.abs(endY - lineStart.y);
 
   if (dx > dy) {
-    const start = Math.min(lineStart.x, endX),
-      end = Math.max(lineStart.x, endX);
+    const start = Math.min(lineStart.x, endX);
+    const end = Math.max(lineStart.x, endX);
     for (let x = start; x <= end; x++) {
-      setTileAt(x, lineStart.y, selectedTile.col, selectedTile.row, activeLayer);
+      setTileAt(x, lineStart.y, selectedBrush, activeLayer);
     }
   } else {
-    const start = Math.min(lineStart.y, endY),
-      end = Math.max(lineStart.y, endY);
+    const start = Math.min(lineStart.y, endY);
+    const end = Math.max(lineStart.y, endY);
     for (let y = start; y <= end; y++) {
-      setTileAt(lineStart.x, y, selectedTile.col, selectedTile.row, activeLayer);
+      setTileAt(lineStart.x, y, selectedBrush, activeLayer);
     }
   }
 
@@ -310,27 +682,17 @@ function renderLinePreview(gx, gy) {
   renderMap(); // clear map back to committed state
   mCtx.fillStyle = 'rgba(0, 255, 0, 0.4)';
 
-  const dx = Math.abs(gx - lineStart.x),
-    dy = Math.abs(gy - lineStart.y);
+  const dx = Math.abs(gx - lineStart.x);
+  const dy = Math.abs(gy - lineStart.y);
 
   if (dx > dy) {
-    const start = Math.min(lineStart.x, gx),
-      end = Math.max(lineStart.x, gx);
-    mCtx.fillRect(
-      start * TILE,
-      lineStart.y * TILE,
-      (end - start + 1) * TILE,
-      TILE
-    );
+    const start = Math.min(lineStart.x, gx);
+    const end = Math.max(lineStart.x, gx);
+    mCtx.fillRect(start * TILE, lineStart.y * TILE, (end - start + 1) * TILE, TILE);
   } else {
-    const start = Math.min(lineStart.y, gy),
-      end = Math.max(lineStart.y, gy);
-    mCtx.fillRect(
-      lineStart.x * TILE,
-      start * TILE,
-      TILE,
-      (end - start + 1) * TILE
-    );
+    const start = Math.min(lineStart.y, gy);
+    const end = Math.max(lineStart.y, gy);
+    mCtx.fillRect(lineStart.x * TILE, start * TILE, TILE, (end - start + 1) * TILE);
   }
 }
 
@@ -349,7 +711,6 @@ const getGridCoords = (e) => {
 
 mCanvas.addEventListener('mousedown', (e) => {
   if (e.shiftKey || e.button === 1 || spacePanHeld) {
-    // Start Panning
     e.preventDefault();
     isPanning = true;
     panStartX = e.clientX;
@@ -360,7 +721,8 @@ mCanvas.addEventListener('mousedown', (e) => {
     return;
   }
 
-  // Normal Tool Logic
+  if (editorMode !== 'map') return;
+
   const { gx, gy } = getGridCoords(e);
   if (gx < 0 || gy < 0 || gx >= MAP_WIDTH || gy >= MAP_HEIGHT) return;
 
@@ -394,6 +756,7 @@ window.addEventListener('mouseup', () => {
   isResizing = false;
   isDrawing = false;
   isErasing = false;
+  spriteDrawing = false;
 
   if (isPanning) {
     isPanning = false;
@@ -413,13 +776,12 @@ window.addEventListener('mousemove', (e) => {
     const dy = e.clientY - panStartY;
     mapContainer.scrollLeft = scrollStartX - dx;
     mapContainer.scrollTop = scrollStartY - dy;
-    return;
   }
 });
 
 // Local canvas mousemove for drawing previews
 mCanvas.addEventListener('mousemove', (e) => {
-  if (isPanning) return;
+  if (isPanning || editorMode !== 'map') return;
 
   const { gx, gy } = getGridCoords(e);
 
@@ -432,11 +794,9 @@ mCanvas.addEventListener('mousemove', (e) => {
 
 // --- Map Renderer ---
 function renderMap() {
-  // Base Fill (shows through only if BOTH layers are empty and sprite is transparent)
   mCtx.fillStyle = '#2a2a2a';
   mCtx.fillRect(0, 0, mCanvas.width, mCanvas.height);
 
-  // Grid Lines
   mCtx.strokeStyle = isGridWhite ? 'rgb(202, 202, 202)' : 'rgb(0, 0, 0)';
   mCtx.lineWidth = 0.25;
 
@@ -453,22 +813,29 @@ function renderMap() {
     mCtx.stroke();
   }
 
-  // ✅ Draw tiles sorted by layer (ground first, then objects)
   placedTiles
     .slice()
     .sort((a, b) => (a.layer ?? 0) - (b.layer ?? 0))
     .forEach((t) => {
-      mCtx.drawImage(
-        img,
-        t.tileX * SLOT,
-        t.tileY * SLOT,
-        TILE,
-        TILE,
-        t.x * TILE,
-        t.y * TILE,
-        TILE,
-        TILE
-      );
+      if (t.customSpriteId && customSpriteCanvases.has(t.customSpriteId)) {
+        const c = customSpriteCanvases.get(t.customSpriteId);
+        mCtx.drawImage(c, t.x * TILE, t.y * TILE, TILE, TILE);
+        return;
+      }
+
+      if (Number.isFinite(t.tileX) && Number.isFinite(t.tileY)) {
+        mCtx.drawImage(
+          img,
+          t.tileX * SLOT,
+          t.tileY * SLOT,
+          TILE,
+          TILE,
+          t.x * TILE,
+          t.y * TILE,
+          TILE,
+          TILE
+        );
+      }
     });
 }
 
@@ -482,6 +849,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     alert('Enter a map name first.');
     return;
   }
+
   const resp = await fetch('/save-map', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -490,10 +858,12 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
       width: MAP_WIDTH,
       height: MAP_HEIGHT,
       tiles: placedTiles,
+      customSprites: customSpritesPayloadForSave(),
     }),
   });
+
   const res = await resp.json();
-  alert(res.message);
+  alert(res.message || 'Saved.');
 });
 
 document.getElementById('loadBtn').addEventListener('click', async () => {
@@ -513,8 +883,8 @@ document.getElementById('loadBtn').addEventListener('click', async () => {
   const loadedTiles = Array.isArray(res.tiles) ? res.tiles : [];
   const loadedWidth = Number.parseInt(res.width, 10);
   const loadedHeight = Number.parseInt(res.height, 10);
-  const maxX = loadedTiles.reduce((acc, t) => Math.max(acc, t.x ?? 0), 0) + 1;
-  const maxY = loadedTiles.reduce((acc, t) => Math.max(acc, t.y ?? 0), 0) + 1;
+  const maxX = loadedTiles.reduce((acc, t) => Math.max(acc, Number(t?.x) || 0), 0) + 1;
+  const maxY = loadedTiles.reduce((acc, t) => Math.max(acc, Number(t?.y) || 0), 0) + 1;
 
   MAP_WIDTH = Number.isFinite(loadedWidth) && loadedWidth > 0 ? loadedWidth : Math.max(40, maxX);
   MAP_HEIGHT = Number.isFinite(loadedHeight) && loadedHeight > 0 ? loadedHeight : Math.max(25, maxY);
@@ -522,14 +892,18 @@ document.getElementById('loadBtn').addEventListener('click', async () => {
   document.getElementById('gridW').value = MAP_WIDTH;
   document.getElementById('gridH').value = MAP_HEIGHT;
 
-  // ✅ Coerce loaded tiles to include layer (default 0 if missing)
-  placedTiles = loadedTiles.map((t) => ({
-    x: t.x,
-    y: t.y,
-    tileX: t.tileX,
-    tileY: t.tileY,
-    layer: Number.isFinite(t.layer) ? t.layer : 0,
-  }));
+  await hydrateCustomSprites(res.customSprites);
+
+  placedTiles = loadedTiles
+    .filter((t) => Number.isFinite(t?.x) && Number.isFinite(t?.y))
+    .map((t) => ({
+      x: t.x,
+      y: t.y,
+      tileX: Number.isFinite(t.tileX) ? t.tileX : undefined,
+      tileY: Number.isFinite(t.tileY) ? t.tileY : undefined,
+      customSpriteId: typeof t.customSpriteId === 'string' ? t.customSpriteId : undefined,
+      layer: Number.isFinite(t.layer) ? t.layer : 0,
+    }));
 
   updateDimensions();
   alert(`Loaded "${name}"`);

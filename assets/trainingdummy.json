@@ -1,0 +1,11 @@
+﻿{
+  "spriteSheet": "trainingdummy.png",
+  "indexBase": 0,
+  "sheetSize": { "width": 512, "height": 32 },
+  "frameSize": { "width": 32, "height": 32 },
+  "layout": { "columns": 16, "rows": 1 },
+  "totalFrames": 16,
+  "namedFrames": {
+    "0": "trainingdummy"
+  }
+}

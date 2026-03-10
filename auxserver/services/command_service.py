@@ -8,10 +8,6 @@ from services.prompt_loader import load_prompt
 
 VALID_CATEGORIES = {
     "gather",
-    "store",
-    "smelt",
-    "craft",
-    "crank",
     "combat",
     "follow",
     "idle",
@@ -19,32 +15,17 @@ VALID_CATEGORIES = {
 
 VALID_TASKS = {
     "gather",
-    "deposit",
-    "fill",
-    "smelt",
-    "loop",
     "follow",
     "idle",
     "attack_nearest_enemy",
-    "deposit_to_crate",
+    "defend_player",
+    "train",
 }
 VALID_GOALS = {
     "gather",
-    "gather_from_rocks",
-    "deposit_extra",
-    "deposit_ore",
-    "fill_furnace_wood",
-    "crank_flywheel",
-    "hunt_for_feathers",
-    "gather_wood_for_arrows",
-    "smith_arrowheads",
-    "fetch_arrowheads",
-    "craft_arrows",
-    "deposit_arrows",
     "attack_nearest_enemy",
     "defend_player",
-    "defend_location",
-    "patrol_area",
+    "train",
 }
 
 

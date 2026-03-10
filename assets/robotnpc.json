@@ -1,0 +1,30 @@
+{
+  "spriteSheet": "robotnpc.png",
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 3840,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 120,
+    "rows": 1
+  },
+  "totalFrames": 120,
+  "namedFrames": {
+    "0": "face_down",
+    "1": "face_up",
+    "2": "face_right",
+    "3": "face_left",
+    "36": "walk_1_down",
+    "37": "walk_1_up",
+    "38": "walk_1_right",
+    "39": "walk_1_left",
+    "54": "punch_sequence_1_right",
+    "55": "punch_sequence_1_left",
+    "64": "punch_sequence_1_right"
+  }
+}

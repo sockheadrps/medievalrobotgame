@@ -1,0 +1,10 @@
+node_modules
+dist
+auxserver/.venv
+auxserver/data
+__pycache__
+*.pyc
+.env
+.git
+.claude
+*.md

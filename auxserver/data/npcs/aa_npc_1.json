@@ -1,0 +1,56 @@
+{
+  "id": "aa_npc_1",
+  "name": "a1",
+  "x": 709.1555542410831,
+  "y": 678.6823514250096,
+  "stats": {
+    "maxHp": 15,
+    "hp": 15,
+    "str": 1,
+    "def": 1,
+    "level": 1,
+    "xp": 0,
+    "logs": 8
+  },
+  "soul": {
+    "personality": {
+      "cooperation": 0.64,
+      "aggression": 0.2,
+      "neuroticism": 0.18
+    },
+    "relationships": {
+      "default": {
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0,
+        "cooperation_mod": 0,
+        "aggression_mod": 0,
+        "label": "allied",
+        "trust_baseline": 0.5,
+        "fear_baseline": 0,
+        "anger_baseline": 0,
+        "_trust_accum": 0,
+        "_fear_accum": 0,
+        "_anger_accum": 0
+      },
+      "aa": {
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0,
+        "cooperation_mod": 0,
+        "aggression_mod": 0,
+        "label": "allied",
+        "trust_baseline": 0.5,
+        "fear_baseline": 0,
+        "anger_baseline": 0,
+        "_trust_accum": 0,
+        "_fear_accum": 0,
+        "_anger_accum": 0
+      }
+    },
+    "memories": {
+      "global": [],
+      "aa": []
+    }
+  }
+}

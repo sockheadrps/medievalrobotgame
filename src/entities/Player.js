@@ -1,33 +1,30 @@
 import Phaser from 'phaser';
 import {
   PLAYER_KEY, PLAYER_SPEED, PLAYER_RUN_SPEED,
-  PANIM_WALK_DOWN, PANIM_WALK_UP, PANIM_WALK_LEFT,
-  PANIM_RUN_DOWN, PANIM_RUN_UP, PANIM_RUN_LEFT,
+  PFRAME_FACE_DOWN, PFRAME_FACE_UP, PFRAME_FACE_RIGHT, PFRAME_FACE_LEFT,
+  PFRAME_WALK1_DOWN, PFRAME_WALK1_UP, PFRAME_WALK1_RIGHT, PFRAME_WALK1_LEFT,
+  PFRAME_WALK2_DOWN, PFRAME_WALK2_UP, PFRAME_WALK2_RIGHT, PFRAME_WALK2_LEFT,
+  PFRAME_STAND_DOWN, PFRAME_STAND_UP, PFRAME_STAND_RIGHT, PFRAME_STAND_LEFT,
+  PFRAME_PUNCH_LEFT, PFRAME_PUNCH_RIGHT,
   INTERACT_KEY, TILE_SIZE, PLAYER_FRAME_H,
-  ENCUMBRANCE_THRESHOLD, MAX_SPEED_PENALTY, ATHLETICS_XP_INTERVAL_MS,
 } from '../constants.js';
 
-// HP formula: 10 + (constitutionLevel * 5)
-// Regen: 1 HP every 30 000 ms out of combat
 const HP_REGEN_MS = 30000;
-
-// 32px frame height → scale to 48px tile
-const SCALE = TILE_SIZE / PLAYER_FRAME_H; // 1.5
+const SCALE = TILE_SIZE / PLAYER_FRAME_H; // 48/32 = 1.5
 
 export class Player extends Phaser.Physics.Arcade.Sprite {
 
   constructor(scene, x, y) {
-    // Start on idle frame: center frame (col 1) of walk-down row
-    super(scene, x, y, PLAYER_KEY, PANIM_WALK_DOWN * 3 + 1);
+    super(scene, x, y, PLAYER_KEY, PFRAME_FACE_DOWN);
     scene.add.existing(this);
     scene.physics.add.existing(this);
 
     this.setScale(SCALE);
-    this.setOrigin(0.5, 1);          // anchor at feet (bottom-center)
-    this.setSize(10, 12);            // narrow body covering lower half
-    this.setOffset(3, 16);           // start body at y=16 in frame space
-    this.setCollideWorldBounds(true);
+    this.setOrigin(0.5, 1);
     this.setDepth(2);
+
+    // Disable physics body — movement is server-authoritative
+    this.body.enable = false;
 
     this._createAnims(scene);
     this._facing = 'down';
@@ -53,82 +50,81 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     }).setOrigin(0.5, 1).setDepth(10).setVisible(false);
     this._bubbleTimer = null;
 
-    // HP — wired to Constitution skill via setConstitutionLevel()
-    this.maxHp       = 15;   // default: Constitution level 1
-    this.hp          = this.maxHp;
-    this._regenAccum = 0;    // ms accumulated toward next regen tick
+    // Stats
+    this.maxHp = 20;
+    this.hp    = this.maxHp;
+    this.str   = 1;
+    this.def   = 1;
+    this.level = 1;
+    this.xp    = 0;
+    this._regenAccum = 0;
 
-    // Athletics / encumbrance
-    this._athleticsLevel   = 1;
-    this._athleticsXpAccum = 0;  // ms accumulated toward next Athletics XP tick
+    // Simple log counter
+    this.logs = 0;
+    this._punching = false;
   }
 
   _createAnims(scene) {
     const anims = scene.anims;
-    const def = (key, row, fps) => {
+    const def = (key, frames, fps) => {
       if (anims.exists(key)) return;
       anims.create({
         key,
-        frames: anims.generateFrameNumbers(PLAYER_KEY, { start: row * 3, end: row * 3 + 2 }),
+        frames: frames.map(f => ({ key: PLAYER_KEY, frame: f })),
         frameRate: fps,
         repeat: -1,
       });
     };
 
-    def('walk-down', PANIM_WALK_DOWN, 8);
-    def('walk-up',   PANIM_WALK_UP,   8);
-    def('walk-side', PANIM_WALK_LEFT, 8);   // used for both left & right (flip for right)
-    def('run-down',  PANIM_RUN_DOWN,  12);
-    def('run-up',    PANIM_RUN_UP,    12);
-    def('run-side',  PANIM_RUN_LEFT,  12);  // used for both left & right (flip for right)
+    // Walk: face → walk1 → stand → walk2 cycle
+    def('walk-down',  [PFRAME_WALK1_DOWN,  PFRAME_FACE_DOWN,  PFRAME_WALK2_DOWN,  PFRAME_FACE_DOWN],  8);
+    def('walk-up',    [PFRAME_WALK1_UP,    PFRAME_FACE_UP,    PFRAME_WALK2_UP,    PFRAME_FACE_UP],    8);
+    def('walk-left',  [PFRAME_WALK1_LEFT,  PFRAME_FACE_LEFT,  PFRAME_WALK2_LEFT,  PFRAME_FACE_LEFT],  8);
+    def('walk-right', [PFRAME_WALK1_RIGHT, PFRAME_FACE_RIGHT, PFRAME_WALK2_RIGHT, PFRAME_FACE_RIGHT], 8);
+
+    // Run: same frames, faster
+    def('run-down',  [PFRAME_WALK1_DOWN,  PFRAME_FACE_DOWN,  PFRAME_WALK2_DOWN,  PFRAME_FACE_DOWN],  12);
+    def('run-up',    [PFRAME_WALK1_UP,    PFRAME_FACE_UP,    PFRAME_WALK2_UP,    PFRAME_FACE_UP],    12);
+    def('run-left',  [PFRAME_WALK1_LEFT,  PFRAME_FACE_LEFT,  PFRAME_WALK2_LEFT,  PFRAME_FACE_LEFT],  12);
+    def('run-right', [PFRAME_WALK1_RIGHT, PFRAME_FACE_RIGHT, PFRAME_WALK2_RIGHT, PFRAME_FACE_RIGHT], 12);
+
   }
 
   onInteract(callback) {
     this._interactCallback = callback;
   }
 
-  // ── HP API ────────────────────────────────────────────────────────────────
+  getFacing() { return this._facing; }
 
-  /** Call whenever Constitution level changes. Preserves HP% if possible. */
-  setConstitutionLevel(lvl) {
-    const prev = this.maxHp;
-    this.maxHp = 10 + lvl * 5;
-    // Scale current HP proportionally (don't exceed new max)
-    this.hp = Math.min(this.hp + (this.maxHp - prev), this.maxHp);
+  /** Play punch frame toward a target. Uses left/right punch frame without changing facing. */
+  playAttack(targetX) {
+    if (this._punching) return;
+    this._punching = true;
+
+    // Pick punch frame based on target side, but don't change _facing
+    const side = targetX < this.x ? 'left' : 'right';
+    this.setFlipX(false);
+    this.stop();
+    this.setFrame(side === 'left' ? PFRAME_PUNCH_LEFT : PFRAME_PUNCH_RIGHT);
+
+    // Hold the punch frame briefly then return to idle
+    this.scene.time.delayedCall(300, () => {
+      this._punching = false;
+    });
   }
 
-  /** Deal damage to the player. Returns true if player died. */
   takeDamage(amount) {
     this.hp = Math.max(0, this.hp - amount);
-    this._regenAccum = 0;   // reset regen on hit
+    this._regenAccum = 0;
     return this.hp <= 0;
   }
 
-  /** Heal the player up to maxHp. */
   heal(amount) {
     this.hp = Math.min(this.maxHp, this.hp + amount);
   }
 
-  // ── Athletics API ─────────────────────────────────────────────────────────
-
-  setAthleticsLevel(lvl) {
-    this._athleticsLevel = lvl;
-  }
-
-  /** Returns 0-1 encumbrance ratio. 0 = no penalty, 1 = max penalty. */
-  getEncumbrance() {
-    const inv = this.scene?.inventory;
-    if (!inv) return 0;
-    const weight   = inv.getTotalWeight();
-    const capacity = inv.getWeightCapacity();
-    if (capacity <= 0) return 0;
-    const threshold = capacity * ENCUMBRANCE_THRESHOLD;
-    if (weight <= threshold) return 0;
-    return Math.min(1, (weight - threshold) / (capacity - threshold));
-  }
-
   update(delta) {
-    // HP regen — 1 HP every HP_REGEN_MS ms out of combat
+    // HP regen
     if (this.hp < this.maxHp) {
       this._regenAccum += delta;
       if (this._regenAccum >= HP_REGEN_MS) {
@@ -137,6 +133,18 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       }
     } else {
       this._regenAccum = 0;
+    }
+
+    // Freeze animation during attack
+    if (this._punching) {
+      if (this._bubble) this._bubble.setPosition(this.x, this.y - this.displayHeight + 4);
+      return;
+    }
+
+    // Block animation while chat input is open
+    if (this.scene.chatBox?.isOpen()) {
+      if (this._bubble) this._bubble.setPosition(this.x, this.y - this.displayHeight + 4);
+      return;
     }
 
     const keys  = this._keys;
@@ -148,35 +156,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     if (keys.up.isDown)    vy -= 1;
     if (keys.down.isDown)  vy += 1;
 
-    if (vx !== 0 && vy !== 0) { vx /= Math.SQRT2; vy /= Math.SQRT2; }
-
-    // Encumbrance speed modifier
-    const encumbrance = this.getEncumbrance();
-    const speedMult   = 1 - encumbrance * MAX_SPEED_PENALTY;
-    const baseSpeed   = isRun ? PLAYER_RUN_SPEED : PLAYER_SPEED;
-    const speed       = baseSpeed * speedMult;
-
-    this.setVelocity(vx * speed, vy * speed);
-
     const moving = vx !== 0 || vy !== 0;
 
-    // Athletics XP — award while moving with weight
-    if (moving) {
-      const inv = this.scene?.inventory;
-      const weight = inv?.getTotalWeight() ?? 0;
-      if (weight > 0) {
-        this._athleticsXpAccum += delta;
-        if (this._athleticsXpAccum >= ATHLETICS_XP_INTERVAL_MS) {
-          this._athleticsXpAccum -= ATHLETICS_XP_INTERVAL_MS;
-          const xp = Math.max(1, Math.floor(weight / 20));
-          this.scene?.skillSystem?.awardXP('athletics', xp, this.scene);
-        }
-      }
-    } else {
-      this._athleticsXpAccum = 0;
-    }
-
-    // Update facing — horizontal takes priority for side animations
     if (vx < 0)       this._facing = 'left';
     else if (vx > 0)  this._facing = 'right';
     else if (vy < 0)  this._facing = 'up';
@@ -184,28 +165,27 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     if (!moving) {
       this.stop();
-      // Idle = center frame of the appropriate walk row
-      const idleRow = {
-        down:  PANIM_WALK_DOWN,
-        up:    PANIM_WALK_UP,
-        left:  PANIM_WALK_LEFT,
-        right: PANIM_WALK_LEFT,  // same row, flipped
+      const idleFrame = {
+        down:  PFRAME_FACE_DOWN,
+        up:    PFRAME_FACE_UP,
+        left:  PFRAME_FACE_LEFT,
+        right: PFRAME_FACE_RIGHT,
       }[this._facing];
-      this.setFlipX(this._facing === 'right');
-      this.setFrame(idleRow * 3 + 1);
+      this.setFlipX(false);
+      this.setFrame(idleFrame);
       return;
     }
 
-    const isSide = this._facing === 'left' || this._facing === 'right';
-    this.setFlipX(this._facing === 'right');
+    // Each direction has its own animation — no flipX needed
+    this.setFlipX(false);
 
     let animKey;
-    if (isSide)              animKey = isRun ? 'run-side' : 'walk-side';
-    else if (this._facing === 'up')   animKey = isRun ? 'run-up'   : 'walk-up';
-    else                     animKey = isRun ? 'run-down' : 'walk-down';
+    if (this._facing === 'left')       animKey = isRun ? 'run-left'  : 'walk-left';
+    else if (this._facing === 'right') animKey = isRun ? 'run-right' : 'walk-right';
+    else if (this._facing === 'up')    animKey = isRun ? 'run-up'    : 'walk-up';
+    else                               animKey = isRun ? 'run-down'  : 'walk-down';
 
     if (this.anims.currentAnim?.key !== animKey) this.play(animKey);
-    // Keep speech bubble above head
     if (this._bubble) this._bubble.setPosition(this.x, this.y - this.displayHeight + 4);
   }
 

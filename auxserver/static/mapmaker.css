@@ -70,6 +70,12 @@ body {
   color: #0f0;
 }
 
+.mode-btn.active {
+  border-color: #00b7ff;
+  background: #1b2c33;
+  color: #8de6ff;
+}
+
 #selection-display {
   margin-left: auto;
   color: #0f0;
@@ -181,4 +187,67 @@ body {
   color: #aaa;
   font-size: 11px;
   line-height: 1.5;
+}
+
+.hidden {
+  display: none;
+}
+
+#spriteEditorPanel {
+  margin: 14px 0 6px;
+  padding: 10px;
+  border: 1px solid #3b3b3b;
+  background: #161616;
+}
+
+.sprite-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.sprite-controls select {
+  flex: 1;
+  min-width: 140px;
+  background: #222;
+  color: #fff;
+  border: 1px solid #444;
+}
+
+#spriteEditorCanvas {
+  display: block;
+  width: 256px;
+  height: 256px;
+  max-width: 100%;
+  margin: 8px auto;
+  border: 2px solid #8de6ff;
+  background: #111;
+  image-rendering: pixelated;
+  cursor: crosshair;
+}
+
+#spritePreviewCanvas {
+  display: block;
+  width: 128px;
+  height: 128px;
+  max-width: 100%;
+  margin: 8px auto;
+  border: 1px solid #666;
+  background: #0a0a0a;
+  image-rendering: pixelated;
+}
+
+#spriteInfo {
+  margin-top: 6px;
+  color: #bdbdbd;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+body.sprite-mode #mapToolsSection,
+body.sprite-mode #gridSection,
+body.sprite-mode #clearBtn {
+  display: none;
 }

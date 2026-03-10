@@ -1,0 +1,56 @@
+{
+  "id": "bb_npc_1",
+  "name": "b1",
+  "x": 901.8058317641937,
+  "y": 713.7700736151506,
+  "stats": {
+    "maxHp": 15,
+    "hp": 9,
+    "str": 1,
+    "def": 1,
+    "level": 1,
+    "xp": 0,
+    "logs": 2
+  },
+  "soul": {
+    "personality": {
+      "cooperation": 0.54,
+      "aggression": 0.12,
+      "neuroticism": 0.27
+    },
+    "relationships": {
+      "default": {
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0,
+        "cooperation_mod": 0,
+        "aggression_mod": 0,
+        "label": "allied",
+        "trust_baseline": 0.5,
+        "fear_baseline": 0,
+        "anger_baseline": 0,
+        "_trust_accum": 0,
+        "_fear_accum": 0,
+        "_anger_accum": 0
+      },
+      "bb": {
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0,
+        "cooperation_mod": 0,
+        "aggression_mod": 0,
+        "label": "allied",
+        "trust_baseline": 0.5,
+        "fear_baseline": 0,
+        "anger_baseline": 0,
+        "_trust_accum": 0,
+        "_fear_accum": 0,
+        "_anger_accum": 0
+      }
+    },
+    "memories": {
+      "global": [],
+      "bb": []
+    }
+  }
+}

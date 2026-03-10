@@ -1,0 +1,4 @@
+logs col=53 row=22 frame=1285 (px 901, 374) COLS=56
+1 - col=37 row=8 frame=485 (px 629, 136) COLS=56
+2 - col=38 row=8 frame=486 (px 646, 136) COLS=56
+3 - col=39 row=8 frame=487 (px 663, 136) COLS=56
