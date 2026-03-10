@@ -14,10 +14,19 @@
         <select id="modelSelect"><option>loading...</option></select>
       </section>
       <section>
+        <label>Temp</label>
+        <input type="number" id="llmTemp" value="0.7" min="0" max="2" step="0.1" title="Temperature (dialogue)" />
+        <label>Tokens</label>
+        <input type="number" id="llmMaxTok" value="300" min="10" max="2000" step="10" title="Max tokens" />
+        <label>Ctx</label>
+        <input type="number" id="llmCtx" value="4096" min="256" max="32768" step="256" title="Context window" />
+      </section>
+      <section>
         <label>Load NPC</label>
         <select id="npcSelect"><option value="">— fresh —</option></select>
         <button id="loadNpcBtn">Load</button>
         <button id="resetBtn">Reset</button>
+        <button id="resetAllBtn" title="Reset everything: state, logs, prompts">Reset All</button>
       </section>
       <section>
         <label>Decay</label>
@@ -72,6 +81,23 @@
         <div class="escalation-label">Escalation: <strong id="escLabel">1×</strong></div>
 
         <h3>Memories <button id="addMemBtn" class="small-btn">+ Add</button></h3>
+        <div id="memAddForm" class="mem-add-form hidden">
+          <input type="text" id="memText" placeholder="Memory text..." />
+          <div class="field-row compact">
+            <label>Type</label>
+            <select id="memType">
+              <option>event</option><option>command</option><option>observation</option>
+              <option>dialogue</option><option>relationship</option><option>goal</option>
+            </select>
+            <label>Imp</label>
+            <input type="number" id="memImp" value="1.0" min="0" max="1" step="0.05" />
+            <label>Bucket</label>
+            <select id="memBucket">
+              <option value="player">Player</option><option value="global">Global</option>
+            </select>
+            <button id="memSubmitBtn" class="small-btn">Add</button>
+          </div>
+        </div>
         <div id="memoryList" class="memory-list"></div>
 
         <h3>NPC Identity</h3>
@@ -248,6 +274,29 @@
 
         <h3>Last Deltas</h3>
         <div id="deltaDisplay" class="delta-display">—</div>
+
+        <h3>Validation</h3>
+        <div id="validationPane" class="validation-pane">—</div>
+
+        <h3>Baseline Drift</h3>
+        <div class="drift-telemetry">
+          <div class="drift-row">
+            <label>Trust</label>
+            <span>baseline: <strong id="driftTrustBl">0.50</strong></span>
+            <span>time &gt;0.90: <strong id="driftTrustTime">0s</strong></span>
+          </div>
+          <div class="drift-row">
+            <label>Fear</label>
+            <span>baseline: <strong id="driftFearBl">0.00</strong></span>
+            <span>time &gt;0.90: <strong id="driftFearTime">0s</strong></span>
+          </div>
+          <div class="drift-row">
+            <label>Anger</label>
+            <span>baseline: <strong id="driftAngerBl">0.00</strong></span>
+            <span>time &gt;0.90: <strong id="driftAngerTime">0s</strong></span>
+          </div>
+          <div id="driftLog" class="drift-log"></div>
+        </div>
 
         <h3>Pipeline Trace</h3>
         <div id="traceLog" class="trace-log"></div>

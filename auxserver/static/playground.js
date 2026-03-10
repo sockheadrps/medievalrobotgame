@@ -13,7 +13,6 @@ const OLLAMA_CHAT = `${OLLAMA_BASE}/api/chat`;
 const OLLAMA_TAGS = `${OLLAMA_BASE}/api/tags`;
 
 let currentModel = 'llama3.2:latest';
-let numCtx = 4096;
 
 // ── Default Prompts (copied from game) ────────────────────────────────────────
 const DEFAULT_PROMPTS = {
@@ -263,6 +262,17 @@ const ESCALATION_MAX = 16;
 const ESCALATION_COOLDOWN = 30000;
 const DECAY_RATE = 0.02;
 const OWNER_DECAY_MULT = 0.2;
+const BASELINE_THRESHOLD = 0.9;
+const BASELINE_SHIFT = 0.01;
+const BASELINE_CAP = 0.85;
+
+// Drift tracking: time (in seconds) each emotion has been above 0.90
+const drift = { trust_time: 0, fear_time: 0, anger_time: 0 };
+
+// LLM overrides (read from topbar inputs)
+function getLLMTemp() { return parseFloat($('llmTemp')?.value) || 0.7; }
+function getLLMMaxTok() { return parseInt($('llmMaxTok')?.value) || 300; }
+function getLLMCtx() { return parseInt($('llmCtx')?.value) || 4096; }
 
 let activeTab = 'dialogue';
 let decayRunning = false;
@@ -347,7 +357,8 @@ async function loadNpcList() {
 
 // ── Core LLM call with metrics ────────────────────────────────────────────────
 async function callLLM(systemPrompt, userMessage, opts = {}) {
-  const { temperature = 0.7, maxTokens = 300 } = opts;
+  const { temperature = getLLMTemp(), maxTokens = getLLMMaxTok() } = opts;
+  const ctx = getLLMCtx();
   const t0 = performance.now();
 
   const body = {
@@ -357,7 +368,7 @@ async function callLLM(systemPrompt, userMessage, opts = {}) {
       { role: 'user', content: userMessage },
     ],
     stream: false,
-    options: { temperature, num_predict: maxTokens, num_ctx: numCtx },
+    options: { temperature, num_predict: maxTokens, num_ctx: ctx },
   };
 
   const res = await fetch(OLLAMA_CHAT, {
@@ -385,7 +396,7 @@ async function callLLM(systemPrompt, userMessage, opts = {}) {
     system_prompt_len: systemPrompt.length,
     user_msg_len: userMessage.length,
     temperature,
-    num_ctx: numCtx,
+    num_ctx: ctx,
   };
 
   return { content, metrics };
@@ -449,6 +460,7 @@ function applyDeltas(deltas, clampRange = 0.4) {
   updateGauges();
   updateRelLabel();
   showDeltas(actual);
+  showValidation(deltas, clampRange, state.escalation / 2, actual);
   return actual;
 }
 
@@ -457,9 +469,29 @@ function decayTick() {
   state.trust = decayToward(state.trust, state.trust_baseline, rate);
   state.fear = decayToward(state.fear, state.fear_baseline, rate);
   state.anger = decayToward(state.anger, state.anger_baseline, rate);
+
+  // Track time above threshold for baseline drift
+  const tickSec = 2;
+  for (const [key, blKey, driftKey] of [['trust','trust_baseline','trust_time'],['fear','fear_baseline','fear_time'],['anger','anger_baseline','anger_time']]) {
+    if (state[key] >= BASELINE_THRESHOLD) {
+      drift[driftKey] += tickSec;
+      // Every 5 seconds above threshold → baseline shifts
+      if (drift[driftKey] % 5 < tickSec && drift[driftKey] >= 5) {
+        const oldBl = state[blKey];
+        state[blKey] = Math.min(BASELINE_CAP, state[blKey] + BASELINE_SHIFT);
+        if (state[blKey] !== oldBl) {
+          addDriftLog(`${key} baseline shifted: ${oldBl.toFixed(3)} → ${state[blKey].toFixed(3)} (${drift[driftKey]}s above 0.90)`);
+        }
+      }
+    } else {
+      drift[driftKey] = 0;
+    }
+  }
+
   syncSlidersFromState();
   updateGauges();
   updateRelLabel();
+  updateDriftTelemetry();
 }
 
 function decayToward(value, baseline, rate) {
@@ -845,6 +877,57 @@ function showDeltas(actual) {
   dd.innerHTML = html;
 }
 
+// ── UI: Validation Pane ───────────────────────────────────────────────────────
+function showValidation(rawDeltas, clampRange, escalation, actual) {
+  const pane = $('validationPane');
+  let html = '<table class="val-table">';
+  html += '<tr><th></th><th>Raw</th><th>Clamped</th><th>Scaled</th><th>Before</th><th>After</th><th>Status</th></tr>';
+  for (const key of ['trust', 'fear', 'anger']) {
+    const d = actual[key];
+    const warnings = [];
+    if (Math.abs(d.raw) > clampRange) warnings.push(`clamped from ${d.raw.toFixed(3)}`);
+    if (d.after <= 0 || d.after >= 1) warnings.push('hit boundary');
+    if (escalation > 2) warnings.push(`esc ${escalation}×`);
+    const cls = warnings.length ? 'val-warn' : 'val-ok';
+    html += `<tr class="${cls}"><td><strong>${key}</strong></td>`;
+    html += `<td>${d.raw.toFixed(3)}</td><td>${d.clamped.toFixed(3)}</td>`;
+    html += `<td>${d.scaled >= 0 ? '+' : ''}${d.scaled.toFixed(3)}</td>`;
+    html += `<td>${d.before.toFixed(2)}</td><td>${d.after.toFixed(2)}</td>`;
+    html += `<td>${warnings.length ? warnings.join(', ') : 'ok'}</td></tr>`;
+  }
+  html += '</table>';
+
+  // Check for missing keys
+  const missing = ['trust', 'fear', 'anger'].filter(k => !(k in rawDeltas));
+  if (missing.length) html += `<div class="val-note">Missing keys: ${missing.join(', ')} (treated as 0)</div>`;
+
+  // Check for unexpected keys
+  const unexpected = Object.keys(rawDeltas).filter(k => !['trust', 'fear', 'anger'].includes(k));
+  if (unexpected.length) html += `<div class="val-note">Unexpected keys ignored: ${unexpected.join(', ')}</div>`;
+
+  pane.innerHTML = html;
+}
+
+// ── UI: Drift Telemetry ──────────────────────────────────────────────────────
+function updateDriftTelemetry() {
+  $('driftTrustBl').textContent = state.trust_baseline.toFixed(2);
+  $('driftFearBl').textContent = state.fear_baseline.toFixed(2);
+  $('driftAngerBl').textContent = state.anger_baseline.toFixed(2);
+  $('driftTrustTime').textContent = drift.trust_time + 's';
+  $('driftFearTime').textContent = drift.fear_time + 's';
+  $('driftAngerTime').textContent = drift.anger_time + 's';
+}
+
+function addDriftLog(text) {
+  const log = $('driftLog');
+  const div = document.createElement('div');
+  div.className = 'drift-entry';
+  const ts = new Date().toLocaleTimeString();
+  div.innerHTML = `<span class="ts">${ts}</span> ${esc(text)}`;
+  log.insertBefore(div, log.firstChild);
+  while (log.children.length > 20) log.removeChild(log.lastChild);
+}
+
 // ── UI: History ───────────────────────────────────────────────────────────────
 function addHistory(text) {
   const log = $('historyLog');
@@ -987,15 +1070,27 @@ function bindButtons() {
   $('ffwd60').onclick = () => fastForward(60);
   $('ffwd300').onclick = () => fastForward(300);
 
-  // Add memory
+  // Add memory (toggle form)
   $('addMemBtn').onclick = () => {
-    const text = prompt('Memory text:');
-    if (!text) return;
-    state.memories.push({ text, type: 'event', ts: Date.now(), importance: 1.0 });
-    renderMemories();
+    $('memAddForm').classList.toggle('hidden');
+    if (!$('memAddForm').classList.contains('hidden')) $('memText').focus();
   };
 
-  // Reset
+  $('memSubmitBtn').onclick = () => {
+    const text = $('memText').value.trim();
+    if (!text) return;
+    const type = $('memType').value;
+    const importance = parseFloat($('memImp').value) || 1.0;
+    const bucket = $('memBucket').value;
+    state.memories.push({ text, type, ts: Date.now(), importance, bucket });
+    renderMemories();
+    $('memText').value = '';
+    addChat('system', `Added ${type} memory (imp=${importance.toFixed(2)}, ${bucket}): "${text}"`);
+  };
+
+  $('memText').onkeydown = (e) => { if (e.key === 'Enter') $('memSubmitBtn').click(); };
+
+  // Reset (state only)
   $('resetBtn').onclick = () => {
     state.personality = { cooperation: 0.70, aggression: 0.15, neuroticism: 0.35 };
     state.trust = 0.70; state.fear = 0.05; state.anger = 0.02;
@@ -1060,6 +1155,27 @@ function bindButtons() {
     } catch (e) {
       addChat('error', `Failed to load NPC: ${e.message}`);
     }
+  };
+
+  // Reset All: state + logs + prompts + drift
+  $('resetAllBtn').onclick = () => {
+    $('resetBtn').click();
+    // Also reset prompts to defaults
+    for (const key of Object.keys(DEFAULT_PROMPTS)) {
+      prompts[key] = DEFAULT_PROMPTS[key];
+    }
+    if ($('promptEditor')) $('promptEditor').value = prompts[activePrompt];
+    // Reset drift tracking
+    drift.trust_time = 0; drift.fear_time = 0; drift.anger_time = 0;
+    updateDriftTelemetry();
+    $('driftLog').innerHTML = '';
+    // Reset validation pane
+    $('validationPane').innerHTML = '—';
+    // Reset LLM settings to defaults
+    $('llmTemp').value = '0.7';
+    $('llmMaxTok').value = '300';
+    $('llmCtx').value = '4096';
+    addChat('system', 'Full reset: state, logs, prompts, drift, and LLM settings restored to defaults');
   };
 }
 
