@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>NPC Soul Playground</title>
+    <link rel="stylesheet" href="/static/playground.css" />
+  </head>
+  <body>
+    <!-- ── Top Bar ────────────────────────────────────────────────── -->
+    <div class="topbar">
+      <strong>NPC SOUL PLAYGROUND</strong>
+      <section>
+        <label>Model</label>
+        <select id="modelSelect"><option>loading...</option></select>
+      </section>
+      <section>
+        <label>Load NPC</label>
+        <select id="npcSelect"><option value="">— fresh —</option></select>
+        <button id="loadNpcBtn">Load</button>
+        <button id="resetBtn">Reset</button>
+      </section>
+      <section>
+        <label>Decay</label>
+        <button id="decayToggle" class="toggle-btn">OFF</button>
+        <button id="ffwd30">+30s</button>
+        <button id="ffwd60">+1m</button>
+        <button id="ffwd300">+5m</button>
+      </section>
+      <section id="statusSection">
+        <span id="ollamaStatus" class="status-dot red"></span>
+        <span id="statusText">Ollama: checking...</span>
+      </section>
+    </div>
+
+    <!-- ── Main Layout ────────────────────────────────────────────── -->
+    <div class="workspace">
+
+      <!-- LEFT: NPC State -->
+      <div class="panel left-panel">
+        <h3>Personality <span class="hint">(immutable)</span></h3>
+        <div class="slider-group">
+          <label>Cooperation <span id="valCoop">0.70</span></label>
+          <input type="range" id="slCoop" min="0" max="1" step="0.01" value="0.70" />
+        </div>
+        <div class="slider-group">
+          <label>Aggression <span id="valAggr">0.15</span></label>
+          <input type="range" id="slAggr" min="0" max="1" step="0.01" value="0.15" />
+        </div>
+        <div class="slider-group">
+          <label>Neuroticism <span id="valNeur">0.35</span></label>
+          <input type="range" id="slNeur" min="0" max="1" step="0.01" value="0.35" />
+        </div>
+
+        <h3>Emotions <span class="hint">(toward current player)</span></h3>
+        <div class="slider-group trust">
+          <label>Trust <span id="valTrust">0.70</span></label>
+          <input type="range" id="slTrust" min="0" max="1" step="0.01" value="0.70" />
+          <div class="baseline-row">baseline: <input type="number" id="blTrust" min="0" max="0.85" step="0.01" value="0.50" /></div>
+        </div>
+        <div class="slider-group fear">
+          <label>Fear <span id="valFear">0.05</span></label>
+          <input type="range" id="slFear" min="0" max="1" step="0.01" value="0.05" />
+          <div class="baseline-row">baseline: <input type="number" id="blFear" min="0" max="0.85" step="0.01" value="0.00" /></div>
+        </div>
+        <div class="slider-group anger">
+          <label>Anger <span id="valAnger">0.02</span></label>
+          <input type="range" id="slAnger" min="0" max="1" step="0.01" value="0.02" />
+          <div class="baseline-row">baseline: <input type="number" id="blAnger" min="0" max="0.85" step="0.01" value="0.00" /></div>
+        </div>
+
+        <div class="rel-label">Relationship: <strong id="relLabel">allied</strong></div>
+        <div class="escalation-label">Escalation: <strong id="escLabel">1×</strong></div>
+
+        <h3>Memories <button id="addMemBtn" class="small-btn">+ Add</button></h3>
+        <div id="memoryList" class="memory-list"></div>
+
+        <h3>NPC Identity</h3>
+        <div class="field-row">
+          <label>Name</label>
+          <input type="text" id="npcName" value="Rusty" />
+        </div>
+        <div class="field-row">
+          <label>Player ID</label>
+          <input type="text" id="playerId" value="player_test" />
+        </div>
+      </div>
+
+      <!-- CENTER: Interaction Console -->
+      <div class="panel center-panel">
+        <div class="tabs">
+          <button class="tab active" data-tab="dialogue">Dialogue</button>
+          <button class="tab" data-tab="command">Command</button>
+          <button class="tab" data-tab="decision">Decision</button>
+          <button class="tab" data-tab="npc-chat">NPC Chat</button>
+          <button class="tab" data-tab="prompts">Prompts</button>
+        </div>
+
+        <div id="chatLog" class="chat-log"></div>
+
+        <!-- Dialogue / Command input -->
+        <div id="inputArea" class="input-area">
+          <input type="text" id="msgInput" placeholder="Type a message to the NPC..." />
+          <button id="sendBtn">Send</button>
+        </div>
+
+        <!-- Decision: state packet editor -->
+        <div id="decisionArea" class="input-area hidden">
+          <div class="decision-fields">
+            <div class="field-row compact">
+              <label>HP</label><input type="number" id="dHp" value="12" min="0" />
+              <label>MaxHP</label><input type="number" id="dMaxHp" value="15" min="1" />
+              <label>Logs</label><input type="number" id="dLogs" value="3" min="0" />
+              <label>MaxLogs</label><input type="number" id="dMaxLogs" value="10" min="1" />
+            </div>
+            <div class="field-row compact">
+              <label>Status</label>
+              <select id="dStatus">
+                <option>idle</option><option>gathering</option><option>following</option>
+                <option>attacking</option><option>defending</option>
+              </select>
+              <label>Command</label>
+              <select id="dCommand">
+                <option>idle</option><option>gather</option><option>follow</option>
+                <option>defend_player</option><option>attack_nearest_enemy</option><option>train</option>
+              </select>
+              <label>Age(ms)</label><input type="number" id="dCmdAge" value="5000" min="0" />
+            </div>
+            <div class="field-row compact">
+              <label>Player dist</label><input type="number" id="dPlayerDist" value="3.0" step="0.1" />
+              <label>Player HP</label><input type="number" id="dPlayerHp" value="25" />
+              <label>Trees</label><input type="number" id="dTrees" value="8" min="0" />
+            </div>
+            <div class="field-row compact">
+              <label>Nearby entities (JSON array)</label>
+            </div>
+            <textarea id="dEntities" rows="3" spellcheck="false">[{"id":"dummy_1","type":"training_dummy","distance":5.1,"hp":40,"maxHp":40}]</textarea>
+            <div class="field-row compact">
+              <label>Recent events (JSON array)</label>
+            </div>
+            <textarea id="dEvents" rows="2" spellcheck="false">[{"type":"command","text":"Player commanded: gather","age_ms":5000,"importance":0.9}]</textarea>
+          </div>
+          <button id="decideBtn">Run Decision</button>
+        </div>
+
+        <!-- Prompts editor -->
+        <div id="promptsArea" class="prompts-area hidden">
+          <div class="prompt-tabs">
+            <button class="prompt-tab active" data-prompt="router">Router</button>
+            <button class="prompt-tab" data-prompt="dialogue">Dialogue</button>
+            <button class="prompt-tab" data-prompt="decision">Decision</button>
+            <button class="prompt-tab" data-prompt="gather">Gather</button>
+            <button class="prompt-tab" data-prompt="combat">Combat</button>
+            <button class="prompt-tab" data-prompt="follow">Follow</button>
+            <button class="prompt-tab" data-prompt="idle">Idle</button>
+            <button class="prompt-tab" data-prompt="build">Build</button>
+            <button class="prompt-tab" data-prompt="fallback">Fallback</button>
+            <button class="prompt-tab" data-prompt="npc_chat">NPC Chat</button>
+            <button class="prompt-tab" data-prompt="chat_impact">Chat Impact</button>
+          </div>
+          <textarea id="promptEditor" rows="20" spellcheck="false"></textarea>
+          <div class="prompt-actions">
+            <button id="promptResetBtn" class="small-btn">Reset to Default</button>
+            <span id="promptStatus" class="prompt-status"></span>
+          </div>
+        </div>
+
+        <!-- NPC Chat: pick second NPC -->
+        <div id="npcChatArea" class="input-area hidden">
+          <h4>NPC B (other NPC)</h4>
+          <div class="field-row compact">
+            <label>Name</label><input type="text" id="npcBName" value="Clanker" />
+            <label>Coop</label><input type="number" id="npcBCoop" value="0.40" step="0.01" min="0" max="1" />
+            <label>Aggr</label><input type="number" id="npcBAggr" value="0.60" step="0.01" min="0" max="1" />
+          </div>
+          <div class="field-row compact">
+            <label>Trust→A</label><input type="number" id="npcBTrust" value="0.30" step="0.01" min="0" max="1" />
+            <label>Anger→A</label><input type="number" id="npcBAnger" value="0.40" step="0.01" min="0" max="1" />
+            <label>Logs</label><input type="number" id="npcBLogs" value="5" min="0" />
+          </div>
+          <button id="npcChatBtn">Run NPC Chat</button>
+        </div>
+      </div>
+
+      <!-- RIGHT: Metrics -->
+      <div class="panel right-panel">
+        <h3>Emotion Gauges</h3>
+        <div class="gauge-group">
+          <div class="gauge">
+            <label>Trust</label>
+            <div class="gauge-bar"><div id="gaugeTrust" class="gauge-fill trust" style="width:70%"></div></div>
+            <span id="gaugeValTrust">0.70</span>
+          </div>
+          <div class="gauge">
+            <label>Fear</label>
+            <div class="gauge-bar"><div id="gaugeFear" class="gauge-fill fear" style="width:5%"></div></div>
+            <span id="gaugeValFear">0.05</span>
+          </div>
+          <div class="gauge">
+            <label>Anger</label>
+            <div class="gauge-bar"><div id="gaugeAnger" class="gauge-fill anger" style="width:2%"></div></div>
+            <span id="gaugeValAnger">0.02</span>
+          </div>
+        </div>
+
+        <h3>Last Deltas</h3>
+        <div id="deltaDisplay" class="delta-display">—</div>
+
+        <h3>Pipeline Trace</h3>
+        <div id="traceLog" class="trace-log"></div>
+
+        <h3>Interaction Log</h3>
+        <div id="historyLog" class="history-log"></div>
+      </div>
+    </div>
+
+    <script src="/static/playground.js"></script>
+  </body>
+</html>

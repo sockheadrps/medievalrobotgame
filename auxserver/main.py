@@ -5,7 +5,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 # Ensure local package-style imports (api/, core/, services/) resolve
@@ -18,7 +18,7 @@ from api.maps import router as maps_router
 from api.soul import router as soul_router
 from api.ws import router as ws_router
 from api.accounts import router as accounts_router
-from core.config import STATIC_DIR, TEMPLATES_DIR, DEV_MODE
+from core.config import STATIC_DIR, TEMPLATES_DIR, DEV_MODE, templates
 from services.database import init_db, migrate_json_files, ensure_dev_accounts
 from services.game_state import game
 
@@ -56,6 +56,11 @@ app.include_router(accounts_router)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/playground", response_class=HTMLResponse)
+async def playground(request: Request):
+    return templates.TemplateResponse("playground.html", {"request": request})
 
 
 # ── Ollama proxy (production: clients hit /ollama/* which we forward to Ollama) ──
