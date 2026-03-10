@@ -93,6 +93,7 @@
           <button class="tab" data-tab="decision">Decision</button>
           <button class="tab" data-tab="npc-chat">NPC Chat</button>
           <button class="tab" data-tab="prompts">Prompts</button>
+          <button class="tab" data-tab="scenarios">Scenarios</button>
         </div>
 
         <div id="chatLog" class="chat-log"></div>
@@ -161,6 +162,49 @@
           <div class="prompt-actions">
             <button id="promptResetBtn" class="small-btn">Reset to Default</button>
             <span id="promptStatus" class="prompt-status"></span>
+          </div>
+        </div>
+
+        <!-- Scenarios -->
+        <div id="scenariosArea" class="scenarios-area hidden">
+          <div class="scenarios-header">
+            <h4>Preset Scenarios</h4>
+            <span class="hint">One-click to load state + run interaction</span>
+          </div>
+          <div id="presetList" class="preset-list"></div>
+
+          <div class="scenarios-header" style="margin-top:12px">
+            <h4>Batch Sequence</h4>
+            <span class="hint">Run multiple messages in order, watch cumulative drift</span>
+          </div>
+          <div class="batch-controls">
+            <div class="field-row compact">
+              <label>Mode</label>
+              <select id="batchMode">
+                <option value="dialogue">Dialogue</option>
+                <option value="command">Command</option>
+              </select>
+              <label>Delay(ms)</label>
+              <input type="number" id="batchDelay" value="500" min="0" step="100" />
+            </div>
+            <textarea id="batchInput" rows="8" spellcheck="false" placeholder="One message per line. Lines starting with # are comments.&#10;&#10;# Example: escalation test&#10;Hey there buddy&#10;I said do it now&#10;Don't make me angry&#10;I'll scrap you for parts&#10;You're dead metal"></textarea>
+            <div class="batch-actions">
+              <button id="batchRunBtn">Run Batch</button>
+              <button id="batchStopBtn" class="small-btn" disabled>Stop</button>
+              <span id="batchStatus"></span>
+            </div>
+          </div>
+
+          <div class="scenarios-header" style="margin-top:12px">
+            <h4>Custom Scenarios</h4>
+            <span class="hint">Save/load your own test configs</span>
+          </div>
+          <div class="custom-scenario-controls">
+            <div class="field-row compact">
+              <input type="text" id="scenarioName" placeholder="Scenario name..." />
+              <button id="scenarioSaveBtn" class="small-btn">Save Current</button>
+            </div>
+            <div id="customScenarioList" class="custom-scenario-list"></div>
           </div>
         </div>
 

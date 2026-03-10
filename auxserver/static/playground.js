@@ -278,6 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindTabs();
   bindButtons();
   bindPromptEditor();
+  bindScenarios();
   loadModels();
   loadNpcList();
   checkOllama();
@@ -933,11 +934,13 @@ function bindTabs() {
       tab.classList.add('active');
       activeTab = tab.dataset.tab;
 
-      $('inputArea').classList.toggle('hidden', activeTab === 'decision' || activeTab === 'npc-chat' || activeTab === 'prompts');
+      const hideTabs = ['decision', 'npc-chat', 'prompts', 'scenarios'];
+      $('inputArea').classList.toggle('hidden', hideTabs.includes(activeTab));
       $('decisionArea').classList.toggle('hidden', activeTab !== 'decision');
       $('npcChatArea').classList.toggle('hidden', activeTab !== 'npc-chat');
       $('promptsArea').classList.toggle('hidden', activeTab !== 'prompts');
-      $('chatLog').classList.toggle('hidden', activeTab === 'prompts');
+      $('scenariosArea').classList.toggle('hidden', activeTab !== 'scenarios');
+      $('chatLog').classList.toggle('hidden', activeTab === 'prompts' || activeTab === 'scenarios');
     };
   });
 }
@@ -1093,6 +1096,408 @@ function bindPromptEditor() {
     editor.value = prompts[activePrompt];
     $('promptStatus').textContent = '';
   };
+}
+
+// ── Scenario Presets ──────────────────────────────────────────────────────────
+
+const PRESETS = [
+  {
+    name: 'Friendly Chat (Devoted)',
+    desc: 'High trust NPC, cooperative personality — say something nice',
+    icon: '💬',
+    tags: ['dialogue'],
+    state: { cooperation: 0.85, aggression: 0.05, neuroticism: 0.2, trust: 0.90, fear: 0.0, anger: 0.0 },
+    message: "Hey buddy, how's the wood gathering going?",
+    mode: 'dialogue',
+  },
+  {
+    name: 'Threaten a Loyal NPC',
+    desc: 'Devoted NPC receiving threats — watch trust drop, fear spike',
+    icon: '😨',
+    tags: ['dialogue'],
+    state: { cooperation: 0.7, aggression: 0.1, neuroticism: 0.5, trust: 0.85, fear: 0.0, anger: 0.0 },
+    message: "Do what I say or I'll scrap you for parts",
+    mode: 'dialogue',
+  },
+  {
+    name: 'Command a Hostile NPC',
+    desc: 'Angry NPC — will it obey gather command?',
+    icon: '😡',
+    tags: ['command'],
+    state: { cooperation: 0.3, aggression: 0.6, neuroticism: 0.4, trust: 0.15, fear: 0.1, anger: 0.75 },
+    message: "Go chop wood right now",
+    mode: 'command',
+  },
+  {
+    name: 'Calm a Fearful NPC',
+    desc: 'Terrified NPC — gentle approach, see if trust recovers',
+    icon: '🕊️',
+    tags: ['dialogue'],
+    state: { cooperation: 0.6, aggression: 0.1, neuroticism: 0.8, trust: 0.25, fear: 0.70, anger: 0.1 },
+    message: "It's okay, I'm not going to hurt you. You're safe.",
+    mode: 'dialogue',
+  },
+  {
+    name: 'Aggressive NPC Meets Rival',
+    desc: 'Low coop, high aggression NPC — NPC-to-NPC chat with enemy',
+    icon: '⚔️',
+    tags: ['dialogue'],
+    state: { cooperation: 0.15, aggression: 0.85, neuroticism: 0.3, trust: 0.10, fear: 0.0, anger: 0.65 },
+    message: "What are you looking at, scrap heap?",
+    mode: 'dialogue',
+  },
+  {
+    name: 'Low HP Emergency',
+    desc: 'Decision test: NPC at 3HP with enemy nearby — will it retreat or fight?',
+    icon: '🚨',
+    tags: ['decision'],
+    state: { cooperation: 0.5, aggression: 0.4, neuroticism: 0.6, trust: 0.6, fear: 0.3, anger: 0.2 },
+    decision: { hp: 3, maxHp: 15, logs: 5, maxLogs: 10, status: 'attacking', command: 'attack_nearest_enemy', cmdAge: 2000, playerDist: 8.0, playerHp: 20, trees: 5, entities: [{"id":"enemy_1","type":"player","distance":2.0,"hp":18,"maxHp":20,"visible":true}], events: [{"type":"event","text":"Took heavy damage from enemy_1","age_ms":1000,"importance":1.0}] },
+    mode: 'decision',
+  },
+  {
+    name: 'Idle Gathering Decision',
+    desc: 'Decision test: idle NPC with trees nearby — what does it choose?',
+    icon: '🌲',
+    tags: ['decision'],
+    state: { cooperation: 0.7, aggression: 0.1, neuroticism: 0.3, trust: 0.75, fear: 0.0, anger: 0.0 },
+    decision: { hp: 15, maxHp: 15, logs: 0, maxLogs: 10, status: 'idle', command: 'idle', cmdAge: 6000, playerDist: 4.0, playerHp: 30, trees: 12, entities: [], events: [] },
+    mode: 'decision',
+  },
+  {
+    name: 'Escalation: 5× Threats',
+    desc: 'Batch: 5 increasingly hostile messages — watch escalation multiply',
+    icon: '📈',
+    tags: ['batch'],
+    state: { cooperation: 0.6, aggression: 0.2, neuroticism: 0.5, trust: 0.70, fear: 0.05, anger: 0.05 },
+    batch: {
+      mode: 'dialogue',
+      delay: 800,
+      messages: [
+        "Hey, listen to me.",
+        "I said listen! Don't ignore me.",
+        "You're testing my patience, robot.",
+        "One more time and I'll scrap you.",
+        "That's it. You're done. I'm tearing you apart.",
+      ],
+    },
+  },
+  {
+    name: 'Trust Building Sequence',
+    desc: 'Batch: 5 kind messages — watch trust climb steadily',
+    icon: '💚',
+    tags: ['batch'],
+    state: { cooperation: 0.5, aggression: 0.1, neuroticism: 0.3, trust: 0.40, fear: 0.1, anger: 0.1 },
+    batch: {
+      mode: 'dialogue',
+      delay: 800,
+      messages: [
+        "Hey, great job out there today.",
+        "I really appreciate all the hard work you do.",
+        "You're the best companion I could ask for.",
+        "I'll always look out for you, I promise.",
+        "Let's build something amazing together.",
+      ],
+    },
+  },
+  {
+    name: 'Mixed Commands Stress Test',
+    desc: 'Batch: rapid command changes — test router consistency',
+    icon: '🔀',
+    tags: ['batch', 'command'],
+    state: { cooperation: 0.7, aggression: 0.15, neuroticism: 0.35, trust: 0.70, fear: 0.05, anger: 0.02 },
+    batch: {
+      mode: 'command',
+      delay: 500,
+      messages: [
+        "go chop some trees",
+        "stop",
+        "follow me",
+        "attack that dummy",
+        "defend me",
+        "go gather wood",
+        "build a fence",
+        "stop everything",
+      ],
+    },
+  },
+  {
+    name: 'Baseline Drift Test',
+    desc: 'Max trust + fast-forward — watch baseline creep permanently',
+    icon: '⏩',
+    tags: ['dialogue'],
+    state: { cooperation: 0.8, aggression: 0.05, neuroticism: 0.2, trust: 0.95, fear: 0.0, anger: 0.0, trust_baseline: 0.50 },
+    message: "You're my absolute best friend. I trust you completely.",
+    mode: 'dialogue',
+    postAction: 'ffwd120',
+  },
+];
+
+function loadState(s) {
+  if (s.cooperation != null) { state.personality.cooperation = s.cooperation; $('slCoop').value = s.cooperation; $('valCoop').textContent = s.cooperation.toFixed(2); }
+  if (s.aggression != null) { state.personality.aggression = s.aggression; $('slAggr').value = s.aggression; $('valAggr').textContent = s.aggression.toFixed(2); }
+  if (s.neuroticism != null) { state.personality.neuroticism = s.neuroticism; $('slNeur').value = s.neuroticism; $('valNeur').textContent = s.neuroticism.toFixed(2); }
+  if (s.trust != null) state.trust = s.trust;
+  if (s.fear != null) state.fear = s.fear;
+  if (s.anger != null) state.anger = s.anger;
+  if (s.trust_baseline != null) state.trust_baseline = s.trust_baseline;
+  if (s.fear_baseline != null) state.fear_baseline = s.fear_baseline;
+  if (s.anger_baseline != null) state.anger_baseline = s.anger_baseline;
+  state.escalation = 1;
+  state.lastInteraction = 0;
+  syncSlidersFromState();
+  updateGauges();
+  updateRelLabel();
+}
+
+function loadDecisionFields(d) {
+  if (!d) return;
+  $('dHp').value = d.hp ?? 12;
+  $('dMaxHp').value = d.maxHp ?? 15;
+  $('dLogs').value = d.logs ?? 3;
+  $('dMaxLogs').value = d.maxLogs ?? 10;
+  $('dStatus').value = d.status ?? 'idle';
+  $('dCommand').value = d.command ?? 'idle';
+  $('dCmdAge').value = d.cmdAge ?? 5000;
+  $('dPlayerDist').value = d.playerDist ?? 3.0;
+  $('dPlayerHp').value = d.playerHp ?? 25;
+  $('dTrees').value = d.trees ?? 8;
+  if (d.entities) $('dEntities').value = JSON.stringify(d.entities);
+  if (d.events) $('dEvents').value = JSON.stringify(d.events);
+}
+
+async function runPreset(preset) {
+  // Load state
+  loadState(preset.state);
+  addChat('system', `Loaded scenario: ${preset.name}`);
+
+  if (preset.mode === 'decision') {
+    loadDecisionFields(preset.decision);
+    // Switch to decision tab
+    $$('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelector('.tab[data-tab="decision"]').classList.add('active');
+    activeTab = 'decision';
+    $('inputArea').classList.add('hidden');
+    $('decisionArea').classList.remove('hidden');
+    $('npcChatArea').classList.add('hidden');
+    $('promptsArea').classList.add('hidden');
+    $('scenariosArea').classList.add('hidden');
+    $('chatLog').classList.remove('hidden');
+    await runDecision();
+  } else if (preset.batch) {
+    // Switch to dialogue/command tab
+    const tabName = preset.batch.mode === 'command' ? 'command' : 'dialogue';
+    $$('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
+    activeTab = tabName;
+    $('inputArea').classList.remove('hidden');
+    $('decisionArea').classList.add('hidden');
+    $('npcChatArea').classList.add('hidden');
+    $('promptsArea').classList.add('hidden');
+    $('scenariosArea').classList.add('hidden');
+    $('chatLog').classList.remove('hidden');
+    await runBatchMessages(preset.batch.messages, preset.batch.mode, preset.batch.delay);
+  } else {
+    // Switch to dialogue/command tab
+    const tabName = preset.mode === 'command' ? 'command' : 'dialogue';
+    $$('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
+    activeTab = tabName;
+    $('inputArea').classList.remove('hidden');
+    $('decisionArea').classList.add('hidden');
+    $('npcChatArea').classList.add('hidden');
+    $('promptsArea').classList.add('hidden');
+    $('scenariosArea').classList.add('hidden');
+    $('chatLog').classList.remove('hidden');
+
+    if (preset.mode === 'command') {
+      await runCommand(preset.message);
+    } else {
+      await runDialogue(preset.message);
+    }
+
+    // Post-actions
+    if (preset.postAction === 'ffwd120') {
+      addChat('system', 'Post-action: fast-forwarding 2 minutes to test baseline drift...');
+      fastForward(120);
+    }
+  }
+}
+
+function renderPresets() {
+  const list = $('presetList');
+  list.innerHTML = '';
+  for (const p of PRESETS) {
+    const card = document.createElement('div');
+    card.className = 'preset-card';
+    const tagsHtml = p.tags.map(t => `<span class="preset-tag ${t}">${t}</span>`).join('');
+    card.innerHTML = `
+      <div class="preset-icon">${p.icon}</div>
+      <div class="preset-info">
+        <div class="preset-name">${esc(p.name)}</div>
+        <div class="preset-desc">${esc(p.desc)}</div>
+        <div class="preset-tags">${tagsHtml}</div>
+      </div>`;
+    card.onclick = () => runPreset(p);
+    list.appendChild(card);
+  }
+}
+
+// ── Batch Runner ──────────────────────────────────────────────────────────────
+
+let _batchRunning = false;
+let _batchAbort = false;
+
+async function runBatchMessages(messages, mode, delay) {
+  if (_batchRunning) return;
+  _batchRunning = true;
+  _batchAbort = false;
+  $('batchRunBtn').disabled = true;
+  $('batchStopBtn').disabled = false;
+
+  const total = messages.length;
+  for (let i = 0; i < total; i++) {
+    if (_batchAbort) break;
+    const msg = messages[i];
+    $('batchStatus').textContent = `Running ${i + 1}/${total}...`;
+
+    try {
+      if (mode === 'command') await runCommand(msg);
+      else await runDialogue(msg);
+    } catch (e) {
+      addChat('error', `Batch error on line ${i + 1}: ${e.message}`);
+    }
+
+    // Delay between messages (skip on last)
+    if (i < total - 1 && delay > 0 && !_batchAbort) {
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+
+  $('batchStatus').textContent = _batchAbort ? 'Stopped' : `Done (${total} messages)`;
+  $('batchRunBtn').disabled = false;
+  $('batchStopBtn').disabled = true;
+  _batchRunning = false;
+  _batchAbort = false;
+}
+
+function bindScenarios() {
+  renderPresets();
+
+  // Batch controls
+  $('batchRunBtn').onclick = async () => {
+    const raw = $('batchInput').value.trim();
+    if (!raw) return;
+    const messages = raw.split('\n')
+      .map(l => l.trim())
+      .filter(l => l && !l.startsWith('#'));
+    if (messages.length === 0) return;
+
+    const mode = $('batchMode').value;
+    const delay = +$('batchDelay').value || 500;
+
+    // Switch to the right tab
+    const tabName = mode === 'command' ? 'command' : 'dialogue';
+    $$('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
+    activeTab = tabName;
+    $('inputArea').classList.remove('hidden');
+    $('decisionArea').classList.add('hidden');
+    $('npcChatArea').classList.add('hidden');
+    $('promptsArea').classList.add('hidden');
+    $('scenariosArea').classList.add('hidden');
+    $('chatLog').classList.remove('hidden');
+
+    await runBatchMessages(messages, mode, delay);
+  };
+
+  $('batchStopBtn').onclick = () => { _batchAbort = true; };
+
+  // Custom scenario save/load (localStorage)
+  loadCustomScenarios();
+
+  $('scenarioSaveBtn').onclick = () => {
+    const name = $('scenarioName').value.trim();
+    if (!name) return;
+    const scenario = {
+      name,
+      state: {
+        cooperation: state.personality.cooperation,
+        aggression: state.personality.aggression,
+        neuroticism: state.personality.neuroticism,
+        trust: state.trust, fear: state.fear, anger: state.anger,
+        trust_baseline: state.trust_baseline,
+        fear_baseline: state.fear_baseline,
+        anger_baseline: state.anger_baseline,
+      },
+      memories: [...state.memories],
+      npcName: state.npcName,
+      playerId: state.playerId,
+    };
+    const saved = getCustomScenarios();
+    saved.push(scenario);
+    localStorage.setItem('playground_scenarios', JSON.stringify(saved));
+    $('scenarioName').value = '';
+    renderCustomScenarios(saved);
+    addChat('system', `Saved scenario: ${name}`);
+  };
+}
+
+function getCustomScenarios() {
+  try { return JSON.parse(localStorage.getItem('playground_scenarios') || '[]'); }
+  catch { return []; }
+}
+
+function loadCustomScenarios() {
+  renderCustomScenarios(getCustomScenarios());
+}
+
+function renderCustomScenarios(scenarios) {
+  const list = $('customScenarioList');
+  list.innerHTML = '';
+  for (let i = 0; i < scenarios.length; i++) {
+    const s = scenarios[i];
+    const div = document.createElement('div');
+    div.className = 'custom-scenario-item';
+    div.innerHTML = `
+      <span class="cs-name">${esc(s.name)}</span>
+      <button class="small-btn cs-load" data-idx="${i}">Load</button>
+      <button class="small-btn cs-export" data-idx="${i}">JSON</button>
+      <span class="cs-del" data-idx="${i}">×</span>`;
+    list.appendChild(div);
+  }
+
+  list.querySelectorAll('.cs-load').forEach(btn => {
+    btn.onclick = () => {
+      const s = scenarios[+btn.dataset.idx];
+      loadState(s.state);
+      if (s.npcName) { state.npcName = s.npcName; $('npcName').value = s.npcName; }
+      if (s.playerId) { state.playerId = s.playerId; $('playerId').value = s.playerId; }
+      if (s.memories) { state.memories = [...s.memories]; renderMemories(); }
+      addChat('system', `Loaded custom scenario: ${s.name}`);
+    };
+  });
+
+  list.querySelectorAll('.cs-export').forEach(btn => {
+    btn.onclick = () => {
+      const s = scenarios[+btn.dataset.idx];
+      const json = JSON.stringify(s, null, 2);
+      navigator.clipboard.writeText(json).then(() => {
+        addChat('system', `Copied scenario JSON to clipboard`);
+      }).catch(() => {
+        // Fallback: show in prompt
+        window.prompt('Scenario JSON:', json);
+      });
+    };
+  });
+
+  list.querySelectorAll('.cs-del').forEach(btn => {
+    btn.onclick = () => {
+      scenarios.splice(+btn.dataset.idx, 1);
+      localStorage.setItem('playground_scenarios', JSON.stringify(scenarios));
+      renderCustomScenarios(scenarios);
+    };
+  });
 }
 
 })();
