@@ -1,8 +1,11 @@
+import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI
+import httpx
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 # Ensure local package-style imports (api/, core/, services/) resolve
@@ -53,6 +56,27 @@ app.include_router(accounts_router)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ── Ollama proxy (production: clients hit /ollama/* which we forward to Ollama) ──
+OLLAMA_BASE = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+
+@app.api_route("/ollama/{path:path}", methods=["GET", "POST"])
+async def ollama_proxy(path: str, request: Request):
+    url = f"{OLLAMA_BASE}/{path}"
+    body = await request.body()
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.request(
+            method=request.method,
+            url=url,
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+    return StreamingResponse(
+        iter([resp.content]),
+        status_code=resp.status_code,
+        headers={"Content-Type": resp.headers.get("Content-Type", "application/json")},
+    )
 
 
 # Serve built frontend (Docker puts it in /app/static/game)
