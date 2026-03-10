@@ -1096,38 +1096,57 @@ function showDeltas(actual) {
   let html = '';
   for (const [key, d] of Object.entries(actual)) {
     const cls = d.scaled > 0 ? 'delta-pos' : d.scaled < 0 ? 'delta-neg' : 'delta-zero';
-    html += `<div><strong>${key}:</strong> raw=${d.raw.toFixed(3)} → clamped=${d.clamped.toFixed(3)} × ${state.escalation / 2}x = <span class="${cls}">${d.scaled >= 0 ? '+' : ''}${d.scaled.toFixed(3)}</span> (${d.before.toFixed(2)} → ${d.after.toFixed(2)})</div>`;
+    html += `<div><strong>${key}:</strong> <span class="${cls}">${d.scaled >= 0 ? '+' : ''}${d.scaled.toFixed(3)}</span> <span style="color:#666">(${d.before.toFixed(2)} → ${d.after.toFixed(2)})</span></div>`;
   }
   dd.innerHTML = html;
+
+  // Also show delta summary in the chat
+  addDeltaToChat(actual);
+}
+
+function addDeltaToChat(actual) {
+  const log = $('chatLog');
+  const div = document.createElement('div');
+  div.className = 'chat-delta';
+  let html = '';
+  for (const [key, d] of Object.entries(actual)) {
+    if (Math.abs(d.scaled) < 0.001) continue;
+    const cls = d.scaled > 0 ? 'delta-pos' : 'delta-neg';
+    const icon = key === 'trust' ? '🛡' : key === 'fear' ? '😨' : '😡';
+    const sign = d.scaled >= 0 ? '+' : '';
+    html += `<span class="chat-delta-item ${cls}">${icon} ${key} ${sign}${d.scaled.toFixed(3)} <span class="chat-delta-range">${d.before.toFixed(2)} → ${d.after.toFixed(2)}</span></span>`;
+  }
+  if (!html) return; // no changes
+  div.innerHTML = html;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
 }
 
 // ── UI: Validation Pane ───────────────────────────────────────────────────────
 function showValidation(rawDeltas, clampRange, escalation, actual) {
   const pane = $('validationPane');
   let html = '<table class="val-table">';
-  html += '<tr><th></th><th>Raw</th><th>Clamped</th><th>Scaled</th><th>Before</th><th>After</th><th>Status</th></tr>';
+  html += '<tr><th></th><th>Raw</th><th>Clamp</th><th>Effect</th><th>Before</th><th>After</th><th></th></tr>';
   for (const key of ['trust', 'fear', 'anger']) {
     const d = actual[key];
     const warnings = [];
-    if (Math.abs(d.raw) > clampRange) warnings.push(`clamped from ${d.raw.toFixed(3)}`);
-    if (d.after <= 0 || d.after >= 1) warnings.push('hit boundary');
-    if (escalation > 2) warnings.push(`esc ${escalation}×`);
+    if (Math.abs(d.raw) > clampRange) warnings.push('clamped');
+    if (d.after <= 0 || d.after >= 1) warnings.push('boundary');
+    if (escalation > 2) warnings.push(`${escalation}x esc`);
     const cls = warnings.length ? 'val-warn' : 'val-ok';
     html += `<tr class="${cls}"><td><strong>${key}</strong></td>`;
     html += `<td>${d.raw.toFixed(3)}</td><td>${d.clamped.toFixed(3)}</td>`;
     html += `<td>${d.scaled >= 0 ? '+' : ''}${d.scaled.toFixed(3)}</td>`;
     html += `<td>${d.before.toFixed(2)}</td><td>${d.after.toFixed(2)}</td>`;
-    html += `<td>${warnings.length ? warnings.join(', ') : 'ok'}</td></tr>`;
+    html += `<td>${warnings.length ? warnings.join(' ') : 'ok'}</td></tr>`;
   }
   html += '</table>';
 
-  // Check for missing keys
   const missing = ['trust', 'fear', 'anger'].filter(k => !(k in rawDeltas));
-  if (missing.length) html += `<div class="val-note">Missing keys: ${missing.join(', ')} (treated as 0)</div>`;
+  if (missing.length) html += `<div class="val-note">Missing: ${missing.join(', ')} (= 0)</div>`;
 
-  // Check for unexpected keys
   const unexpected = Object.keys(rawDeltas).filter(k => !['trust', 'fear', 'anger'].includes(k));
-  if (unexpected.length) html += `<div class="val-note">Unexpected keys ignored: ${unexpected.join(', ')}</div>`;
+  if (unexpected.length) html += `<div class="val-note">Ignored: ${unexpected.join(', ')}</div>`;
 
   pane.innerHTML = html;
 }
@@ -1241,14 +1260,15 @@ function bindTabs() {
       tab.classList.add('active');
       activeTab = tab.dataset.tab;
 
-      const hideTabs = ['decision', 'npc-chat', 'prompts', 'scenarios', 'reports'];
+      const hideTabs = ['decision', 'npc-chat', 'prompts', 'scenarios', 'reports', 'flowchart'];
       $('inputArea').classList.toggle('hidden', hideTabs.includes(activeTab));
       $('decisionArea').classList.toggle('hidden', activeTab !== 'decision');
       $('npcChatArea').classList.toggle('hidden', activeTab !== 'npc-chat');
       $('promptsArea').classList.toggle('hidden', activeTab !== 'prompts');
       $('scenariosArea').classList.toggle('hidden', activeTab !== 'scenarios');
       $('reportsArea').classList.toggle('hidden', activeTab !== 'reports');
-      $('chatLog').classList.toggle('hidden', activeTab === 'prompts' || activeTab === 'scenarios' || activeTab === 'reports');
+      $('flowchartArea').classList.toggle('hidden', activeTab !== 'flowchart');
+      $('chatLog').classList.toggle('hidden', activeTab === 'prompts' || activeTab === 'scenarios' || activeTab === 'reports' || activeTab === 'flowchart');
     };
   });
 }
@@ -1629,6 +1649,7 @@ async function runPreset(preset) {
     $('npcChatArea').classList.add('hidden');
     $('promptsArea').classList.add('hidden');
     $('scenariosArea').classList.add('hidden');
+    $('flowchartArea').classList.add('hidden');
     $('chatLog').classList.remove('hidden');
     await runDecision();
   } else if (preset.batch) {
@@ -1642,6 +1663,7 @@ async function runPreset(preset) {
     $('npcChatArea').classList.add('hidden');
     $('promptsArea').classList.add('hidden');
     $('scenariosArea').classList.add('hidden');
+    $('flowchartArea').classList.add('hidden');
     $('chatLog').classList.remove('hidden');
     await runBatchMessages(preset.batch.messages, preset.batch.mode, preset.batch.delay);
   } else {
@@ -1655,6 +1677,7 @@ async function runPreset(preset) {
     $('npcChatArea').classList.add('hidden');
     $('promptsArea').classList.add('hidden');
     $('scenariosArea').classList.add('hidden');
+    $('flowchartArea').classList.add('hidden');
     $('chatLog').classList.remove('hidden');
 
     if (preset.mode === 'command') {
@@ -1762,6 +1785,7 @@ function bindScenarios() {
     $('promptsArea').classList.add('hidden');
     $('scenariosArea').classList.add('hidden');
     $('reportsArea').classList.add('hidden');
+    $('flowchartArea').classList.add('hidden');
     $('chatLog').classList.remove('hidden');
 
     await runBatchMessages(messages, mode, delay);
@@ -2009,5 +2033,39 @@ function renderCustomScenarios(scenarios) {
     };
   });
 }
+
+// ── Public API (for flowchart.js and other modules) ──────────────────────────
+window.Playground = {
+  state,
+  prompts,
+  DEFAULT_PROMPTS,
+  callLLM,
+  runDialogue,
+  runCommand,
+  runDecision,
+  runNPCChat,
+  applyDeltas,
+  fastForward,
+  buildSoulContext,
+  deriveRelationship,
+  loadState,
+  loadDecisionFields,
+  syncSlidersFromState,
+  updateGauges,
+  updateRelLabel,
+  renderMemories,
+  addChat,
+  addHistory,
+  addTrace,
+  addTraceResult,
+  clearTrace,
+  esc,
+  clamp,
+  extractJSON,
+  extractJSONArray,
+  decayTick,
+  updateDriftTelemetry,
+  drift,
+};
 
 })();

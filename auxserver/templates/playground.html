@@ -120,6 +120,7 @@
           <button class="tab" data-tab="npc-chat">NPC Chat</button>
           <button class="tab" data-tab="prompts">Prompts</button>
           <button class="tab" data-tab="scenarios">Scenarios</button>
+          <button class="tab" data-tab="flowchart">Flowchart</button>
           <button class="tab" data-tab="reports">Reports</button>
         </div>
 
@@ -262,6 +263,92 @@
           </div>
         </div>
 
+        <!-- Flowchart -->
+        <div id="flowchartArea" class="flowchart-area hidden">
+          <!-- Toolbar -->
+          <div class="fc-toolbar">
+            <div class="fc-toolbar-left">
+              <label>Add Node</label>
+              <select id="fcNodeType">
+                <optgroup label="Setup">
+                  <option value="spawn_player">Spawn Player</option>
+                  <option value="set_emotions">Set Emotions</option>
+                  <option value="add_memory">Add Memory</option>
+                </optgroup>
+                <optgroup label="Player → NPC">
+                  <option value="dialogue">Dialogue</option>
+                  <option value="command">Command</option>
+                  <option value="coerce_command">Coerce (non-owner)</option>
+                </optgroup>
+                <optgroup label="NPC Autonomous">
+                  <option value="decision">Decision Loop</option>
+                  <option value="emotion_reaction">Emotion Reaction Scan</option>
+                </optgroup>
+                <optgroup label="NPC ↔ NPC">
+                  <option value="npc_chat">NPC Chat (socialize)</option>
+                  <option value="npc_steal">NPC Steal Logs</option>
+                  <option value="npc_encounter">NPC Encounter (auto-decide)</option>
+                </optgroup>
+                <optgroup label="World Events">
+                  <option value="damage_npc">Damage NPC</option>
+                  <option value="kill_event">Kill Event</option>
+                  <option value="time_forward">Time Forward</option>
+                </optgroup>
+                <optgroup label="Assertions">
+                  <option value="assert_emotion">Assert Emotion</option>
+                  <option value="assert_relationship">Assert Relationship</option>
+                </optgroup>
+              </select>
+              <button id="fcAddNodeBtn" class="small-btn">+ Add</button>
+            </div>
+            <div class="fc-toolbar-right">
+              <button id="fcRunAllBtn">Run All</button>
+              <button id="fcRunSelectedBtn" class="small-btn" disabled>Run Chunk</button>
+              <button id="fcStopBtn" class="small-btn" disabled>Stop</button>
+              <span class="fc-sep">|</span>
+              <button id="fcClearBtn" class="small-btn">Clear</button>
+              <button id="fcSaveBtn" class="small-btn">Save</button>
+              <button id="fcLoadBtn" class="small-btn">Load</button>
+              <select id="fcSavedFlows"><option value="">— saved flows —</option></select>
+            </div>
+          </div>
+
+          <!-- Split: node list + detail editor -->
+          <div class="fc-workspace">
+            <!-- Left: node list (the "flowchart") -->
+            <div class="fc-node-list" id="fcNodeList">
+              <div class="fc-empty-hint">Add nodes above to build a test flow.<br>Nodes run top-to-bottom in sequence.</div>
+            </div>
+
+            <!-- Right: node detail / parameter editor -->
+            <div class="fc-detail" id="fcDetail">
+              <div class="fc-detail-empty">Select a node to edit its parameters</div>
+            </div>
+          </div>
+
+          <!-- Bottom: execution log -->
+          <div class="fc-exec-bar">
+            <div class="fc-exec-header">
+              <span>Execution Log</span>
+              <span id="fcExecStatus" class="fc-exec-status"></span>
+            </div>
+            <div id="fcExecLog" class="fc-exec-log"></div>
+          </div>
+
+          <!-- Chunk controls (appears when chunk is selected) -->
+          <div id="fcChunkControls" class="fc-chunk-controls hidden">
+            <div class="fc-chunk-header">
+              <strong>Chunk Replay</strong>
+              <span class="hint">Re-run selected nodes from saved state snapshot</span>
+            </div>
+            <div class="fc-chunk-actions">
+              <button id="fcChunkReplayBtn">Replay Chunk</button>
+              <button id="fcChunkResetBtn" class="small-btn">Reset to Snapshot</button>
+              <span id="fcChunkInfo" class="fc-chunk-info"></span>
+            </div>
+          </div>
+        </div>
+
         <!-- NPC Chat: pick second NPC -->
         <div id="npcChatArea" class="input-area hidden">
           <h4>NPC B (other NPC)</h4>
@@ -336,5 +423,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="/static/playground.js"></script>
+    <script src="/static/flowchart.js"></script>
   </body>
 </html>
