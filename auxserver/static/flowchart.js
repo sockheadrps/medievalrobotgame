@@ -298,6 +298,7 @@ let chunkSnapshot = null; // { world deep copy, _currentNpc }
 let running = false;
 let aborted = false;
 let nextId = 1;
+let flowTest = null;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return 'fc_' + (nextId++); }
@@ -330,6 +331,23 @@ function restoreWorld(snap) {
 }
 
 function esc(s) { return PG().esc(s); }
+
+function emotionSnapshot(name) {
+  if (!name || !world.npcs[name]) return null;
+  const n = world.npcs[name];
+  return { trust: n.trust, fear: n.fear, anger: n.anger };
+}
+
+function getTargetNpcForNode(node) {
+  const p = node.params || {};
+  if (node.type === 'npc_chat') return resolveNpc(p, 'npcA');
+  if (node.type === 'npc_steal') return resolveNpc(p, 'thief');
+  if (node.type === 'npc_encounter') return resolveNpc(p, 'npcA');
+  if (node.type === 'time_forward') return p.npc || null;
+  if (node.type === 'spawn_npc') return p.name || null;
+  if (node.type === 'spawn_player') return null;
+  return resolveNpc(p);
+}
 
 // Resolve which NPC to target — uses node param, falls back to first available
 function resolveNpc(p, key = 'npc') {
@@ -912,6 +930,12 @@ async function runNodes(startIdx, endIdx) {
   let passed = 0;
   let failed = 0;
 
+  // Test Lab run
+  const pg = PG();
+  const flowName = `Flow Run ${new Date().toLocaleString()}`;
+  flowTest = pg.buildTestBase(flowName, 'flow', 'flowchart');
+  flowTest.inputs = nodes.slice(startIdx, endIdx + 1).map(n => ({ type: n.type, params: n.params }));
+
   for (let i = startIdx; i <= endIdx; i++) {
     if (aborted) {
       execLog('Flow aborted by user', 'fc-log-warn');
@@ -923,6 +947,10 @@ async function runNodes(startIdx, endIdx) {
     node.status = 'running';
     render();
 
+    const targetNpc = getTargetNpcForNode(node);
+    const before = emotionSnapshot(targetNpc);
+    const t0 = performance.now();
+
     execLog(`[${i + 1}/${endIdx + 1}] ${def.label} — ${def.summary(node.params)}`);
 
     try {
@@ -931,11 +959,50 @@ async function runNodes(startIdx, endIdx) {
       node.result = result;
       execLog(`  ✓ ${result}`, 'fc-log-ok');
       passed++;
+
+      const after = emotionSnapshot(targetNpc);
+      flowTest.steps.push({
+        step: flowTest.steps.length + 1,
+        input: { node: node.type, params: node.params },
+        raw_response: result,
+        parsed_response: null,
+        clamp_range: null,
+        escalation: targetNpc && world.npcs[targetNpc] ? world.npcs[targetNpc].escalation : null,
+        clamped_deltas: null,
+        scaled_deltas: null,
+        before,
+        after,
+        memory_stored: [],
+        fallback: null,
+        latency_ms: Math.round(performance.now() - t0),
+        tokens: null,
+        clamp_hits: false,
+      });
     } catch (e) {
       node.status = 'failed';
       node.result = `Error: ${e.message}`;
       execLog(`  ✗ ${e.message}`, 'fc-log-err');
       failed++;
+
+      const after = emotionSnapshot(targetNpc);
+      flowTest.steps.push({
+        step: flowTest.steps.length + 1,
+        input: { node: node.type, params: node.params },
+        raw_response: `Error: ${e.message}`,
+        parsed_response: null,
+        clamp_range: null,
+        escalation: targetNpc && world.npcs[targetNpc] ? world.npcs[targetNpc].escalation : null,
+        clamped_deltas: null,
+        scaled_deltas: null,
+        before,
+        after,
+        memory_stored: [],
+        fallback: node.type.startsWith('assert_') ? 'assert_failed' : 'error',
+        latency_ms: Math.round(performance.now() - t0),
+        tokens: null,
+        clamp_hits: false,
+      });
+
       if (node.type.startsWith('assert_')) continue;
       break;
     }
@@ -948,6 +1015,22 @@ async function runNodes(startIdx, endIdx) {
 
   // Save final state back
   saveCurrent();
+
+  // Finalize Test Lab report
+  const anyNpc = _currentNpc || (npcNames()[0] || null);
+  const finalEmotions = anyNpc ? emotionSnapshot(anyNpc) : { trust: 0, fear: 0, anger: 0 };
+  flowTest.final_state = { emotions: finalEmotions, world: deepCloneWorld() };
+  const initEmo = flowTest.initial_state?.emotions || { trust: 0, fear: 0, anger: 0 };
+  flowTest.summary = {
+    trust_delta: +(finalEmotions.trust - (initEmo.trust || 0)).toFixed(3),
+    fear_delta: +(finalEmotions.fear - (initEmo.fear || 0)).toFixed(3),
+    anger_delta: +(finalEmotions.anger - (initEmo.anger || 0)).toFixed(3),
+    escalation_max: Math.max(0, ...flowTest.steps.map(s => s.escalation || 0)),
+    clamp_hits: flowTest.steps.filter(s => s.clamp_hits).length,
+    fallbacks: flowTest.steps.filter(s => s.fallback).length,
+    memory_count: finalEmotions ? (flowTest.final_state?.world ? Object.values(flowTest.final_state.world.npcs).reduce((acc,n)=>acc+(n.memories?.length||0),0) : 0) : 0,
+  };
+  await pg.saveTestReport(flowTest);
 
   $('fcExecStatus').textContent = `Done: ${passed} passed, ${failed} failed`;
   execLog(`Flow complete: ${passed} passed, ${failed} failed`, failed > 0 ? 'fc-log-warn' : 'fc-log-ok');

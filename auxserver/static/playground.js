@@ -2066,6 +2066,14 @@ window.Playground = {
   decayTick,
   updateDriftTelemetry,
   drift,
+  // Test Lab helpers
+  snapshotState,
+  buildTestBase,
+  finalizeTest,
+  saveTestReport,
+  getLLMTemp,
+  getLLMMaxTok,
+  getLLMCtx,
 };
 
 })();
