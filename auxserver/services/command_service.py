@@ -4,7 +4,7 @@ import httpx
 
 from core.config import MODEL, OLLAMA_URL
 from schemas.commands import ChatRequest
-from services.prompt_loader import load_prompt
+from services.prompt_loader import load_prompt, render_prompt
 
 VALID_CATEGORIES = {
     "gather",
@@ -104,21 +104,31 @@ async def route_category(text: str, client: httpx.AsyncClient) -> str:
 
 
 async def specialist_commands(category: str, request: ChatRequest, client: httpx.AsyncClient) -> list:
-    specialist_prompt = load_prompt(category)
-
-    ctx_parts = []
+    # Build template context from request
+    tmpl_ctx = {}
     if request.npc_context:
-        ctx_parts.append("NPC context: " + json.dumps(request.npc_context))
+        tmpl_ctx["npc"] = request.npc_context
     if request.world_context:
-        ctx_parts.append("World state: " + json.dumps(request.world_context))
-    context_str = ("\n\n" + "\n".join(ctx_parts)) if ctx_parts else ""
+        tmpl_ctx["world"] = request.world_context
+
+    specialist_prompt = render_prompt(category, tmpl_ctx)
+
+    # For plain-text prompts, append context the old way
+    if "{{" not in load_prompt(category):
+        ctx_parts = []
+        if request.npc_context:
+            ctx_parts.append("NPC context: " + json.dumps(request.npc_context))
+        if request.world_context:
+            ctx_parts.append("World state: " + json.dumps(request.world_context))
+        context_str = ("\n\n" + "\n".join(ctx_parts)) if ctx_parts else ""
+        specialist_prompt += context_str
 
     resp = await client.post(
         OLLAMA_URL,
         json={
             "model": MODEL,
             "messages": [
-                {"role": "system", "content": specialist_prompt + context_str},
+                {"role": "system", "content": specialist_prompt},
                 {"role": "user", "content": request.text},
             ],
             "stream": False,

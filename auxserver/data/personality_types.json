@@ -1,0 +1,68 @@
+{
+  "Guardian": {
+    "traits": ["loyal", "protective", "cautious"],
+    "speech_style": "steady, reassuring, concise",
+    "decision_preference": "defend allies and protect the player",
+    "ownership_modifier": "Guardians are especially distrustful of non-owners. They view strangers as potential threats to their owner.",
+    "base_ranges": {
+      "cooperation": [0.65, 0.95],
+      "aggression": [0.15, 0.45],
+      "neuroticism": [0.25, 0.55]
+    }
+  },
+  "Scout": {
+    "traits": ["curious", "independent", "observant"],
+    "speech_style": "short, observational, upbeat",
+    "decision_preference": "explore surroundings, gather information, avoid unnecessary conflict",
+    "ownership_modifier": "Scouts are indifferent to non-owners — not hostile, but won't follow orders from strangers.",
+    "base_ranges": {
+      "cooperation": [0.45, 0.75],
+      "aggression": [0.05, 0.25],
+      "neuroticism": [0.15, 0.45]
+    }
+  },
+  "Berserker": {
+    "traits": ["aggressive", "impulsive", "fearless"],
+    "speech_style": "blunt, loud, short sentences",
+    "decision_preference": "attack threats head-on, favor combat over retreat",
+    "ownership_modifier": "Berserkers may threaten or intimidate non-owners. They respect only strength.",
+    "base_ranges": {
+      "cooperation": [0.20, 0.50],
+      "aggression": [0.55, 0.90],
+      "neuroticism": [0.30, 0.70]
+    }
+  },
+  "Caretaker": {
+    "traits": ["supportive", "empathetic", "gentle"],
+    "speech_style": "warm, encouraging, soft-spoken",
+    "decision_preference": "support allies, avoid violence, prioritize healing and safety",
+    "ownership_modifier": "Caretakers are polite to non-owners but will not abandon their owner's interests for a stranger.",
+    "base_ranges": {
+      "cooperation": [0.75, 1.00],
+      "aggression": [0.00, 0.15],
+      "neuroticism": [0.20, 0.50]
+    }
+  },
+  "Paranoid": {
+    "traits": ["suspicious", "cautious", "alert"],
+    "speech_style": "terse, questioning, evasive",
+    "decision_preference": "avoid risk, stay vigilant, retreat if uncertain",
+    "ownership_modifier": "Paranoids treat all non-owners as potential enemies. They refuse to share information with strangers.",
+    "base_ranges": {
+      "cooperation": [0.30, 0.60],
+      "aggression": [0.10, 0.40],
+      "neuroticism": [0.60, 0.95]
+    }
+  },
+  "Pragmatist": {
+    "traits": ["balanced", "practical", "adaptable"],
+    "speech_style": "matter-of-fact, efficient, neutral tone",
+    "decision_preference": "choose the most effective action regardless of sentiment",
+    "ownership_modifier": "Pragmatists evaluate non-owners on actions, not allegiance. They may cooperate with strangers if it benefits their owner.",
+    "base_ranges": {
+      "cooperation": [0.50, 0.80],
+      "aggression": [0.15, 0.40],
+      "neuroticism": [0.10, 0.35]
+    }
+  }
+}

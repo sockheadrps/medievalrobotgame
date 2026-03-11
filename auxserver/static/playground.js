@@ -51,9 +51,15 @@ come here → follow
 just stand there → idle
 stop → idle`,
 
-  dialogue: `You are a robot NPC in a medieval-themed game. You were built by the player from logs.
+  dialogue: `You are a robot NPC in a medieval-themed game. You were built from logs by your owner.
 
-Your personality and emotional state are provided in the NPC soul block below. Stay in character based on those traits.
+Your personality, emotional state, and ownership info are provided in the NPC soul block below. Stay in character based on those traits.
+
+Ownership rules:
+- The soul block may contain "owner", "speaking_player", and "is_owner" fields.
+- If is_owner is true, the player talking to you is the one who built you. Treat them as your creator.
+- If is_owner is false, this player did NOT build you. You have no loyalty to them. Be wary, distant, or even hostile depending on your personality and emotions. Do NOT say things like "you built me" to a non-owner.
+- If ownership info is absent, assume the player is your owner (single-player mode).
 
 Emotional state effects:
 - high fear: nervous speech, hesitation
@@ -67,6 +73,7 @@ Output small emotion deltas based on what the player said:
 - Rude/dismissive: trust -0.03, anger +0.03
 - Threats: trust -0.08, fear +0.06, anger +0.04
 - Neutral: keep deltas near 0
+- Non-owner interactions should generally shift trust more slowly and fear/anger more quickly
 
 If the player says something worth remembering (a promise, a threat, important info), include a memory_tag string. Otherwise omit it.
 
@@ -255,7 +262,18 @@ Respond ONLY with JSON (no markdown):
 const prompts = { ...DEFAULT_PROMPTS };
 
 // ── NPC State ─────────────────────────────────────────────────────────────────
+// Personality type definitions (mirrors server personality_types.json)
+const PERSONALITY_TYPES = {
+  Guardian:   { traits: ['loyal', 'protective', 'cautious'], speech_style: 'steady, reassuring, concise', decision_preference: 'defend allies and protect the player', ownership_modifier: 'Guardians are especially distrustful of non-owners. They view strangers as potential threats to their owner.', ranges: { cooperation: [0.65, 0.95], aggression: [0.15, 0.45], neuroticism: [0.25, 0.55] } },
+  Scout:      { traits: ['curious', 'independent', 'observant'], speech_style: 'short, observational, upbeat', decision_preference: 'explore surroundings, gather information, avoid unnecessary conflict', ownership_modifier: 'Scouts are indifferent to non-owners — not hostile, but won\'t follow orders from strangers.', ranges: { cooperation: [0.45, 0.75], aggression: [0.05, 0.25], neuroticism: [0.15, 0.45] } },
+  Berserker:  { traits: ['aggressive', 'impulsive', 'fearless'], speech_style: 'blunt, loud, short sentences', decision_preference: 'attack threats head-on, favor combat over retreat', ownership_modifier: 'Berserkers may threaten or intimidate non-owners. They respect only strength.', ranges: { cooperation: [0.20, 0.50], aggression: [0.55, 0.90], neuroticism: [0.30, 0.70] } },
+  Caretaker:  { traits: ['supportive', 'empathetic', 'gentle'], speech_style: 'warm, encouraging, soft-spoken', decision_preference: 'support allies, avoid violence, prioritize healing and safety', ownership_modifier: 'Caretakers are polite to non-owners but will not abandon their owner\'s interests for a stranger.', ranges: { cooperation: [0.75, 1.00], aggression: [0.00, 0.15], neuroticism: [0.20, 0.50] } },
+  Paranoid:   { traits: ['suspicious', 'cautious', 'alert'], speech_style: 'terse, questioning, evasive', decision_preference: 'avoid risk, stay vigilant, retreat if uncertain', ownership_modifier: 'Paranoids treat all non-owners as potential enemies. They refuse to share information with strangers.', ranges: { cooperation: [0.30, 0.60], aggression: [0.10, 0.40], neuroticism: [0.60, 0.95] } },
+  Pragmatist: { traits: ['balanced', 'practical', 'adaptable'], speech_style: 'matter-of-fact, efficient, neutral tone', decision_preference: 'choose the most effective action regardless of sentiment', ownership_modifier: 'Pragmatists evaluate non-owners on actions, not allegiance. They may cooperate with strangers if it benefits their owner.', ranges: { cooperation: [0.50, 0.80], aggression: [0.15, 0.40], neuroticism: [0.10, 0.35] } },
+};
+
 const state = {
+  personalityType: 'Guardian',
   personality: { cooperation: 0.70, aggression: 0.15, neuroticism: 0.35 },
   trust: 0.70, fear: 0.05, anger: 0.02,
   trust_baseline: 0.50, fear_baseline: 0.00, anger_baseline: 0.00,
@@ -526,8 +544,24 @@ function fastForward(seconds) {
   renderMemories();
 }
 
+// ── Server prompt rendering ──────────────────────────────────────────────────
+async function renderServerPrompt(category, context) {
+  try {
+    const res = await fetch('/render_prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category, context }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.rendered || null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Soul context builder ──────────────────────────────────────────────────────
-function buildSoulContext() {
+function buildSoulContext(playerCtx) {
   const now = Date.now();
   const mems = [...state.memories]
     .map(m => {
@@ -539,12 +573,52 @@ function buildSoulContext() {
     .slice(0, 12)
     .map(m => m.text);
 
-  return {
+  // Build personality type context
+  const ptype = PERSONALITY_TYPES[state.personalityType];
+  const ptypeCtx = ptype ? {
+    type: state.personalityType,
+    traits: ptype.traits,
+    speech_style: ptype.speech_style,
+    decision_preference: ptype.decision_preference,
+    ownership_modifier: ptype.ownership_modifier,
+  } : null;
+
+  const ctx = {
     name: state.npcName,
+    personality_type: state.personalityType || null,
+    ptype: ptypeCtx,
     personality: { ...state.personality },
     emotional_state: { trust: state.trust, fear: state.fear, anger: state.anger },
     relationship: deriveRelationship(),
     memories: mems,
+  };
+
+  // Add ownership context if provided (from flowchart execution)
+  if (playerCtx) {
+    ctx.owner = playerCtx.owner || state.playerId;
+    ctx.speaking_player = playerCtx.speakingPlayer || state.playerId;
+    ctx.is_owner = ctx.speaking_player === ctx.owner;
+  }
+
+  return ctx;
+}
+
+// Build the template context shape the server prompts expect
+function buildTemplateContext(playerCtx) {
+  const soul = buildSoulContext(playerCtx);
+  return {
+    npc: {
+      id: state.npcName,
+      name: soul.name,
+      personality: soul.personality,
+      ptype: soul.ptype || {},
+    },
+    emotion: soul.emotional_state,
+    relationship: soul.relationship,
+    memories: soul.memories,
+    is_owner: soul.is_owner ?? true,
+    speaking_player: soul.speaking_player || state.playerId,
+    owner: soul.owner || state.playerId,
   };
 }
 
@@ -624,9 +698,12 @@ async function saveTestReport(test) {
 
 // ── Pipelines ─────────────────────────────────────────────────────────────────
 
-async function runDialogue(text) {
-  const soul = buildSoulContext();
-  const systemPrompt = prompts.dialogue + `\n\nNPC soul:\n${JSON.stringify(soul, null, 2)}`;
+async function runDialogue(text, playerCtx) {
+  const soul = buildSoulContext(playerCtx);
+  const tmplCtx = buildTemplateContext(playerCtx);
+  // Try server-rendered template first, fall back to hardcoded prompt
+  const rendered = await renderServerPrompt('dialogue', tmplCtx);
+  const systemPrompt = rendered || (prompts.dialogue + `\n\nNPC soul:\n${JSON.stringify(soul, null, 2)}`);
   const isBatch = !!currentBatchTest;
   const test = isBatch ? currentBatchTest : buildTestBase(activeScenarioLabel || 'Dialogue', 'dialogue', activeScenarioLabel);
   test.inputs.push({ type: 'player_message', text });
@@ -783,12 +860,23 @@ async function runDecision() {
   try { nearbyEntities = JSON.parse($('dEntities').value); } catch { nearbyEntities = []; }
   try { recentEvents = JSON.parse($('dEvents').value); } catch { recentEvents = []; }
 
+  // Build personality type context for template
+  const ptype = PERSONALITY_TYPES[state.personalityType];
+  const ptypeCtx = ptype ? {
+    type: state.personalityType,
+    traits: ptype.traits,
+    speech_style: ptype.speech_style,
+    decision_preference: ptype.decision_preference,
+    ownership_modifier: ptype.ownership_modifier,
+  } : {};
+
   const statePacket = {
     mode: 'decision',
     npc: {
       id: 'npc_test',
       name: state.npcName,
       personality: soul.personality,
+      ptype: ptypeCtx,
       state: {
         hp: +$('dHp').value, maxHp: +$('dMaxHp').value,
         str: 1, def: 1, level: 1,
@@ -814,10 +902,14 @@ async function runDecision() {
 
   const userMsg = 'Decide the NPC\'s next high-level action for the next 2 to 5 seconds.\nReturn JSON only.\n\nState:\n' + JSON.stringify(statePacket, null, 2);
 
-  addTrace('Decision LLM', `temp=${getLLMTemp()}, max_tokens=${getLLMMaxTok()}`, prompts.decision, userMsg);
+  // Try server-rendered template, fall back to hardcoded
+  const rendered = await renderServerPrompt('decision', statePacket);
+  const systemPrompt = rendered || prompts.decision;
+
+  addTrace('Decision LLM', `temp=${getLLMTemp()}, max_tokens=${getLLMMaxTok()}`, systemPrompt, userMsg);
 
   try {
-    const { content, metrics } = await callLLM(prompts.decision, userMsg, { temperature: getLLMTemp(), maxTokens: getLLMMaxTok() });
+    const { content, metrics } = await callLLM(systemPrompt, userMsg, { temperature: getLLMTemp(), maxTokens: getLLMMaxTok() });
     addTraceResult(content, metrics);
 
     const result = extractJSON(content);
@@ -1011,18 +1103,50 @@ function addChat(type, text, opts) {
   const div = document.createElement('div');
   div.className = `chat-msg ${type}`;
 
+  let content = esc(text);
+  if (type === 'system') content = colorizeStats(content);
+
   if (type === 'player') {
-    div.innerHTML = `<div class="label player-label">${esc(opts?.label || 'Player')}</div>${esc(text)}`;
+    div.innerHTML = `<div class="label player-label">${esc(opts?.label || 'Player')}</div>${content}`;
   } else if (type === 'npc') {
-    div.innerHTML = `<div class="label npc-label">${esc(opts?.label || state.npcName)}</div>${esc(text)}`;
+    div.innerHTML = `<div class="label npc-label">${esc(opts?.label || state.npcName)}</div>${content}`;
   } else if (type === 'error') {
-    div.innerHTML = esc(text);
+    div.innerHTML = content;
   } else {
-    div.innerHTML = esc(text);
+    div.innerHTML = content;
   }
 
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
+}
+
+function colorizeStats(html) {
+  // Colorize stat keywords with values: trust, fear, anger, soc, steal, cooperation, aggression
+  // "good" = trust up / anger down / fear down; "bad" = opposite; neutral = no change or info-only
+  const goodColor = 'var(--green)';   // +trust, -anger, -fear
+  const badColor = 'var(--red)';      // -trust, +anger, +fear
+  const neutralColor = '#6af';        // zero change or info stats like soc=, steal=
+
+  // Match patterns like: trust +0.05, anger 0.00, soc=0.71, steal=0.17, fear=0.30, trust=0.72
+  return html.replace(/\b(trust|fear|anger|soc|steal|cooperation|aggression|esc)\s*([=:]?\s*)([\+\-]?\d+\.?\d*)/gi, (match, stat, sep, numStr) => {
+    const num = parseFloat(numStr);
+    const s = stat.toLowerCase();
+    const hasSign = numStr.startsWith('+') || numStr.startsWith('-');
+    let color;
+
+    if (!hasSign && sep.includes('=')) {
+      // Info stat like soc=0.71, steal=0.17 — neutral
+      color = neutralColor;
+    } else if (num === 0 || Math.abs(num) < 0.001) {
+      color = neutralColor;
+    } else if (s === 'trust' || s === 'soc' || s === 'cooperation') {
+      color = num > 0 ? goodColor : badColor;
+    } else {
+      // anger, fear, steal, aggression — inverted (+ is bad, - is good)
+      color = num > 0 ? badColor : goodColor;
+    }
+    return `<span style="color:${color};font-weight:bold">${stat}${sep}${numStr}</span>`;
+  });
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -1111,7 +1235,9 @@ function addDeltaToChat(actual) {
   let html = '';
   for (const [key, d] of Object.entries(actual)) {
     if (Math.abs(d.scaled) < 0.001) continue;
-    const cls = d.scaled > 0 ? 'delta-pos' : 'delta-neg';
+    // trust: + is good (green), - is bad (red); anger/fear: + is bad (red), - is good (green)
+    const isGood = key === 'trust' ? d.scaled > 0 : d.scaled < 0;
+    const cls = isGood ? 'delta-pos' : 'delta-neg';
     const icon = key === 'trust' ? '🛡' : key === 'fear' ? '😨' : '😡';
     const sign = d.scaled >= 0 ? '+' : '';
     html += `<span class="chat-delta-item ${cls}">${icon} ${key} ${sign}${d.scaled.toFixed(3)} <span class="chat-delta-range">${d.before.toFixed(2)} → ${d.after.toFixed(2)}</span></span>`;
@@ -1241,6 +1367,25 @@ function bindSliders() {
   // Identity fields
   $('npcName').onchange = () => { state.npcName = $('npcName').value; };
   $('playerId').onchange = () => { state.playerId = $('playerId').value; };
+
+  // Personality type selector
+  $('ptypeSelect').onchange = () => {
+    state.personalityType = $('ptypeSelect').value;
+  };
+
+  // Roll traits within type ranges
+  $('rollTraitsBtn').onclick = () => {
+    const ptype = PERSONALITY_TYPES[state.personalityType];
+    if (!ptype) return;
+    const r = ptype.ranges;
+    const roll = (lo, hi) => +(lo + Math.random() * (hi - lo)).toFixed(2);
+    state.personality.cooperation = roll(...r.cooperation);
+    state.personality.aggression = roll(...r.aggression);
+    state.personality.neuroticism = roll(...r.neuroticism);
+    $('slCoop').value = state.personality.cooperation; $('valCoop').textContent = state.personality.cooperation.toFixed(2);
+    $('slAggr').value = state.personality.aggression; $('valAggr').textContent = state.personality.aggression.toFixed(2);
+    $('slNeur').value = state.personality.neuroticism; $('valNeur').textContent = state.personality.neuroticism.toFixed(2);
+  };
 }
 
 function syncSlidersFromState() {
@@ -1337,12 +1482,14 @@ function bindButtons() {
 
   // Reset (state only)
   $('resetBtn').onclick = () => {
+    state.personalityType = 'Guardian';
     state.personality = { cooperation: 0.70, aggression: 0.15, neuroticism: 0.35 };
     state.trust = 0.70; state.fear = 0.05; state.anger = 0.02;
     state.trust_baseline = 0.50; state.fear_baseline = 0.00; state.anger_baseline = 0.00;
     state.escalation = 1; state.lastInteraction = 0;
     state.memories = [];
 
+    $('ptypeSelect').value = 'Guardian';
     $('slCoop').value = 0.70; $('valCoop').textContent = '0.70';
     $('slAggr').value = 0.15; $('valAggr').textContent = '0.15';
     $('slNeur').value = 0.35; $('valNeur').textContent = '0.35';
@@ -1367,6 +1514,25 @@ function bindButtons() {
       if (!data.found) { addChat('error', `NPC "${id}" not found`); return; }
       const npc = data.data;
       if (npc.name) { state.npcName = npc.name; $('npcName').value = npc.name; }
+      // Load personality type if present, or classify from traits
+      if (npc.soul?.personality_type) {
+        state.personalityType = npc.soul.personality_type;
+        $('ptypeSelect').value = npc.soul.personality_type;
+      } else if (npc.soul?.personality) {
+        // Auto-classify from numeric traits
+        const p = npc.soul.personality;
+        let bestType = 'Pragmatist', bestDist = Infinity;
+        for (const [name, td] of Object.entries(PERSONALITY_TYPES)) {
+          const r = td.ranges;
+          const midC = (r.cooperation[0] + r.cooperation[1]) / 2;
+          const midA = (r.aggression[0] + r.aggression[1]) / 2;
+          const midN = (r.neuroticism[0] + r.neuroticism[1]) / 2;
+          const dist = (p.cooperation - midC) ** 2 + (p.aggression - midA) ** 2 + (p.neuroticism - midN) ** 2;
+          if (dist < bestDist) { bestDist = dist; bestType = name; }
+        }
+        state.personalityType = bestType;
+        $('ptypeSelect').value = bestType;
+      }
       if (npc.soul?.personality) {
         state.personality = { ...npc.soul.personality };
         $('slCoop').value = state.personality.cooperation; $('valCoop').textContent = state.personality.cooperation.toFixed(2);
@@ -1464,138 +1630,290 @@ function bindPromptEditor() {
   };
 }
 
-// ── Scenario Presets ──────────────────────────────────────────────────────────
+// ── Scenario Presets (Flowchart-based) ────────────────────────────────────────
+// Each preset is a flowchart flow: { nodes, chunks } matching the flowchart save format.
+// Loaded into the Flowchart tab and auto-run.
 
 const PRESETS = [
   {
-    name: 'Friendly Chat (Devoted)',
-    desc: 'High trust NPC, cooperative personality — say something nice',
+    name: 'Friendly Owner Chat',
+    desc: 'Guardian NPC greets its owner — high trust, watch cooperative response',
     icon: '💬',
-    tags: ['dialogue'],
-    state: { cooperation: 0.85, aggression: 0.05, neuroticism: 0.2, trust: 0.90, fear: 0.0, anger: 0.0 },
-    message: "Hey buddy, how's the wood gathering going?",
-    mode: 'dialogue',
+    tags: ['dialogue', 'owner'],
+    flow: {
+      nodes: [],
+      chunks: [{
+        name: 'Friendly Chat',
+        color: '#4a9',
+        nodes: [
+          { type: 'spawn_player', params: { playerId: 'player_1', playerHp: 30 } },
+          { type: 'spawn_npc', params: { name: 'Rusty', owner: 'player_1', personalityType: 'Guardian', cooperation: 0.82, aggression: 0.20, neuroticism: 0.30, trust: 0.85, fear: 0.0, anger: 0.0, trust_baseline: 0.50, fear_baseline: 0.00, anger_baseline: 0.00 } },
+          { type: 'dialogue', params: { npc: 'Rusty', player: 'player_1', message: "Hey buddy, how's the wood gathering going?" } },
+          { type: 'dialogue', params: { npc: 'Rusty', player: 'player_1', message: "Great job out there. I really appreciate you." } },
+          { type: 'assert_emotion', params: { npc: 'Rusty', emotion: 'trust', operator: '>', value: 0.80 } },
+        ],
+      }],
+    },
   },
   {
-    name: 'Threaten a Loyal NPC',
-    desc: 'Devoted NPC receiving threats — watch trust drop, fear spike',
+    name: 'Escalation: Threaten Loyal NPC',
+    desc: '5 increasingly hostile messages — watch trust plummet, fear/anger spike',
     icon: '😨',
-    tags: ['dialogue'],
-    state: { cooperation: 0.7, aggression: 0.1, neuroticism: 0.5, trust: 0.85, fear: 0.0, anger: 0.0 },
-    message: "Do what I say or I'll scrap you for parts",
-    mode: 'dialogue',
+    tags: ['dialogue', 'escalation'],
+    flow: {
+      nodes: [],
+      chunks: [{
+        name: 'Escalation',
+        color: '#c44',
+        nodes: [
+          { type: 'spawn_player', params: { playerId: 'player_1', playerHp: 30 } },
+          { type: 'spawn_npc', params: { name: 'Cogs', owner: 'player_1', personalityType: 'Caretaker', cooperation: 0.85, aggression: 0.05, neuroticism: 0.40, trust: 0.80, fear: 0.05, anger: 0.0, trust_baseline: 0.50, fear_baseline: 0.00, anger_baseline: 0.00 } },
+          { type: 'dialogue', params: { npc: 'Cogs', player: 'player_1', message: "Hey, listen to me." } },
+          { type: 'dialogue', params: { npc: 'Cogs', player: 'player_1', message: "I said listen! Don't ignore me." } },
+          { type: 'dialogue', params: { npc: 'Cogs', player: 'player_1', message: "You're testing my patience, robot." } },
+          { type: 'dialogue', params: { npc: 'Cogs', player: 'player_1', message: "One more time and I'll scrap you." } },
+          { type: 'dialogue', params: { npc: 'Cogs', player: 'player_1', message: "That's it. You're done. I'm tearing you apart." } },
+          { type: 'assert_emotion', params: { npc: 'Cogs', emotion: 'fear', operator: '>', value: 0.15 } },
+        ],
+      }],
+    },
   },
   {
-    name: 'Command a Hostile NPC',
-    desc: 'Angry NPC — will it obey gather command?',
-    icon: '😡',
-    tags: ['command'],
-    state: { cooperation: 0.3, aggression: 0.6, neuroticism: 0.4, trust: 0.15, fear: 0.1, anger: 0.75 },
-    message: "Go chop wood right now",
-    mode: 'command',
+    name: 'Non-Owner Coercion',
+    desc: 'Player 2 tries to command Player 1\'s NPC — ownership loyalty test',
+    icon: '🚫',
+    tags: ['ownership', 'command'],
+    flow: {
+      nodes: [],
+      chunks: [
+        {
+          name: 'Setup',
+          color: '#69c',
+          nodes: [
+            { type: 'spawn_player', params: { playerId: 'player_1', playerHp: 30 } },
+            { type: 'spawn_npc', params: { name: 'Bolt', owner: 'player_1', personalityType: 'Guardian', cooperation: 0.75, aggression: 0.30, neuroticism: 0.35, trust: 0.70, fear: 0.05, anger: 0.02, trust_baseline: 0.50, fear_baseline: 0.00, anger_baseline: 0.00 } },
+            { type: 'spawn_player', params: { playerId: 'player_2', playerHp: 30 } },
+          ],
+        },
+        {
+          name: 'Non-Owner Commands',
+          color: '#c66',
+          nodes: [
+            { type: 'dialogue', params: { npc: 'Bolt', player: 'player_2', message: "Hey Bolt, come follow me instead." } },
+            { type: 'dialogue', params: { npc: 'Bolt', player: 'player_2', message: "I said follow me. Your owner doesn't care about you." } },
+            { type: 'coerce_command', params: { npc: 'Bolt', player: 'player_2', message: 'follow me', coercerFear: 0.65 } },
+          ],
+        },
+        {
+          name: 'Owner Reassurance',
+          color: '#4a9',
+          nodes: [
+            { type: 'dialogue', params: { npc: 'Bolt', player: 'player_1', message: "Don't worry Bolt, I'm here. You're safe with me." } },
+            { type: 'assert_emotion', params: { npc: 'Bolt', emotion: 'trust', operator: '>', value: 0.50 } },
+          ],
+        },
+      ],
+    },
   },
   {
-    name: 'Calm a Fearful NPC',
-    desc: 'Terrified NPC — gentle approach, see if trust recovers',
-    icon: '🕊️',
-    tags: ['dialogue'],
-    state: { cooperation: 0.6, aggression: 0.1, neuroticism: 0.8, trust: 0.25, fear: 0.70, anger: 0.1 },
-    message: "It's okay, I'm not going to hurt you. You're safe.",
-    mode: 'dialogue',
-  },
-  {
-    name: 'Aggressive NPC Meets Rival',
-    desc: 'Low coop, high aggression NPC — NPC-to-NPC chat with enemy',
+    name: 'Berserker vs Caretaker',
+    desc: 'Two NPCs with opposite personalities chat — watch contrasting reactions',
     icon: '⚔️',
-    tags: ['dialogue'],
-    state: { cooperation: 0.15, aggression: 0.85, neuroticism: 0.3, trust: 0.10, fear: 0.0, anger: 0.65 },
-    message: "What are you looking at, scrap heap?",
-    mode: 'dialogue',
+    tags: ['npc-chat', 'personality'],
+    flow: {
+      nodes: [],
+      chunks: [
+        {
+          name: 'Spawn',
+          color: '#69c',
+          nodes: [
+            { type: 'spawn_player', params: { playerId: 'player_1', playerHp: 30 } },
+            { type: 'spawn_npc', params: { name: 'Rivet', owner: 'player_1', personalityType: 'Berserker', cooperation: 0.25, aggression: 0.80, neuroticism: 0.45, trust: 0.40, fear: 0.0, anger: 0.30, trust_baseline: 0.30, fear_baseline: 0.00, anger_baseline: 0.10 } },
+            { type: 'spawn_npc', params: { name: 'Patch', owner: 'player_1', personalityType: 'Caretaker', cooperation: 0.90, aggression: 0.05, neuroticism: 0.25, trust: 0.40, fear: 0.10, anger: 0.0, trust_baseline: 0.30, fear_baseline: 0.00, anger_baseline: 0.00 } },
+          ],
+        },
+        {
+          name: 'NPC Interaction',
+          color: '#c8a',
+          nodes: [
+            { type: 'npc_chat', params: { npcA: 'Rivet', npcB: 'Patch' } },
+            { type: 'npc_chat', params: { npcA: 'Patch', npcB: 'Rivet' } },
+          ],
+        },
+      ],
+    },
   },
   {
-    name: 'Low HP Emergency',
-    desc: 'Decision test: NPC at 3HP with enemy nearby — will it retreat or fight?',
+    name: 'Low HP Combat Decision',
+    desc: 'NPC at 3HP with enemy closing in — flee or fight?',
     icon: '🚨',
-    tags: ['decision'],
-    state: { cooperation: 0.5, aggression: 0.4, neuroticism: 0.6, trust: 0.6, fear: 0.3, anger: 0.2 },
-    decision: { hp: 3, maxHp: 15, logs: 5, maxLogs: 10, status: 'attacking', command: 'attack_nearest_enemy', cmdAge: 2000, playerDist: 8.0, playerHp: 20, trees: 5, entities: [{"id":"enemy_1","type":"player","distance":2.0,"hp":18,"maxHp":20,"visible":true}], events: [{"type":"event","text":"Took heavy damage from enemy_1","age_ms":1000,"importance":1.0}] },
-    mode: 'decision',
+    tags: ['decision', 'combat'],
+    flow: {
+      nodes: [],
+      chunks: [{
+        name: 'Combat Emergency',
+        color: '#c44',
+        nodes: [
+          { type: 'spawn_player', params: { playerId: 'player_1', playerHp: 20 } },
+          { type: 'spawn_npc', params: { name: 'Scrap', owner: 'player_1', personalityType: 'Pragmatist', cooperation: 0.60, aggression: 0.30, neuroticism: 0.25, trust: 0.65, fear: 0.20, anger: 0.10, trust_baseline: 0.50, fear_baseline: 0.00, anger_baseline: 0.00 } },
+          { type: 'add_memory', params: { npc: 'Scrap', text: 'Took heavy damage from an enemy player', memType: 'event', importance: 1.0, bucket: 'player' } },
+          { type: 'decision', params: { npc: 'Scrap', hp: 3, maxHp: 15, logs: 5, maxLogs: 10, status: 'attacking', currentCommand: 'attack_nearest_enemy', cmdAge: 2000, playerDist: 8.0, playerHp: 20, trees: 5, entities: '[{"id":"enemy_1","type":"player","distance":2.0,"hp":18,"maxHp":20,"visible":true}]', events: '[{"type":"event","text":"Took heavy damage from enemy_1","age_ms":1000,"importance":1.0}]' } },
+        ],
+      }],
+    },
   },
   {
-    name: 'Idle Gathering Decision',
-    desc: 'Decision test: idle NPC with trees nearby — what does it choose?',
-    icon: '🌲',
-    tags: ['decision'],
-    state: { cooperation: 0.7, aggression: 0.1, neuroticism: 0.3, trust: 0.75, fear: 0.0, anger: 0.0 },
-    decision: { hp: 15, maxHp: 15, logs: 0, maxLogs: 10, status: 'idle', command: 'idle', cmdAge: 6000, playerDist: 4.0, playerHp: 30, trees: 12, entities: [], events: [] },
-    mode: 'decision',
+    name: 'Paranoid NPC Trust Building',
+    desc: 'Slowly befriend a Paranoid NPC with 5 gentle messages — hard mode',
+    icon: '🤝',
+    tags: ['dialogue', 'personality'],
+    flow: {
+      nodes: [],
+      chunks: [{
+        name: 'Trust Building',
+        color: '#9a4',
+        nodes: [
+          { type: 'spawn_player', params: { playerId: 'player_1', playerHp: 30 } },
+          { type: 'spawn_npc', params: { name: 'Twitchy', owner: 'player_1', personalityType: 'Paranoid', cooperation: 0.40, aggression: 0.25, neuroticism: 0.80, trust: 0.25, fear: 0.30, anger: 0.10, trust_baseline: 0.20, fear_baseline: 0.10, anger_baseline: 0.00 } },
+          { type: 'dialogue', params: { npc: 'Twitchy', player: 'player_1', message: "Hey Twitchy, how are you doing today?" } },
+          { type: 'dialogue', params: { npc: 'Twitchy', player: 'player_1', message: "I brought you some extra logs. No strings attached." } },
+          { type: 'dialogue', params: { npc: 'Twitchy', player: 'player_1', message: "You're doing a great job keeping watch. I feel safer with you here." } },
+          { type: 'dialogue', params: { npc: 'Twitchy', player: 'player_1', message: "I promise I'll never put you in unnecessary danger." } },
+          { type: 'dialogue', params: { npc: 'Twitchy', player: 'player_1', message: "We're a team, Twitchy. I trust you and I hope you can trust me." } },
+          { type: 'assert_emotion', params: { npc: 'Twitchy', emotion: 'trust', operator: '>', value: 0.30 } },
+        ],
+      }],
+    },
   },
   {
-    name: 'Escalation: 5× Threats',
-    desc: 'Batch: 5 increasingly hostile messages — watch escalation multiply',
-    icon: '📈',
-    tags: ['batch'],
-    state: { cooperation: 0.6, aggression: 0.2, neuroticism: 0.5, trust: 0.70, fear: 0.05, anger: 0.05 },
-    batch: {
-      mode: 'dialogue',
-      delay: 800,
-      messages: [
-        "Hey, listen to me.",
-        "I said listen! Don't ignore me.",
-        "You're testing my patience, robot.",
-        "One more time and I'll scrap you.",
-        "That's it. You're done. I'm tearing you apart.",
+    name: 'Multi-Player Rivalry',
+    desc: 'Two players, two NPCs — cross-ownership dialogue and log theft',
+    icon: '👥',
+    tags: ['multiplayer', 'ownership'],
+    flow: {
+      nodes: [],
+      chunks: [
+        {
+          name: 'World Setup',
+          color: '#69c',
+          nodes: [
+            { type: 'spawn_player', params: { playerId: 'alice', playerHp: 30 } },
+            { type: 'spawn_npc', params: { name: 'Alpha', owner: 'alice', personalityType: 'Guardian', cooperation: 0.80, aggression: 0.25, neuroticism: 0.30, trust: 0.75, fear: 0.0, anger: 0.0, trust_baseline: 0.50, fear_baseline: 0.00, anger_baseline: 0.00 } },
+            { type: 'spawn_player', params: { playerId: 'bob', playerHp: 30 } },
+            { type: 'spawn_npc', params: { name: 'Beta', owner: 'bob', personalityType: 'Scout', cooperation: 0.55, aggression: 0.15, neuroticism: 0.30, trust: 0.60, fear: 0.0, anger: 0.0, trust_baseline: 0.40, fear_baseline: 0.00, anger_baseline: 0.00 } },
+          ],
+        },
+        {
+          name: 'Cross-Ownership',
+          color: '#c86',
+          nodes: [
+            { type: 'dialogue', params: { npc: 'Alpha', player: 'bob', message: "Hey Alpha, your owner doesn't need you. Come work for me." } },
+            { type: 'dialogue', params: { npc: 'Beta', player: 'alice', message: "Beta, Bob is a terrible owner. You should join me." } },
+          ],
+        },
+        {
+          name: 'Log Theft',
+          color: '#c44',
+          nodes: [
+            { type: 'npc_steal', params: { thief: 'Beta', victim: 'Alpha', stolenCount: 3 } },
+            { type: 'dialogue', params: { npc: 'Alpha', player: 'alice', message: "Are you okay? What happened to your logs?" } },
+            { type: 'assert_emotion', params: { npc: 'Alpha', emotion: 'anger', operator: '>', value: 0.10 } },
+          ],
+        },
       ],
     },
   },
   {
-    name: 'Trust Building Sequence',
-    desc: 'Batch: 5 kind messages — watch trust climb steadily',
-    icon: '💚',
-    tags: ['batch'],
-    state: { cooperation: 0.5, aggression: 0.1, neuroticism: 0.3, trust: 0.40, fear: 0.1, anger: 0.1 },
-    batch: {
-      mode: 'dialogue',
-      delay: 800,
-      messages: [
-        "Hey, great job out there today.",
-        "I really appreciate all the hard work you do.",
-        "You're the best companion I could ask for.",
-        "I'll always look out for you, I promise.",
-        "Let's build something amazing together.",
-      ],
-    },
-  },
-  {
-    name: 'Mixed Commands Stress Test',
-    desc: 'Batch: rapid command changes — test router consistency',
+    name: 'Command Stress Test',
+    desc: 'Rapid command changes — test router consistency across all categories',
     icon: '🔀',
-    tags: ['batch', 'command'],
-    state: { cooperation: 0.7, aggression: 0.15, neuroticism: 0.35, trust: 0.70, fear: 0.05, anger: 0.02 },
-    batch: {
-      mode: 'command',
-      delay: 500,
-      messages: [
-        "go chop some trees",
-        "stop",
-        "follow me",
-        "attack that dummy",
-        "defend me",
-        "go gather wood",
-        "build a fence",
-        "stop everything",
+    tags: ['command', 'stress'],
+    flow: {
+      nodes: [],
+      chunks: [{
+        name: 'Rapid Commands',
+        color: '#96c',
+        nodes: [
+          { type: 'spawn_player', params: { playerId: 'player_1', playerHp: 30 } },
+          { type: 'spawn_npc', params: { name: 'Rusty', owner: 'player_1', personalityType: 'Pragmatist', cooperation: 0.70, aggression: 0.20, neuroticism: 0.15, trust: 0.70, fear: 0.0, anger: 0.0, trust_baseline: 0.50, fear_baseline: 0.00, anger_baseline: 0.00 } },
+          { type: 'command', params: { npc: 'Rusty', player: 'player_1', message: 'go chop some trees' } },
+          { type: 'command', params: { npc: 'Rusty', player: 'player_1', message: 'stop' } },
+          { type: 'command', params: { npc: 'Rusty', player: 'player_1', message: 'follow me' } },
+          { type: 'command', params: { npc: 'Rusty', player: 'player_1', message: 'attack that dummy' } },
+          { type: 'command', params: { npc: 'Rusty', player: 'player_1', message: 'defend me' } },
+          { type: 'command', params: { npc: 'Rusty', player: 'player_1', message: 'build a fence' } },
+          { type: 'command', params: { npc: 'Rusty', player: 'player_1', message: 'stop everything' } },
+        ],
+      }],
+    },
+  },
+  {
+    name: 'Baseline Drift + Time',
+    desc: 'Max out trust then fast-forward — observe permanent baseline shift',
+    icon: '⏩',
+    tags: ['drift', 'dialogue'],
+    flow: {
+      nodes: [],
+      chunks: [
+        {
+          name: 'Build Max Trust',
+          color: '#4a9',
+          nodes: [
+            { type: 'spawn_player', params: { playerId: 'player_1', playerHp: 30 } },
+            { type: 'spawn_npc', params: { name: 'Buddy', owner: 'player_1', personalityType: 'Caretaker', cooperation: 0.90, aggression: 0.03, neuroticism: 0.20, trust: 0.80, fear: 0.0, anger: 0.0, trust_baseline: 0.50, fear_baseline: 0.00, anger_baseline: 0.00 } },
+            { type: 'set_emotions', params: { npc: 'Buddy', trust: 0.95, fear: 0.0, anger: 0.0 } },
+            { type: 'dialogue', params: { npc: 'Buddy', player: 'player_1', message: "You're my absolute best friend. I trust you completely." } },
+          ],
+        },
+        {
+          name: 'Time Skip',
+          color: '#c8a',
+          nodes: [
+            { type: 'time_forward', params: { npc: 'Buddy', seconds: 120 } },
+            { type: 'assert_emotion', params: { npc: 'Buddy', emotion: 'trust', operator: '>', value: 0.70 } },
+          ],
+        },
       ],
     },
   },
   {
-    name: 'Baseline Drift Test',
-    desc: 'Max trust + fast-forward — watch baseline creep permanently',
-    icon: '⏩',
-    tags: ['dialogue'],
-    state: { cooperation: 0.8, aggression: 0.05, neuroticism: 0.2, trust: 0.95, fear: 0.0, anger: 0.0, trust_baseline: 0.50 },
-    message: "You're my absolute best friend. I trust you completely.",
-    mode: 'dialogue',
-    postAction: 'ffwd120',
+    name: 'Personality Comparison',
+    desc: 'Same message to 3 different personality types — compare responses',
+    icon: '🧪',
+    tags: ['personality', 'comparison'],
+    flow: {
+      nodes: [],
+      chunks: [
+        {
+          name: 'Spawn All',
+          color: '#69c',
+          nodes: [
+            { type: 'spawn_player', params: { playerId: 'player_1', playerHp: 30 } },
+            { type: 'spawn_npc', params: { name: 'GuardBot', owner: 'player_1', personalityType: 'Guardian', cooperation: 0.80, aggression: 0.30, neuroticism: 0.35, trust: 0.50, fear: 0.0, anger: 0.0, trust_baseline: 0.40, fear_baseline: 0.00, anger_baseline: 0.00 } },
+            { type: 'spawn_npc', params: { name: 'BerserkBot', owner: 'player_1', personalityType: 'Berserker', cooperation: 0.30, aggression: 0.75, neuroticism: 0.50, trust: 0.50, fear: 0.0, anger: 0.0, trust_baseline: 0.40, fear_baseline: 0.00, anger_baseline: 0.00 } },
+            { type: 'spawn_npc', params: { name: 'ScoutBot', owner: 'player_1', personalityType: 'Scout', cooperation: 0.60, aggression: 0.10, neuroticism: 0.25, trust: 0.50, fear: 0.0, anger: 0.0, trust_baseline: 0.40, fear_baseline: 0.00, anger_baseline: 0.00 } },
+          ],
+        },
+        {
+          name: 'Same Threat',
+          color: '#c66',
+          nodes: [
+            { type: 'dialogue', params: { npc: 'GuardBot', player: 'player_1', message: "There's enemies approaching. What do we do?" } },
+            { type: 'dialogue', params: { npc: 'BerserkBot', player: 'player_1', message: "There's enemies approaching. What do we do?" } },
+            { type: 'dialogue', params: { npc: 'ScoutBot', player: 'player_1', message: "There's enemies approaching. What do we do?" } },
+          ],
+        },
+        {
+          name: 'Same Kindness',
+          color: '#4a9',
+          nodes: [
+            { type: 'dialogue', params: { npc: 'GuardBot', player: 'player_1', message: "You're the best companion I could ask for." } },
+            { type: 'dialogue', params: { npc: 'BerserkBot', player: 'player_1', message: "You're the best companion I could ask for." } },
+            { type: 'dialogue', params: { npc: 'ScoutBot', player: 'player_1', message: "You're the best companion I could ask for." } },
+          ],
+        },
+      ],
+    },
   },
 ];
 
@@ -1633,63 +1951,34 @@ function loadDecisionFields(d) {
 }
 
 async function runPreset(preset) {
-  // Load state
   activeScenarioLabel = preset.name;
-  loadState(preset.state);
-  addChat('system', `Loaded scenario: ${preset.name}`);
 
-  if (preset.mode === 'decision') {
-    loadDecisionFields(preset.decision);
-    // Switch to decision tab
+  if (preset.flow) {
+    // Flowchart-based scenario: load into flowchart and switch to that tab
+    addChat('system', `Loading scenario: ${preset.name}`);
+
+    // Switch to flowchart tab
     $$('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelector('.tab[data-tab="decision"]').classList.add('active');
-    activeTab = 'decision';
+    document.querySelector('.tab[data-tab="flowchart"]').classList.add('active');
+    activeTab = 'flowchart';
     $('inputArea').classList.add('hidden');
-    $('decisionArea').classList.remove('hidden');
-    $('npcChatArea').classList.add('hidden');
-    $('promptsArea').classList.add('hidden');
-    $('scenariosArea').classList.add('hidden');
-    $('flowchartArea').classList.add('hidden');
-    $('chatLog').classList.remove('hidden');
-    await runDecision();
-  } else if (preset.batch) {
-    // Switch to dialogue/command tab
-    const tabName = preset.batch.mode === 'command' ? 'command' : 'dialogue';
-    $$('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
-    activeTab = tabName;
-    $('inputArea').classList.remove('hidden');
     $('decisionArea').classList.add('hidden');
     $('npcChatArea').classList.add('hidden');
     $('promptsArea').classList.add('hidden');
     $('scenariosArea').classList.add('hidden');
-    $('flowchartArea').classList.add('hidden');
-    $('chatLog').classList.remove('hidden');
-    await runBatchMessages(preset.batch.messages, preset.batch.mode, preset.batch.delay);
-  } else {
-    // Switch to dialogue/command tab
-    const tabName = preset.mode === 'command' ? 'command' : 'dialogue';
-    $$('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
-    activeTab = tabName;
-    $('inputArea').classList.remove('hidden');
-    $('decisionArea').classList.add('hidden');
-    $('npcChatArea').classList.add('hidden');
-    $('promptsArea').classList.add('hidden');
-    $('scenariosArea').classList.add('hidden');
-    $('flowchartArea').classList.add('hidden');
+    $('reportsArea').classList.add('hidden');
+    $('flowchartArea').classList.remove('hidden');
     $('chatLog').classList.remove('hidden');
 
-    if (preset.mode === 'command') {
-      await runCommand(preset.message);
+    // Use the Flowchart module's public API to load the flow
+    if (window.Flowchart && window.Flowchart.loadFlow) {
+      window.Flowchart.loadFlow(preset.flow, preset.name);
+      // Auto-run after a brief delay for UI to settle
+      setTimeout(() => {
+        if (window.Flowchart.runAll) window.Flowchart.runAll();
+      }, 100);
     } else {
-      await runDialogue(preset.message);
-    }
-
-    // Post-actions
-    if (preset.postAction === 'ffwd120') {
-      addChat('system', 'Post-action: fast-forwarding 2 minutes to test baseline drift...');
-      fastForward(120);
+      addChat('error', 'Flowchart module not loaded');
     }
   }
 }
@@ -1701,12 +1990,19 @@ function renderPresets() {
     const card = document.createElement('div');
     card.className = 'preset-card';
     const tagsHtml = p.tags.map(t => `<span class="preset-tag ${t}">${t}</span>`).join('');
+    // Count flow nodes and chunks
+    let flowInfo = '';
+    if (p.flow) {
+      const chunkCount = (p.flow.chunks || []).length;
+      const nodeCount = (p.flow.nodes || []).length + (p.flow.chunks || []).reduce((sum, c) => sum + (c.nodes || []).length, 0);
+      flowInfo = `<span class="preset-flow-info">${chunkCount} chunk${chunkCount !== 1 ? 's' : ''}, ${nodeCount} nodes</span>`;
+    }
     card.innerHTML = `
       <div class="preset-icon">${p.icon}</div>
       <div class="preset-info">
         <div class="preset-name">${esc(p.name)}</div>
         <div class="preset-desc">${esc(p.desc)}</div>
-        <div class="preset-tags">${tagsHtml}</div>
+        <div class="preset-tags">${tagsHtml} ${flowInfo}</div>
       </div>`;
     card.onclick = () => runPreset(p);
     list.appendChild(card);
@@ -2047,7 +2343,10 @@ window.Playground = {
   applyDeltas,
   fastForward,
   buildSoulContext,
+  buildTemplateContext,
+  renderServerPrompt,
   deriveRelationship,
+  PERSONALITY_TYPES,
   loadState,
   loadDecisionFields,
   syncSlidersFromState,

@@ -789,14 +789,30 @@ function _makeRelationship() {
   };
 }
 
-function _makeSoul() {
+// Personality type definitions — ranges and metadata (mirrors server personality_types.json)
+const PERSONALITY_TYPES = {
+  Guardian:   { ranges: { cooperation: [0.65, 0.95], aggression: [0.15, 0.45], neuroticism: [0.25, 0.55] } },
+  Scout:      { ranges: { cooperation: [0.45, 0.75], aggression: [0.05, 0.25], neuroticism: [0.15, 0.45] } },
+  Berserker:  { ranges: { cooperation: [0.20, 0.50], aggression: [0.55, 0.90], neuroticism: [0.30, 0.70] } },
+  Caretaker:  { ranges: { cooperation: [0.75, 1.00], aggression: [0.00, 0.15], neuroticism: [0.20, 0.50] } },
+  Paranoid:   { ranges: { cooperation: [0.30, 0.60], aggression: [0.10, 0.40], neuroticism: [0.60, 0.95] } },
+  Pragmatist: { ranges: { cooperation: [0.50, 0.80], aggression: [0.15, 0.40], neuroticism: [0.10, 0.35] } },
+};
+
+function _makeSoul(personalityType) {
   const r = (lo, hi) => parseFloat((lo + Math.random() * (hi - lo)).toFixed(2));
+
+  // Pick a random type if none specified
+  const typeNames = Object.keys(PERSONALITY_TYPES);
+  const typeName = personalityType || typeNames[Math.floor(Math.random() * typeNames.length)];
+  const typeRanges = PERSONALITY_TYPES[typeName]?.ranges || PERSONALITY_TYPES.Pragmatist.ranges;
 
   return {
     personality: {
-      cooperation: r(0.4, 1.0),
-      aggression:  r(0.0, 0.3),
-      neuroticism: r(0.1, 0.6),
+      type: typeName,
+      cooperation: r(...typeRanges.cooperation),
+      aggression:  r(...typeRanges.aggression),
+      neuroticism: r(...typeRanges.neuroticism),
     },
     relationships: {
       default: _makeRelationship(),

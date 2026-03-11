@@ -4,8 +4,9 @@ import httpx
 
 from core.config import MODEL, OLLAMA_URL
 from schemas.soul import DialogueRequest, NPCSaveRequest, SoulContext
-from services.prompt_loader import load_prompt
+from services.prompt_loader import load_prompt, render_prompt
 from services import database as db
+from services import personality_types as ptypes
 
 
 def extract_soul_json(raw: str) -> dict:
@@ -50,11 +51,48 @@ def _soul_block(soul: SoulContext) -> str:
     return json.dumps(payload, indent=2)
 
 
+def _build_template_context(
+    soul: SoulContext,
+    world_context: dict | None = None,
+    speaking_player: str = "",
+    owner: str = "",
+) -> dict:
+    """Build a flat context dict for template rendering from soul + world state."""
+    personality = soul.personality or {}
+
+    # Resolve personality type — explicit field, or auto-classify from traits
+    type_name = personality.get("type", "")
+    if not type_name:
+        type_name = ptypes.classify(personality)
+
+    ctx = {
+        "npc": {
+            "name": soul.name,
+            "personality": personality,
+            "ptype": ptypes.type_context(type_name),
+        },
+        "emotion": soul.emotional_state,
+        "relationship": soul.relationship,
+        "memories": soul.memories[-12:] if soul.memories else [],
+    }
+    if speaking_player:
+        ctx["speaking_player"] = speaking_player
+    if owner:
+        ctx["owner"] = owner
+    if speaking_player and owner:
+        ctx["is_owner"] = speaking_player == owner
+    if world_context:
+        ctx["world"] = world_context
+    return ctx
+
+
 async def generate_dialogue(request: DialogueRequest) -> dict:
-    prompt_text = load_prompt("dialogue")
-    system_content = prompt_text + f"\n\nNPC soul:\n{_soul_block(request.soul)}"
-    if request.world_context:
-        system_content += "\n\nWorld state: " + json.dumps(request.world_context)
+    ctx = _build_template_context(
+        request.soul, request.world_context,
+        speaking_player=request.speaking_player,
+        owner=request.owner,
+    )
+    system_content = render_prompt("dialogue", ctx)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(

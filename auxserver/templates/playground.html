@@ -106,6 +106,18 @@
           <input type="text" id="npcName" value="Rusty" />
         </div>
         <div class="field-row">
+          <label>Type</label>
+          <select id="ptypeSelect">
+            <option value="Guardian">Guardian</option>
+            <option value="Scout">Scout</option>
+            <option value="Berserker">Berserker</option>
+            <option value="Caretaker">Caretaker</option>
+            <option value="Paranoid">Paranoid</option>
+            <option value="Pragmatist">Pragmatist</option>
+          </select>
+          <button id="rollTraitsBtn" class="small-btn" title="Randomize traits within type ranges">Roll</button>
+        </div>
+        <div class="field-row">
           <label>Player ID</label>
           <input type="text" id="playerId" value="player_test" />
         </div>
@@ -197,7 +209,7 @@
         <div id="scenariosArea" class="scenarios-area hidden">
           <div class="scenarios-header">
             <h4>Preset Scenarios</h4>
-            <span class="hint">One-click to load state + run interaction</span>
+            <span class="hint">Click to load flowchart + auto-run</span>
           </div>
           <div id="presetList" class="preset-list"></div>
 
@@ -335,15 +347,18 @@
             <div id="fcExecLog" class="fc-exec-log"></div>
           </div>
 
-          <!-- Chunk controls (appears when chunk is selected) -->
-          <div id="fcChunkControls" class="fc-chunk-controls hidden">
+          <!-- Chunk manager panel -->
+          <div id="fcChunkPanel" class="fc-chunk-panel">
             <div class="fc-chunk-header">
-              <strong>Chunk Replay</strong>
-              <span class="hint">Re-run selected nodes from saved state snapshot</span>
+              <strong>Chunks</strong>
+              <button id="fcNewChunkBtn" class="small-btn">+ New Chunk</button>
             </div>
-            <div class="fc-chunk-actions">
-              <button id="fcChunkReplayBtn">Replay Chunk</button>
-              <button id="fcChunkResetBtn" class="small-btn">Reset to Snapshot</button>
+            <div id="fcChunkList" class="fc-chunk-list"></div>
+            <div id="fcChunkActions" class="fc-chunk-actions hidden">
+              <button id="fcChunkRunBtn">Run</button>
+              <button id="fcChunkReplayBtn" class="small-btn">Replay</button>
+              <button id="fcChunkResetBtn" class="small-btn">Reset</button>
+              <button id="fcChunkDeleteBtn" class="small-btn danger">Delete</button>
               <span id="fcChunkInfo" class="fc-chunk-info"></span>
             </div>
           </div>

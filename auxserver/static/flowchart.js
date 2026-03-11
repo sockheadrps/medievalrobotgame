@@ -19,6 +19,7 @@ const world = {
 function makeNpcState(p) {
   return {
     owner: p.owner || '',
+    personalityType: p.personalityType || '',
     personality: { cooperation: p.cooperation ?? 0.7, aggression: p.aggression ?? 0.15, neuroticism: p.neuroticism ?? 0.35 },
     trust: p.trust ?? 0.70, fear: p.fear ?? 0.05, anger: p.anger ?? 0.02,
     trust_baseline: p.trust_baseline ?? 0.50, fear_baseline: p.fear_baseline ?? 0.00, anger_baseline: p.anger_baseline ?? 0.00,
@@ -70,18 +71,29 @@ function playerIds() { return Object.keys(world.players); }
 
 // ── Dynamic select options helper ────────────────────────────────────────────
 // Merge live world registry with declared spawn nodes so dropdowns work before execution
+function getAllNodes() {
+  const all = [...nodes];
+  for (const c of chunks) all.push(...c.nodes);
+  return all;
+}
+
 function getNpcOptions() {
-  const set = new Set(npcNames());
-  for (const n of nodes) {
-    if (n.type === 'spawn_npc' && n.params.name) set.add(n.params.name);
+  const map = new Map(); // name → owner
+  for (const [name, npc] of Object.entries(world.npcs)) {
+    map.set(name, npc.owner || '?');
   }
-  const names = [...set];
-  return names.length > 0 ? names : ['(none)'];
+  for (const n of getAllNodes()) {
+    if (n.type === 'spawn_npc' && n.params.name && !map.has(n.params.name)) {
+      map.set(n.params.name, n.params.owner || '?');
+    }
+  }
+  if (map.size === 0) return [{ name: '(none)', owner: '' }];
+  return [...map.entries()].map(([name, owner]) => ({ name, owner }));
 }
 
 function getPlayerOptions() {
   const set = new Set(playerIds());
-  for (const n of nodes) {
+  for (const n of getAllNodes()) {
     if (n.type === 'spawn_player' && n.params.playerId) set.add(n.params.playerId);
   }
   const ids = [...set];
@@ -93,10 +105,11 @@ const NODE_DEFS = {
   // Setup
   spawn_npc: {
     label: 'Spawn NPC', icon: '🤖', category: 'setup',
-    defaults: { name: 'Rusty', owner: '', cooperation: 0.70, aggression: 0.15, neuroticism: 0.35, trust: 0.70, fear: 0.05, anger: 0.02, trust_baseline: 0.50, fear_baseline: 0.00, anger_baseline: 0.00 },
+    defaults: { name: 'Rusty', owner: '', personalityType: 'Guardian', cooperation: 0.70, aggression: 0.15, neuroticism: 0.35, trust: 0.70, fear: 0.05, anger: 0.02, trust_baseline: 0.50, fear_baseline: 0.00, anger_baseline: 0.00 },
     params: [
       { key: 'name', label: 'NPC Name', type: 'text' },
       { key: 'owner', label: 'Owner', type: 'readonly' },
+      { key: 'personalityType', label: 'Personality Type', type: 'select', options: ['Guardian', 'Scout', 'Berserker', 'Caretaker', 'Paranoid', 'Pragmatist'] },
       { key: 'cooperation', label: 'Cooperation', type: 'number', min: 0, max: 1, step: 0.01 },
       { key: 'aggression', label: 'Aggression', type: 'number', min: 0, max: 1, step: 0.01 },
       { key: 'neuroticism', label: 'Neuroticism', type: 'number', min: 0, max: 1, step: 0.01 },
@@ -107,7 +120,7 @@ const NODE_DEFS = {
       { key: 'fear_baseline', label: 'Fear BL', type: 'number', min: 0, max: 0.85, step: 0.01 },
       { key: 'anger_baseline', label: 'Anger BL', type: 'number', min: 0, max: 0.85, step: 0.01 },
     ],
-    summary: (p) => `${p.name} [${p.owner || '?'}]`,
+    summary: (p) => `${p.name} [${p.owner || '?'}] ${p.personalityType || ''}`,
     _internal: true, // not in dropdown, spawned from spawn_player
   },
   spawn_player: {
@@ -298,15 +311,19 @@ const NODE_DEFS = {
 };
 
 // ── Flow state ───────────────────────────────────────────────────────────────
-let nodes = [];
+let nodes = [];        // global (unchunked) nodes
 let selectedNodeId = null;
-let chunkStart = null;
-let chunkEnd = null;
-let chunkSnapshot = null; // { world deep copy, _currentNpc }
+// ── Multi-chunk system ────────────────────────────────────────────────────────
+// Each chunk: { id, name, color, nodes: [], snapshot }
+// Chunks own their nodes. Global `nodes` holds unchunked nodes.
+// Active chunk = where new nodes are added.
+let chunks = [];
+let activeChunkId = null;  // which chunk is selected (nodes go here)
 let running = false;
 let aborted = false;
 let nextId = 1;
 let flowTest = null;
+let _currentFlowName = null; // name of loaded/saved flow
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return 'fc_' + (nextId++); }
@@ -340,6 +357,74 @@ function restoreWorld(snap) {
 
 function esc(s) { return PG().esc(s); }
 
+// ── Chunk helpers ─────────────────────────────────────────────────────────────
+let _chunkIdSeq = 1;
+function chunkUid() { return 'chunk_' + (_chunkIdSeq++); }
+
+function randomChunkColor() {
+  const hue = Math.floor(Math.random() * 360);
+  return `hsl(${hue}, 65%, 55%)`;
+}
+
+function getActiveChunk() {
+  return chunks.find(c => c.id === activeChunkId) || null;
+}
+
+// Get the node list where a node lives (global or chunk)
+function findNodeOwner(nodeId) {
+  if (nodes.find(n => n.id === nodeId)) return { list: nodes, chunk: null };
+  for (const c of chunks) {
+    if (c.nodes.find(n => n.id === nodeId)) return { list: c.nodes, chunk: c };
+  }
+  return null;
+}
+
+function renderChunkList() {
+  const list = $('fcChunkList');
+  list.innerHTML = '';
+
+  // "Global" tag (unchunked)
+  const globalTag = document.createElement('span');
+  globalTag.className = 'fc-chunk-tag' + (activeChunkId === null ? ' active' : '');
+  globalTag.style.background = '#555';
+  globalTag.textContent = `Global (${nodes.length})`;
+  globalTag.onclick = () => {
+    activeChunkId = null;
+    renderChunkList();
+    renderChunkActions();
+    render();
+  };
+  list.appendChild(globalTag);
+
+  for (const c of chunks) {
+    const tag = document.createElement('span');
+    tag.className = 'fc-chunk-tag' + (c.id === activeChunkId ? ' active' : '');
+    tag.style.background = c.color;
+    tag.textContent = `${c.name} (${c.nodes.length})`;
+    tag.onclick = () => {
+      activeChunkId = (activeChunkId === c.id) ? null : c.id;
+      renderChunkList();
+      renderChunkActions();
+      render();
+    };
+    list.appendChild(tag);
+  }
+}
+
+function renderChunkActions() {
+  const c = getActiveChunk();
+  const panel = $('fcChunkActions');
+  const info = $('fcChunkInfo');
+  if (!c) {
+    panel.classList.add('hidden');
+    $('fcRunSelectedBtn').disabled = true;
+    return;
+  }
+  panel.classList.remove('hidden');
+  $('fcRunSelectedBtn').disabled = c.nodes.length === 0;
+  info.textContent = `${c.name}: ${c.nodes.length} node(s)${c.snapshot ? ' • snapshot' : ''}`;
+}
+
 function emotionSnapshot(name) {
   if (!name || !world.npcs[name]) return null;
   const n = world.npcs[name];
@@ -366,80 +451,113 @@ function resolveNpc(p, key = 'npc') {
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────────
+
+function renderNodeInList(list, node, i, ownerList, chunkColor) {
+  if (i > 0) {
+    const conn = document.createElement('div');
+    conn.className = 'fc-connector';
+    list.appendChild(conn);
+  }
+
+  const def = NODE_DEFS[node.type];
+  const div = document.createElement('div');
+  div.className = 'fc-node';
+  div.dataset.category = def.category;
+  div.dataset.id = node.id;
+
+  if (node.id === selectedNodeId) div.classList.add('selected');
+  if (node.status === 'running') div.classList.add('running');
+  if (node.status === 'done') div.classList.add('done');
+  if (node.status === 'failed') div.classList.add('failed');
+
+  if (chunkColor) {
+    div.style.borderLeftColor = chunkColor;
+    div.style.borderLeftWidth = '3px';
+  }
+
+  div.innerHTML = `
+    <span class="fc-node-idx">${i + 1}</span>
+    <span class="fc-node-icon">${def.icon}</span>
+    <div class="fc-node-body">
+      <div class="fc-node-type">${esc(def.label)}</div>
+      <div class="fc-node-summary">${esc(def.summary(node.params))}</div>
+    </div>
+    <div class="fc-node-actions">
+      <button title="Move up" data-action="up">↑</button>
+      <button title="Move down" data-action="down">↓</button>
+      <button title="Duplicate" data-action="dup">⎘</button>
+      <button title="Delete" data-action="del">×</button>
+    </div>
+  `;
+
+  div.onclick = (e) => {
+    if (e.target.closest('.fc-node-actions button')) return;
+    selectedNodeId = node.id;
+    render();
+    renderDetail(node);
+  };
+
+  div.querySelector('[data-action="up"]').onclick = (e) => { e.stopPropagation(); if (i > 0) { [ownerList[i-1], ownerList[i]] = [ownerList[i], ownerList[i-1]]; render(); } };
+  div.querySelector('[data-action="down"]').onclick = (e) => { e.stopPropagation(); if (i < ownerList.length - 1) { [ownerList[i], ownerList[i+1]] = [ownerList[i+1], ownerList[i]]; render(); } };
+  div.querySelector('[data-action="dup"]').onclick = (e) => { e.stopPropagation(); const clone = { id: uid(), type: node.type, params: { ...node.params }, status: 'pending', result: null }; ownerList.splice(i + 1, 0, clone); render(); };
+  div.querySelector('[data-action="del"]').onclick = (e) => {
+    e.stopPropagation();
+    ownerList.splice(i, 1);
+    if (selectedNodeId === node.id) { selectedNodeId = null; $('fcDetail').innerHTML = '<div class="fc-detail-empty">Select a node to edit its parameters</div>'; }
+    render();
+  };
+
+  list.appendChild(div);
+}
+
 function render() {
   const list = $('fcNodeList');
   list.innerHTML = '';
 
-  if (nodes.length === 0) {
-    list.innerHTML = '<div class="fc-empty-hint">Add nodes above to build a test flow.<br>Nodes run top-to-bottom in sequence.</div>';
+  const totalNodes = nodes.length + chunks.reduce((s, c) => s + c.nodes.length, 0);
+
+  if (totalNodes === 0) {
+    list.innerHTML = '<div class="fc-empty-hint">Add nodes above to build a test flow.<br>Create chunks to group related nodes.</div>';
     $('fcDetail').innerHTML = '<div class="fc-detail-empty">Select a node to edit its parameters</div>';
-    $('fcChunkControls').classList.add('hidden');
-    $('fcRunSelectedBtn').disabled = true;
+    renderChunkList();
+    renderChunkActions();
     return;
   }
 
-  nodes.forEach((node, i) => {
-    if (i > 0) {
-      const conn = document.createElement('div');
-      conn.className = 'fc-connector';
-      list.appendChild(conn);
+  // Render global nodes
+  if (nodes.length > 0) {
+    const header = document.createElement('div');
+    header.className = 'fc-section-header';
+    header.innerHTML = '<span style="color:#888">Global Nodes</span>';
+    list.appendChild(header);
+    nodes.forEach((node, i) => renderNodeInList(list, node, i, nodes, null));
+  }
+
+  // Render each chunk
+  for (const c of chunks) {
+    const header = document.createElement('div');
+    header.className = 'fc-section-header';
+    header.style.borderLeftColor = c.color;
+    header.style.borderLeftWidth = '3px';
+    header.style.borderLeftStyle = 'solid';
+    header.innerHTML = `<span style="color:${c.color};font-weight:bold">${esc(c.name)}</span> <span style="color:#666">(${c.nodes.length} nodes)</span>`;
+    list.appendChild(header);
+
+    if (c.nodes.length === 0) {
+      const hint = document.createElement('div');
+      hint.className = 'fc-empty-hint';
+      hint.style.borderLeft = `3px solid ${c.color}`;
+      hint.style.paddingLeft = '8px';
+      hint.style.margin = '4px 0';
+      hint.textContent = 'Select this chunk then add nodes';
+      list.appendChild(hint);
     }
 
-    const def = NODE_DEFS[node.type];
-    const div = document.createElement('div');
-    div.className = 'fc-node';
-    div.dataset.category = def.category;
-    div.dataset.id = node.id;
+    c.nodes.forEach((node, i) => renderNodeInList(list, node, i, c.nodes, c.color));
+  }
 
-    if (node.id === selectedNodeId) div.classList.add('selected');
-    if (node.status === 'running') div.classList.add('running');
-    if (node.status === 'done') div.classList.add('done');
-    if (node.status === 'failed') div.classList.add('failed');
-
-    if (chunkStart !== null && chunkEnd !== null && i >= chunkStart && i <= chunkEnd) {
-      div.classList.add('chunk-selected');
-    }
-
-    div.innerHTML = `
-      <span class="fc-node-idx">${i + 1}</span>
-      <span class="fc-node-icon">${def.icon}</span>
-      <div class="fc-node-body">
-        <div class="fc-node-type">${esc(def.label)}</div>
-        <div class="fc-node-summary">${esc(def.summary(node.params))}</div>
-      </div>
-      <div class="fc-node-actions">
-        <button title="Move up" data-action="up">↑</button>
-        <button title="Move down" data-action="down">↓</button>
-        <button title="Duplicate" data-action="dup">⎘</button>
-        <button title="Delete" data-action="del">×</button>
-      </div>
-    `;
-
-    div.onclick = (e) => {
-      if (e.target.closest('.fc-node-actions button')) return;
-      if (e.shiftKey && selectedNodeId) {
-        const selIdx = nodes.findIndex(n => n.id === selectedNodeId);
-        chunkStart = Math.min(selIdx, i);
-        chunkEnd = Math.max(selIdx, i);
-        updateChunkControls();
-      } else {
-        selectedNodeId = node.id;
-        chunkStart = null;
-        chunkEnd = null;
-        chunkSnapshot = null;
-        $('fcChunkControls').classList.add('hidden');
-      }
-      render();
-      if (!e.shiftKey) renderDetail(node);
-    };
-
-    div.querySelector('[data-action="up"]').onclick = (e) => { e.stopPropagation(); if (i > 0) { [nodes[i-1], nodes[i]] = [nodes[i], nodes[i-1]]; render(); } };
-    div.querySelector('[data-action="down"]').onclick = (e) => { e.stopPropagation(); if (i < nodes.length - 1) { [nodes[i], nodes[i+1]] = [nodes[i+1], nodes[i]]; render(); } };
-    div.querySelector('[data-action="dup"]').onclick = (e) => { e.stopPropagation(); const clone = { id: uid(), type: node.type, params: { ...node.params }, status: 'pending', result: null }; nodes.splice(i + 1, 0, clone); render(); };
-    div.querySelector('[data-action="del"]').onclick = (e) => { e.stopPropagation(); nodes.splice(i, 1); if (selectedNodeId === node.id) { selectedNodeId = null; $('fcDetail').innerHTML = '<div class="fc-detail-empty">Select a node to edit its parameters</div>'; } render(); };
-
-    list.appendChild(div);
-  });
+  renderChunkList();
+  renderChunkActions();
 }
 
 function renderDetail(node) {
@@ -457,14 +575,15 @@ function renderDetail(node) {
     if (p.type === 'npc_select' || p.type === 'npc_select_optional') {
       const opts = getNpcOptions();
       // Auto-assign first real option if param is empty
-      if (!val && p.type === 'npc_select' && opts.length > 0 && opts[0] !== '(none)') {
-        node.params[p.key] = opts[0];
+      if (!val && p.type === 'npc_select' && opts.length > 0 && opts[0].name !== '(none)') {
+        node.params[p.key] = opts[0].name;
       }
       const curVal = node.params[p.key] || '';
       html += `<select data-key="${p.key}">`;
       if (p.type === 'npc_select_optional') html += `<option value="">(all)</option>`;
       for (const opt of opts) {
-        html += `<option value="${opt}" ${curVal === opt ? 'selected' : ''}>${opt}</option>`;
+        const label = opt.owner ? `${opt.name} (${opt.owner})` : opt.name;
+        html += `<option value="${opt.name}" ${curVal === opt.name ? 'selected' : ''}>${esc(label)}</option>`;
       }
       html += '</select>';
     } else if (p.type === 'player_select') {
@@ -538,9 +657,14 @@ function renderDetail(node) {
     spawnBtn.onclick = () => {
       const def = NODE_DEFS['spawn_npc'];
       const npcNode = { id: uid(), type: 'spawn_npc', params: { ...def.defaults, owner: node.params.playerId }, status: 'pending', result: null };
-      // Insert right after this spawn_player node
-      const idx = nodes.findIndex(n => n.id === node.id);
-      nodes.splice(idx + 1, 0, npcNode);
+      // Insert right after this spawn_player node in whichever list owns it
+      const owner = findNodeOwner(node.id);
+      if (owner) {
+        const idx = owner.list.findIndex(n => n.id === node.id);
+        owner.list.splice(idx + 1, 0, npcNode);
+      } else {
+        nodes.push(npcNode);
+      }
       selectedNodeId = npcNode.id;
       render();
       renderDetail(npcNode);
@@ -556,16 +680,35 @@ function renderDetail(node) {
       } else if (paramDef?.type !== 'readonly') {
         node.params[key] = el.value;
       }
+      // When personality type changes on spawn_npc, randomize traits within type ranges
+      if (node.type === 'spawn_npc' && key === 'personalityType') {
+        const typeRanges = {
+          Guardian:   { cooperation: [0.65, 0.95], aggression: [0.15, 0.45], neuroticism: [0.25, 0.55] },
+          Scout:      { cooperation: [0.45, 0.75], aggression: [0.05, 0.25], neuroticism: [0.15, 0.45] },
+          Berserker:  { cooperation: [0.20, 0.50], aggression: [0.55, 0.90], neuroticism: [0.30, 0.70] },
+          Caretaker:  { cooperation: [0.75, 1.00], aggression: [0.00, 0.15], neuroticism: [0.20, 0.50] },
+          Paranoid:   { cooperation: [0.30, 0.60], aggression: [0.10, 0.40], neuroticism: [0.60, 0.95] },
+          Pragmatist: { cooperation: [0.50, 0.80], aggression: [0.15, 0.40], neuroticism: [0.10, 0.35] },
+        };
+        const ranges = typeRanges[el.value];
+        if (ranges) {
+          const r = (lo, hi) => +(lo + Math.random() * (hi - lo)).toFixed(2);
+          node.params.cooperation = r(...ranges.cooperation);
+          node.params.aggression = r(...ranges.aggression);
+          node.params.neuroticism = r(...ranges.neuroticism);
+          renderDetail(node); // re-render to show new values
+        }
+      }
       // When spawn_player's playerId changes, update owned spawn_npc nodes
       if (node.type === 'spawn_player' && key === 'playerId') {
-        const oldId = node.params.playerId; // already updated above, but we saved it in node.params
-        // We need the previous value — grab from nodes before the assignment happened
-        // Since node.params[key] was already set, find spawn_npc nodes owned by this player
-        const idx = nodes.findIndex(n => n.id === node.id);
-        for (let i = idx + 1; i < nodes.length; i++) {
-          if (nodes[i].type === 'spawn_player') break;
-          if (nodes[i].type === 'spawn_npc') {
-            nodes[i].params.owner = el.value;
+        const owner = findNodeOwner(node.id);
+        if (owner) {
+          const idx = owner.list.findIndex(n => n.id === node.id);
+          for (let i = idx + 1; i < owner.list.length; i++) {
+            if (owner.list[i].type === 'spawn_player') break;
+            if (owner.list[i].type === 'spawn_npc') {
+              owner.list[i].params.owner = el.value;
+            }
           }
         }
         const btn = detail.querySelector('[data-action="spawn-npc-for-player"]');
@@ -576,19 +719,6 @@ function renderDetail(node) {
     el.oninput = handler;
     el.onchange = handler;
   });
-}
-
-// ── Chunk controls ───────────────────────────────────────────────────────────
-function updateChunkControls() {
-  if (chunkStart === null || chunkEnd === null) {
-    $('fcChunkControls').classList.add('hidden');
-    $('fcRunSelectedBtn').disabled = true;
-    return;
-  }
-  $('fcChunkControls').classList.remove('hidden');
-  $('fcRunSelectedBtn').disabled = false;
-  const count = chunkEnd - chunkStart + 1;
-  $('fcChunkInfo').textContent = `Nodes ${chunkStart + 1}–${chunkEnd + 1} (${count} nodes)${chunkSnapshot ? ' • snapshot saved' : ''}`;
 }
 
 // ── Node Execution ───────────────────────────────────────────────────────────
@@ -658,7 +788,8 @@ async function executeNode(node) {
       if (!isOwner && p.player) {
         pg.addChat('system', `[${p.player} is NOT ${npc}'s owner (${world.npcs[npc]?.owner})]`);
       }
-      await pg.runDialogue(p.message);
+      // Pass speaking player so LLM knows who it's talking to
+      await pg.runDialogue(p.message, { speakingPlayer: p.player, owner: world.npcs[npc]?.owner });
       saveCurrent();
       const s = world.npcs[npc];
       return `${p.player}→${npc}: "${p.message}" → T=${s.trust.toFixed(2)} F=${s.fear.toFixed(2)} A=${s.anger.toFixed(2)}`;
@@ -926,21 +1057,16 @@ function safeParseJSON(str, fallback) {
 }
 
 // ── Run flow ─────────────────────────────────────────────────────────────────
-async function runNodes(startIdx, endIdx) {
+async function runNodeList(nodeList) {
   if (running) return;
   running = true;
   aborted = false;
   $('fcRunAllBtn').disabled = true;
   $('fcStopBtn').disabled = false;
   $('fcExecLog').innerHTML = '';
-
-  for (let i = startIdx; i <= endIdx; i++) {
-    nodes[i].status = 'pending';
-    nodes[i].result = null;
-  }
   render();
 
-  const total = endIdx - startIdx + 1;
+  const total = nodeList.length;
   execLog(`Starting flow: ${total} node(s)`, 'fc-log-info');
   $('fcExecStatus').textContent = 'Running...';
 
@@ -951,15 +1077,15 @@ async function runNodes(startIdx, endIdx) {
   const pg = PG();
   const flowName = `Flow Run ${new Date().toLocaleString()}`;
   flowTest = pg.buildTestBase(flowName, 'flow', 'flowchart');
-  flowTest.inputs = nodes.slice(startIdx, endIdx + 1).map(n => ({ type: n.type, params: n.params }));
+  flowTest.inputs = nodeList.map(n => ({ type: n.type, params: n.params }));
 
-  for (let i = startIdx; i <= endIdx; i++) {
+  for (let i = 0; i < nodeList.length; i++) {
     if (aborted) {
       execLog('Flow aborted by user', 'fc-log-warn');
       break;
     }
 
-    const node = nodes[i];
+    const node = nodeList[i];
     const def = NODE_DEFS[node.type];
     node.status = 'running';
     render();
@@ -968,7 +1094,7 @@ async function runNodes(startIdx, endIdx) {
     const before = emotionSnapshot(targetNpc);
     const t0 = performance.now();
 
-    execLog(`[${i + 1}/${endIdx + 1}] ${def.label} — ${def.summary(node.params)}`);
+    execLog(`[${i + 1}/${total}] ${def.label} — ${def.summary(node.params)}`);
 
     try {
       const result = await executeNode(node);
@@ -1027,7 +1153,7 @@ async function runNodes(startIdx, endIdx) {
     render();
     if (selectedNodeId === node.id) renderDetail(node);
 
-    if (i < endIdx) await new Promise(r => setTimeout(r, 100));
+    if (i < nodeList.length - 1) await new Promise(r => setTimeout(r, 100));
   }
 
   // Save final state back
@@ -1075,6 +1201,7 @@ function refreshFlowSelect() {
     const opt = document.createElement('option');
     opt.value = name;
     opt.textContent = name;
+    if (name === _currentFlowName) opt.selected = true;
     sel.appendChild(opt);
   }
 }
@@ -1086,57 +1213,101 @@ function init() {
     const def = NODE_DEFS[type];
     if (!def) return;
     const node = { id: uid(), type, params: { ...def.defaults }, status: 'pending', result: null };
-    nodes.push(node);
+    // Add to active chunk or global
+    const chunk = getActiveChunk();
+    if (chunk) {
+      chunk.nodes.push(node);
+    } else {
+      nodes.push(node);
+    }
     selectedNodeId = node.id;
     render();
     renderDetail(node);
   };
 
   $('fcRunAllBtn').onclick = () => {
-    if (nodes.length === 0) return;
+    const all = getAllNodes();
+    if (all.length === 0) return;
     // Reset world for full run
     for (const k of Object.keys(world.npcs)) delete world.npcs[k];
     for (const k of Object.keys(world.players)) delete world.players[k];
     _currentNpc = null;
-    nodes.forEach(n => { n.status = 'pending'; n.result = null; });
-    runNodes(0, nodes.length - 1);
+    all.forEach(n => { n.status = 'pending'; n.result = null; });
+    runNodeList(all);
   };
 
+  // ── New Chunk button ──
+  $('fcNewChunkBtn').onclick = () => {
+    const name = prompt('Chunk name:', `Chunk ${chunks.length + 1}`);
+    if (!name) return;
+    const chunk = {
+      id: chunkUid(),
+      name,
+      color: randomChunkColor(),
+      nodes: [],
+      snapshot: null,
+    };
+    chunks.push(chunk);
+    activeChunkId = chunk.id;
+    renderChunkList();
+    renderChunkActions();
+    render();
+    execLog(`Created chunk "${name}"`, 'fc-log-info');
+  };
+
+  // Run active chunk (runs global nodes first as setup, then chunk nodes)
   $('fcRunSelectedBtn').onclick = () => {
-    if (chunkStart === null || chunkEnd === null) return;
-    if (!chunkSnapshot) {
-      chunkSnapshot = { world: deepCloneWorld(), currentNpc: _currentNpc };
-      execLog(`Snapshot saved for chunk ${chunkStart + 1}–${chunkEnd + 1}`, 'fc-log-info');
+    const c = getActiveChunk();
+    if (!c || c.nodes.length === 0) return;
+    if (!c.snapshot) {
+      c.snapshot = { world: deepCloneWorld(), currentNpc: _currentNpc };
+      execLog(`Snapshot saved for "${c.name}"`, 'fc-log-info');
     }
-    updateChunkControls();
-    runNodes(chunkStart, chunkEnd);
+    renderChunkActions();
+    // Run global (setup) nodes first, then chunk nodes
+    const toRun = [...nodes, ...c.nodes];
+    toRun.forEach(n => { n.status = 'pending'; n.result = null; });
+    runNodeList(toRun);
+  };
+
+  $('fcChunkRunBtn').onclick = () => {
+    $('fcRunSelectedBtn').click();
   };
 
   $('fcChunkReplayBtn').onclick = () => {
-    if (!chunkSnapshot || chunkStart === null || chunkEnd === null) return;
-    restoreWorld(chunkSnapshot.world);
-    _currentNpc = chunkSnapshot.currentNpc;
+    const c = getActiveChunk();
+    if (!c || !c.snapshot) return;
+    restoreWorld(c.snapshot.world);
+    _currentNpc = c.snapshot.currentNpc;
     if (_currentNpc && world.npcs[_currentNpc]) swapIn(_currentNpc);
-    execLog('State restored from snapshot for chunk replay', 'fc-log-info');
-    for (let i = chunkStart; i <= chunkEnd; i++) {
-      nodes[i].status = 'pending';
-      nodes[i].result = null;
-    }
+    execLog(`State restored for "${c.name}" replay`, 'fc-log-info');
+    const toRun = [...nodes, ...c.nodes];
+    toRun.forEach(n => { n.status = 'pending'; n.result = null; });
     render();
-    runNodes(chunkStart, chunkEnd);
+    runNodeList(toRun);
   };
 
   $('fcChunkResetBtn').onclick = () => {
-    if (!chunkSnapshot) return;
-    restoreWorld(chunkSnapshot.world);
-    _currentNpc = chunkSnapshot.currentNpc;
+    const c = getActiveChunk();
+    if (!c || !c.snapshot) return;
+    restoreWorld(c.snapshot.world);
+    _currentNpc = c.snapshot.currentNpc;
     if (_currentNpc && world.npcs[_currentNpc]) swapIn(_currentNpc);
-    for (let i = chunkStart; i <= chunkEnd; i++) {
-      nodes[i].status = 'pending';
-      nodes[i].result = null;
-    }
+    c.nodes.forEach(n => { n.status = 'pending'; n.result = null; });
     render();
-    execLog('State restored from chunk snapshot', 'fc-log-info');
+    execLog(`State restored from "${c.name}" snapshot`, 'fc-log-info');
+  };
+
+  $('fcChunkDeleteBtn').onclick = () => {
+    const c = getActiveChunk();
+    if (!c) return;
+    if (!confirm(`Delete chunk "${c.name}" and its ${c.nodes.length} nodes?`)) return;
+    chunks = chunks.filter(ch => ch.id !== c.id);
+    activeChunkId = null;
+    renderChunkList();
+    renderChunkActions();
+    render();
+    execLog(`Deleted chunk "${c.name}"`, 'fc-log-info');
   };
 
   $('fcStopBtn').onclick = () => { aborted = true; };
@@ -1144,24 +1315,43 @@ function init() {
   $('fcClearBtn').onclick = () => {
     nodes = [];
     selectedNodeId = null;
-    chunkStart = null;
-    chunkEnd = null;
-    chunkSnapshot = null;
+    chunks = [];
+    activeChunkId = null;
     nextId = 1;
+    _currentFlowName = null;
     for (const k of Object.keys(world.npcs)) delete world.npcs[k];
     for (const k of Object.keys(world.players)) delete world.players[k];
     _currentNpc = null;
     $('fcExecLog').innerHTML = '';
     $('fcExecStatus').textContent = '';
+    refreshFlowSelect();
     render();
   };
 
   $('fcSaveBtn').onclick = () => {
-    const name = prompt('Flow name:');
-    if (!name) return;
+    let name;
+    if (_currentFlowName) {
+      if (confirm(`Overwrite "${_currentFlowName}"?`)) {
+        name = _currentFlowName;
+      } else {
+        name = prompt('Save as new flow name:');
+        if (!name) return;
+      }
+    } else {
+      name = prompt('Flow name:');
+      if (!name) return;
+    }
     const flows = getSavedFlows();
-    flows[name] = nodes.map(n => ({ type: n.type, params: { ...n.params } }));
+    flows[name] = {
+      nodes: nodes.map(n => ({ type: n.type, params: { ...n.params } })),
+      chunks: chunks.map(c => ({
+        name: c.name,
+        color: c.color,
+        nodes: c.nodes.map(n => ({ type: n.type, params: { ...n.params } })),
+      })),
+    };
     saveSavedFlows(flows);
+    _currentFlowName = name;
     refreshFlowSelect();
     execLog(`Saved flow: ${name}`, 'fc-log-ok');
   };
@@ -1172,19 +1362,77 @@ function init() {
     const flows = getSavedFlows();
     const flow = flows[name];
     if (!flow) return;
-    nodes = flow.map(n => ({ id: uid(), type: n.type, params: { ...n.params }, status: 'pending', result: null }));
+    // Backwards compat: old format is plain array, new format is { nodes, chunks }
+    const nodeList = Array.isArray(flow) ? flow : (flow.nodes || []);
+    const chunkList = Array.isArray(flow) ? [] : (flow.chunks || []);
+    nodes = nodeList.map(n => ({ id: uid(), type: n.type, params: { ...n.params }, status: 'pending', result: null }));
+    chunks = chunkList.map(c => ({
+      id: chunkUid(),
+      name: c.name,
+      color: c.color || randomChunkColor(),
+      nodes: (c.nodes || []).map(n => ({ id: uid(), type: n.type, params: { ...n.params }, status: 'pending', result: null })),
+      snapshot: null,
+    }));
+    activeChunkId = null;
     selectedNodeId = null;
-    chunkStart = null;
-    chunkEnd = null;
-    chunkSnapshot = null;
+    _currentFlowName = name;
+    renderChunkList();
+    renderChunkActions();
     render();
     $('fcDetail').innerHTML = '<div class="fc-detail-empty">Select a node to edit its parameters</div>';
-    execLog(`Loaded flow: ${name} (${nodes.length} nodes)`, 'fc-log-ok');
+    execLog(`Loaded flow: ${name} (${nodes.length} nodes, ${chunks.length} chunks)`, 'fc-log-ok');
   };
 
   refreshFlowSelect();
   render();
 }
+
+// ── Public API (for playground.js scenarios) ────────────────────────────────
+function loadFlowData(flowData, name) {
+  const nodeList = Array.isArray(flowData) ? flowData : (flowData.nodes || []);
+  const chunkList = Array.isArray(flowData) ? [] : (flowData.chunks || []);
+  nodes = nodeList.map(n => ({ id: uid(), type: n.type, params: { ...n.params }, status: 'pending', result: null }));
+  chunks = chunkList.map(c => ({
+    id: chunkUid(),
+    name: c.name,
+    color: c.color || randomChunkColor(),
+    nodes: (c.nodes || []).map(n => ({ id: uid(), type: n.type, params: { ...n.params }, status: 'pending', result: null })),
+    snapshot: null,
+  }));
+  activeChunkId = null;
+  selectedNodeId = null;
+  _currentFlowName = name || null;
+  // Reset world
+  for (const k of Object.keys(world.npcs)) delete world.npcs[k];
+  for (const k of Object.keys(world.players)) delete world.players[k];
+  _currentNpc = null;
+  $('fcExecLog').innerHTML = '';
+  $('fcExecStatus').textContent = '';
+  renderChunkList();
+  renderChunkActions();
+  refreshFlowSelect();
+  render();
+  $('fcDetail').innerHTML = '<div class="fc-detail-empty">Select a node to edit its parameters</div>';
+  execLog(`Loaded scenario: ${name || 'unnamed'} (${nodes.length} nodes, ${chunks.length} chunks)`, 'fc-log-ok');
+}
+
+function runAllNodes() {
+  const all = getAllNodes();
+  if (all.length === 0) return;
+  // Reset world
+  for (const k of Object.keys(world.npcs)) delete world.npcs[k];
+  for (const k of Object.keys(world.players)) delete world.players[k];
+  _currentNpc = null;
+  all.forEach(n => { n.status = 'pending'; n.result = null; });
+  runNodeList(all);
+}
+
+window.Flowchart = {
+  loadFlow: loadFlowData,
+  runAll: runAllNodes,
+  world,
+  getAllNodes,
+};
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);

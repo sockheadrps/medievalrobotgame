@@ -3,8 +3,9 @@ import json
 import httpx
 
 from core.config import MODEL, OLLAMA_URL
-from services.prompt_loader import load_prompt
+from services.prompt_loader import load_prompt, render_prompt
 from services.soul_service import extract_soul_json
+from services import personality_types as ptypes
 
 
 VALID_INTENTS = {
@@ -112,11 +113,13 @@ def validate_decision(raw: dict) -> dict:
 
 async def generate_decision(state: dict) -> dict:
     """Send curated NPC state to LLM and return a validated decision."""
-    prompt_text = load_prompt("decision")
-
-    # Build system message with NPC context
     npc_info = state.get("npc", {})
-    system_content = prompt_text
+    # Inject personality type context if not already present
+    personality = npc_info.get("personality", {})
+    if "ptype" not in npc_info:
+        type_name = personality.get("type", "") or ptypes.classify(personality)
+        npc_info["ptype"] = ptypes.type_context(type_name)
+    system_content = render_prompt("decision", state)
 
     # Build user message with full state
     user_content = (

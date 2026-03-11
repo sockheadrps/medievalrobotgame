@@ -14,6 +14,8 @@ class DialogueRequest(BaseModel):
     soul: SoulContext
     player_message: str
     world_context: dict = Field(default_factory=dict)
+    speaking_player: str = ""
+    owner: str = ""
 
 
 class NPCSaveRequest(BaseModel):
