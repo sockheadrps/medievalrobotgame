@@ -55,6 +55,7 @@ export class NPCDetailPanel {
             <span class="ndp-type-badge"></span>
           </div>
           <div class="ndp-header-btns">
+            <button class="ndp-reset-btn" title="Wipe memories, phrases, and relationships">Reset Soul</button>
             <button class="ndp-delete-btn" title="Delete NPC">Delete</button>
             <button class="ndp-close-btn">X</button>
           </div>
@@ -115,18 +116,34 @@ export class NPCDetailPanel {
     el.querySelector('.ndp-backdrop').addEventListener('click', () => this.close());
     el.querySelector('.ndp-take-logs-btn').addEventListener('click', () => this._takeLogs());
     el.querySelector('.ndp-delete-btn').addEventListener('click', () => this._deleteNPC());
+    el.querySelector('.ndp-reset-btn').addEventListener('click', () => this._resetSoul());
 
-    // Delegate phrase delete clicks
+    // Delegate phrase button clicks (delete, +, -)
     el.querySelector('.ndp-soul-content').addEventListener('click', (e) => {
-      const btn = e.target.closest('.ndp-phrase-del');
-      if (!btn || !this._npc) return;
-      const phrase = btn.dataset.phrase;
+      if (!this._npc) return;
       const phrases = this._npc.soul.learned_phrases;
       if (!phrases) return;
-      const idx = phrases.findIndex(p => p.phrase === phrase);
-      if (idx !== -1) {
-        phrases.splice(idx, 1);
-        this._refreshSoul(this._npc, this._scene?.player?.playerId || 'default');
+      const playerId = this._scene?.player?.playerId || 'default';
+
+      const delBtn = e.target.closest('.ndp-phrase-del');
+      if (delBtn) {
+        const idx = phrases.findIndex(p => p.phrase === delBtn.dataset.phrase);
+        if (idx !== -1) { phrases.splice(idx, 1); this._refreshSoul(this._npc, playerId); }
+        return;
+      }
+
+      const incBtn = e.target.closest('.ndp-phrase-inc');
+      if (incBtn) {
+        const p = phrases.find(p => p.phrase === incBtn.dataset.phrase);
+        if (p) { p.uses = (p.uses || 1) + 1; this._refreshSoul(this._npc, playerId); }
+        return;
+      }
+
+      const decBtn = e.target.closest('.ndp-phrase-dec');
+      if (decBtn) {
+        const p = phrases.find(p => p.phrase === decBtn.dataset.phrase);
+        if (p && p.uses > 1) { p.uses -= 1; this._refreshSoul(this._npc, playerId); }
+        return;
       }
     });
 
@@ -176,6 +193,21 @@ export class NPCDetailPanel {
     }
     npc.destroy();
     this.close();
+  }
+
+  _resetSoul() {
+    const npc = this._npc;
+    if (!npc) return;
+    // Keep personality type and numeric traits, wipe everything else
+    npc.soul.memories = {};
+    npc.soul.learned_phrases = [];
+    // Reset all relationships to defaults
+    const defaultRel = { trust: 0.5, fear: 0, anger: 0, trust_baseline: 0.5, fear_baseline: 0, anger_baseline: 0, cooperation_mod: 0, aggression_mod: 0, label: 'neutral' };
+    for (const key of Object.keys(npc.soul.relationships)) {
+      npc.soul.relationships[key] = { ...defaultRel };
+    }
+    npc.showBubble('*memory wiped*', 2000);
+    this._refresh();
   }
 
   _startUpdating() {
@@ -366,7 +398,9 @@ export class NPCDetailPanel {
           <button class="ndp-phrase-del" data-phrase="${safePhrase}" title="Remove phrase">x</button>
           <span class="ndp-phrase-text">"${p.phrase}"</span>${toneLabel}${usageLabel}
           <div class="ndp-phrase-bar-wrap"><div class="ndp-phrase-bar" style="width:${bar}%"></div></div>
+          <button class="ndp-phrase-dec" data-phrase="${safePhrase}" title="Decrease uses">-</button>
           <span class="ndp-phrase-uses">x${p.uses}</span>
+          <button class="ndp-phrase-inc" data-phrase="${safePhrase}" title="Increase uses">+</button>
         </div>`;
       }
     }
@@ -481,7 +515,7 @@ export class NPCDetailPanel {
         letter-spacing:0.5px;
       }
       .ndp-header-btns { display:flex; gap:6px; }
-      .ndp-close-btn, .ndp-delete-btn {
+      .ndp-close-btn, .ndp-delete-btn, .ndp-reset-btn {
         border:none; border-radius:4px; cursor:pointer;
         padding:3px 8px; font-size:12px;
       }
@@ -489,6 +523,8 @@ export class NPCDetailPanel {
       .ndp-close-btn:hover { background:#334; color:#fff; }
       .ndp-delete-btn { background:#411; color:#f66; font-size:11px; }
       .ndp-delete-btn:hover { background:#622; color:#faa; }
+      .ndp-reset-btn { background:#331a00; color:#fa4; font-size:11px; }
+      .ndp-reset-btn:hover { background:#552a00; color:#fc6; }
       .ndp-body {
         display:flex; gap:10px; padding:10px; overflow-y:auto; flex:1;
       }
@@ -588,6 +624,8 @@ export class NPCDetailPanel {
       .ndp-phrase-uses { font-size:9px; color:#886; min-width:20px; text-align:right; }
       .ndp-phrase-del { background:none; border:1px solid #533; color:#a66; font-size:9px; width:14px; height:14px; padding:0; cursor:pointer; border-radius:3px; line-height:12px; flex-shrink:0; }
       .ndp-phrase-del:hover { background:#522; color:#f88; border-color:#a44; }
+      .ndp-phrase-inc, .ndp-phrase-dec { background:none; border:1px solid #335; color:#8af; font-size:10px; width:16px; height:14px; padding:0; cursor:pointer; border-radius:3px; line-height:12px; flex-shrink:0; font-weight:bold; }
+      .ndp-phrase-inc:hover, .ndp-phrase-dec:hover { background:#224; color:#adf; border-color:#55a; }
       .ndp-phrase-tone, .ndp-phrase-usage { font-size:8px; padding:1px 4px; border-radius:3px; white-space:nowrap; }
       .ndp-tone-insult { background:#622; color:#f88; }
       .ndp-tone-friendly { background:#264; color:#8f8; }

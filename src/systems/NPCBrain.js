@@ -6,8 +6,9 @@ import Phaser from 'phaser';
 import { TILE_SIZE } from '../constants.js';
 import { generateDecision, checkConnection } from '../net/LLMClient.js';
 
-const DECISION_COOLDOWN_MS = 2000; // minimum ms between LLM calls
-const IDLE_REFRESH_MS      = 5000; // how often to re-decide when idle
+const DECISION_COOLDOWN_MS = 4000;  // minimum ms between LLM calls when triggered by events
+const IDLE_REFRESH_MS      = 12000; // how often to re-decide when idle
+const BUSY_REFRESH_MS      = 15000; // minimum ms between LLM calls when runner is busy
 const MAX_FAIL_BACKOFF_MS  = 60000; // max backoff after repeated failures
 const FAIL_BACKOFF_BASE_MS = 5000;  // initial backoff after a failure
 const HP_DANGER_PCT        = 0.35; // trigger decision when HP drops below this
@@ -64,6 +65,7 @@ export class NPCBrain {
     this._backoffUntil = 0;    // timestamp — don't request until this time
     this._ollamaDown = false;  // true after connectivity check fails
     this._lastConnCheck = 0;   // timestamp of last connectivity check
+    this._lastAppliedTask = null; // track what task is actually running to avoid re-deciding
   }
 
   /** Enable/disable autonomous decision-making. */
@@ -89,6 +91,12 @@ export class NPCBrain {
     this._lastDecisionTime = Date.now();
   }
 
+  /** Extract bare npcId from composite key. "test2_npc_1" → "npc_1", "npc_1" → "npc_1" */
+  _extractNpcId(compositeKey) {
+    const match = compositeKey.match(/(npc_\d+)$/);
+    return match ? match[1] : compositeKey;
+  }
+
   /** Called every frame from GameScene. */
   update(delta) {
     if (!this._enabled || this._npc.isDead() || this._pending) return;
@@ -98,14 +106,19 @@ export class NPCBrain {
 
     // Check triggers
     let shouldDecide = false;
+    const status = this._runner.getStatus();
+    const isBusy = status.running;
+
+    // If runner is busy, use a longer cooldown to avoid spamming LLM with the same decision
+    const minCooldown = isBusy ? BUSY_REFRESH_MS : DECISION_COOLDOWN_MS;
 
     // 1. Event-triggered (combat, player command, etc.)
     if (this._eventQueue.length > 0) {
-      shouldDecide = elapsed >= DECISION_COOLDOWN_MS;
+      shouldDecide = elapsed >= minCooldown;
       if (shouldDecide) this._eventQueue.length = 0;
     }
 
-    // 2. HP dropped below danger threshold
+    // 2. HP dropped below danger threshold — always use short cooldown for danger
     const hpPct = this._npc.hp / this._npc.maxHp;
     if (hpPct < HP_DANGER_PCT && this._lastHpPct >= HP_DANGER_PCT) {
       shouldDecide = elapsed >= DECISION_COOLDOWN_MS;
@@ -113,15 +126,9 @@ export class NPCBrain {
     this._lastHpPct = hpPct;
 
     // 3. Task runner finished all tasks (NPC is idle) — needs new orders
-    const status = this._runner.getStatus();
-    if (!status.running && elapsed >= IDLE_REFRESH_MS) {
+    if (!isBusy && elapsed >= IDLE_REFRESH_MS) {
       shouldDecide = true;
     }
-
-    // 4. Periodic refresh — only if NPC is idle (no task running).
-    //    If the NPC is busy doing something, don't waste LLM calls.
-    //    Events (#1) and HP danger (#2) will still interrupt.
-    // (removed unconditional periodic refresh)
 
     if (shouldDecide) {
       this._requestDecision();
@@ -187,7 +194,8 @@ export class NPCBrain {
       const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rnpc.x, rnpc.y) / TILE_SIZE;
       if (dist < 12) {
         nearbyEntities.push({
-          id: rnpc.npcId,
+          id: `${rnpc.ownerPid}_${rnpc.npcId}`,
+          npc_id: rnpc.npcId,
           type: 'enemy_npc',
           name: rnpc.getName(),
           owner: rnpc.ownerPid,
@@ -228,7 +236,7 @@ export class NPCBrain {
     const npcRelationships = {};
     for (const entity of nearbyEntities) {
       if (entity.type !== 'enemy_npc') continue;
-      const relKey = `npc:${entity.id}`;
+      const relKey = `npc:${entity.npc_id || entity.id}`;
       const rel = npc.soul.relationships[relKey];
       if (rel) {
         npcRelationships[entity.id] = {
@@ -239,8 +247,9 @@ export class NPCBrain {
           label: rel.label,
         };
       }
-      // Include relevant memories about this NPC
-      const mems = npc.soul.memories[relKey];
+      // Include relevant memories about this NPC (use bare npcId key)
+      const memKey = `npc:${entity.npc_id || entity.id}`;
+      const mems = npc.soul.memories[memKey];
       if (mems?.length > 0) {
         npcRelationships[entity.id] = npcRelationships[entity.id] || { name: entity.name };
         npcRelationships[entity.id].memories = mems.slice(0, 3).map(m => m.text);
@@ -282,14 +291,18 @@ export class NPCBrain {
       learned_phrases: soul.learned_phrases || [],
       recent_events: recentEvents,
       memory_summary: _summarizeMemories(soul.memories),
-      allowed_actions: [
-        'follow', 'stay_near_player', 'defend_player', 'attack_enemy',
-        'attack_player', 'attack_npc',
-        'retreat', 'hold_position', 'observe', 'do_nothing',
-        'gather_wood', 'give_logs', 'build_fence', 'train',
-        'socialize_npc', 'steal_logs',
-      ],
+      allowed_actions: this._getAllowedActions(),
     };
+  }
+
+  _getAllowedActions() {
+    return [
+      'follow', 'stay_near_player', 'defend_player', 'attack_enemy',
+      'attack_player', 'attack_npc',
+      'retreat', 'hold_position', 'observe', 'do_nothing',
+      'gather_wood', 'give_logs', 'build_fence', 'train',
+      'socialize_npc', 'steal_logs',
+    ];
   }
 
   // ── Request decision from local Ollama ──────────────────────────────────────
@@ -353,7 +366,9 @@ export class NPCBrain {
     // Don't interrupt give_logs — let the NPC finish delivering before reassigning
     const currentTasks = this._runner.getStatus().tasks;
     const isDelivering = currentTasks.some(t => t.task === 'give_logs');
-    if (isDelivering) {
+    const isSocializing = currentTasks.some(t => t.task === 'socialize_npc');
+    const isStealing = currentTasks.some(t => t.task === 'steal_logs');
+    if (isDelivering || isSocializing || isStealing) {
       this._lastIntent = intent;
       this._lastDecision = decision;
       return;
@@ -363,9 +378,11 @@ export class NPCBrain {
         this._runner.setTasks([{ task: 'attack_player', target_id: decision.target_id }]);
       } else if ((intent === 'attack_npc' || intent === 'steal_logs' || intent === 'socialize_npc') && decision.target_id) {
         const scene = this._scene;
-        const rnpcEntry = Object.values(scene._remoteNPCSprites || {}).find(
-          r => r.npcId === decision.target_id
-        );
+        // target_id is composite key "ownerPid_npcId" (e.g. "test2_npc_1")
+        const rnpcEntry = scene._remoteNPCSprites?.[decision.target_id]
+          || Object.values(scene._remoteNPCSprites || {}).find(
+            r => r.npcId === decision.target_id || `${r.ownerPid}_${r.npcId}` === decision.target_id
+          );
         if (rnpcEntry) {
           if (intent === 'steal_logs') {
             this._runner.setTasks([{
@@ -416,7 +433,9 @@ export class NPCBrain {
         // If the intent targets another NPC, apply emotions toward that NPC too
         const npcTargetIntents = ['steal_logs', 'socialize_npc', 'attack_npc'];
         if (npcTargetIntents.includes(intent) && decision.target_id) {
-          npc.applyEmotionDeltas(clamped, `npc:${decision.target_id}`);
+          // Extract bare npcId from composite key (e.g. "test2_npc_1" → "npc_1")
+          const bareId = this._extractNpcId(decision.target_id);
+          npc.applyEmotionDeltas(clamped, `npc:${bareId}`);
         } else {
           npc.applyEmotionDeltas(clamped, playerId);
         }
@@ -425,7 +444,7 @@ export class NPCBrain {
 
     // Process memory candidates — store under target NPC key if relevant
     const memoryBucket = (['steal_logs', 'socialize_npc', 'attack_npc'].includes(intent) && decision.target_id)
-      ? `npc:${decision.target_id}`
+      ? `npc:${this._extractNpcId(decision.target_id)}`
       : playerId;
 
     if (decision.memory_candidates?.length > 0) {

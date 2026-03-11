@@ -28,6 +28,7 @@ export class NPCTaskRunner {
     this._tasks = Array.isArray(commands) ? [...commands] : [];
     this._state = 'idle';
     this._target = null;
+    this._socializing = false;
     this._npc.stopMoving();
   }
 
@@ -896,6 +897,7 @@ export class NPCTaskRunner {
         const finishDelay = Math.max(1000, lines.length * 3000);
         scene.time.delayedCall(finishDelay, () => {
           this._socializing = false;
+          this._socializeDoneAt = Date.now();
           this._tasks.shift();
         });
       }).catch(() => {
@@ -906,6 +908,7 @@ export class NPCTaskRunner {
           'relationship', `npc:${cmd.target_npc_id}`, 0.6
         );
         this._socializing = false;
+        this._socializeDoneAt = Date.now();
         this._tasks.shift();
       });
     }

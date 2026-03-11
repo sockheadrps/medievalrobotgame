@@ -50,6 +50,7 @@ export class ChatBox {
     this._input          = '';
     this._closedAt       = 0;
     this._chatLog        = [];  // { text, color }
+    this._chatHistory    = new Map();  // npcId → [{ role: 'player'|'npc', text }] (recent conversation turns)
     this._history        = [];  // past commands
     this._historyIdx     = -1;  // -1 = not browsing history
     this._historyDraft   = '';  // saves current input when browsing
@@ -329,6 +330,22 @@ export class ChatBox {
       // No target found — fall through to LLM
     }
 
+    // Check for "rob/steal from <name>" — steal_logs command
+    const robMatch = text.match(/\b(?:go\s+)?(?:rob|steal\s+(?:from|logs?\s+from)?|mug|loot)\s+(.+)/i);
+    if (robMatch) {
+      const targetName = robMatch[1].trim().toLowerCase();
+      const resolved = this._resolveSocializeTarget(targetName);
+      if (resolved) {
+        const cmd = { task: 'steal_logs', target_owner: resolved.command.target_owner, target_npc_id: resolved.command.target_npc_id };
+        const reply = `Going to steal from ${resolved.displayName}!`;
+        npc.showBubble(reply, 3000, { silent: true });
+        npc.addMemory(`Player commanded: "${text}"`, 'command', playerId);
+        this._onCommands(npc, [cmd]);
+        this._addLog(`${npc.getName()}: ${reply}`);
+        return;
+      }
+    }
+
     // Check for "attack <target_name>" pattern — resolve to specific player/NPC
     const attackMatch = text.match(/\b(attack|fight|kill)\s+(.+)/i);
     if (attackMatch) {
@@ -409,13 +426,24 @@ export class ChatBox {
       if (topicEntity) {
         soulCtx.topic_entity = npc.getContextAboutEntity(topicEntity.id, topicEntity.name);
       }
+
+      // Build recent conversation history for this NPC
+      if (!this._chatHistory.has(npc.id)) this._chatHistory.set(npc.id, []);
+      const history = this._chatHistory.get(npc.id);
+      history.push({ role: 'player', text });
+
       const ownerId = this._scene?.playerId || 'default';
       const data = await generateDialogue(soulCtx, text, {
         speakingPlayer: playerId,
         owner: ownerId,
+        chatHistory: history.slice(-8), // last 4 exchanges (8 turns)
       });
 
       const reply = data.dialogue ?? '...';
+      history.push({ role: 'npc', text: reply });
+      // Keep history bounded
+      if (history.length > 12) history.splice(0, history.length - 12);
+
       const actual = data.emotion_deltas ? npc.applyEmotionDeltas(data.emotion_deltas, playerId) : null;
       const deltaStr = _formatDeltas(actual);
       const bubbleText = deltaStr ? `${reply}\n${deltaStr}` : reply;
@@ -596,7 +624,20 @@ export class ChatBox {
       .filter(e => e?.id && e?.name)
       .slice()
       .sort((a, b) => b.name.length - a.name.length);
-    return candidates.find(e => lowered.includes(String(e.name).toLowerCase())) || null;
+
+    // Try matching by name first
+    const byName = candidates.find(e => lowered.includes(String(e.name).toLowerCase()));
+    if (byName) return byName;
+
+    // If text uses a pronoun/vague reference, pick the nearest non-owner entity
+    if (/\b(him|her|them|they|he'?s|he|she'?s|she|that\s*(?:guy|one|robot|npc|thing)?|this\s*(?:guy|one|robot|npc|thing))\b/i.test(lowered)) {
+      const nonOwner = candidates
+        .filter(e => e.relation !== 'owner')
+        .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
+      if (nonOwner.length > 0) return nonOwner[0];
+    }
+
+    return null;
   }
 
   _close() {
