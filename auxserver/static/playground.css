@@ -875,6 +875,8 @@ input[type="range"]::-webkit-slider-thumb {
 .preset-tag.stress { background: #2a1a1a; color: #f88; }
 .preset-tag.combat { background: #2a1a1a; color: var(--red); }
 .preset-tag.comparison { background: #1a1a2a; color: #88f; }
+.preset-tag.robustness { background: #2a2a1a; color: #aa8; }
+.preset-tag.memory { background: #1a2a2a; color: #8ac; }
 
 .preset-flow-info {
   font-size: 9px;
