@@ -11,7 +11,7 @@ const IDLE_REFRESH_MS      = 5000; // how often to re-decide when idle
 const MAX_FAIL_BACKOFF_MS  = 60000; // max backoff after repeated failures
 const FAIL_BACKOFF_BASE_MS = 5000;  // initial backoff after a failure
 const HP_DANGER_PCT        = 0.35; // trigger decision when HP drops below this
-const EMOTION_DELTA_MAX    = 0.25; // max emotion shift per decision (was 0.1)
+const EMOTION_DELTA_MAX    = 0.05; // max emotion shift per decision — small nudges only
 
 // Maps LLM intents to TaskRunner tasks
 const INTENT_TO_TASK = {
@@ -99,7 +99,7 @@ export class NPCBrain {
     // Check triggers
     let shouldDecide = false;
 
-    // 1. Event-triggered
+    // 1. Event-triggered (combat, player command, etc.)
     if (this._eventQueue.length > 0) {
       shouldDecide = elapsed >= DECISION_COOLDOWN_MS;
       if (shouldDecide) this._eventQueue.length = 0;
@@ -112,16 +112,16 @@ export class NPCBrain {
     }
     this._lastHpPct = hpPct;
 
-    // 3. Task runner finished all tasks (NPC is idle)
+    // 3. Task runner finished all tasks (NPC is idle) — needs new orders
     const status = this._runner.getStatus();
     if (!status.running && elapsed >= IDLE_REFRESH_MS) {
       shouldDecide = true;
     }
 
-    // 4. Periodic refresh
-    if (elapsed >= IDLE_REFRESH_MS) {
-      shouldDecide = true;
-    }
+    // 4. Periodic refresh — only if NPC is idle (no task running).
+    //    If the NPC is busy doing something, don't waste LLM calls.
+    //    Events (#1) and HP danger (#2) will still interrupt.
+    // (removed unconditional periodic refresh)
 
     if (shouldDecide) {
       this._requestDecision();
@@ -279,13 +279,14 @@ export class NPCBrain {
       },
       nearby_entities: nearbyEntities,
       nearby_trees: nearbyTrees,
+      learned_phrases: soul.learned_phrases || [],
       recent_events: recentEvents,
       memory_summary: _summarizeMemories(soul.memories),
       allowed_actions: [
         'follow', 'stay_near_player', 'defend_player', 'attack_enemy',
         'attack_player', 'attack_npc',
         'retreat', 'hold_position', 'observe', 'do_nothing',
-        'gather_wood', 'give_logs', 'train',
+        'gather_wood', 'give_logs', 'build_fence', 'train',
         'socialize_npc', 'steal_logs',
       ],
     };

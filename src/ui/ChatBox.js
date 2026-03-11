@@ -4,6 +4,7 @@
 
 import Phaser from 'phaser';
 import { parseCommand, generateDialogue } from '../net/LLMClient.js';
+import { extractLearnablePhrases } from '../entities/NPC.js';
 
 const MAX_LOG_LINES = 80;
 const LOG_PAD = 12;
@@ -56,8 +57,8 @@ export class ChatBox {
     const hud = (obj) => scene.addHud(obj);
     this._hud = hud;
 
-    const W = scene.cameras.main.width;
-    const H = scene.cameras.main.height;
+    const W = scene.scale?.width ?? scene.cameras.main.width;
+    const H = scene.scale?.height ?? scene.cameras.main.height;
 
     // ── Chat log panel (always visible, bottom-left) ──────────────────────────
     const INPUT_BAR_H = 54;
@@ -111,12 +112,12 @@ export class ChatBox {
       if (this._open) this._cursor.setVisible(!this._cursor.visible);
     }});
 
-    this._status = hud(scene.add.text(W / 2, logBottom + 2, '', {
+    this._status = hud(scene.add.text(W / 2, logBottom - 6, '', {
       fontSize: '16px', color: '#ffcc44', backgroundColor: '#00000099',
       padding: { x: 8, y: 4 },
-    }).setDepth(51).setOrigin(0.5, 0).setVisible(false));
+    }).setDepth(51).setOrigin(0.5, 1).setVisible(false));
 
-    this._hint = hud(scene.add.text(W / 2, H - 4, 'Select a target (click) then press Enter to chat', {
+    this._hint = hud(scene.add.text(W / 2, H - INPUT_BAR_H - 6, 'Select a target (click) then press Enter to chat', {
       fontSize: '15px', color: '#667788',
     }).setDepth(51).setOrigin(0.5, 1).setVisible(false));
 
@@ -236,8 +237,35 @@ export class ChatBox {
 
     this._close();
 
-    // If this is a remote entity (no getSoulContext), relay through server
+    // All local NPCs overhear everything the owner says — learn phrases.
+    // Phrases said to others (remote targets) are weighted more strongly
+    // because the NPC is picking up how the owner talks to the world.
     const isRemote = !npc.getSoulContext;
+    // Gather known entity names so they get stripped from learned phrases
+    const knownNames = new Set();
+    for (const n of (this._scene?.npcs || [])) {
+      const name = n.getName?.() || n.name;
+      if (name) knownNames.add(name.toLowerCase());
+    }
+    for (const rp of (this._scene?.remotePlayers?.values?.() || [])) {
+      if (rp.name) knownNames.add(rp.name.toLowerCase());
+    }
+    for (const rn of (this._scene?.remoteNPCs?.values?.() || [])) {
+      const name = rn.getName?.() || rn.name;
+      if (name) knownNames.add(name.toLowerCase());
+    }
+    const learnedPhrases = extractLearnablePhrases(text, knownNames);
+    if (learnedPhrases.length > 0) {
+      const localNPCs = this._scene?.npcs || [];
+      const reps = isRemote ? 3 : 1; // overheard speech = 3x weight
+      for (const localNpc of localNPCs) {
+        for (const phrase of learnedPhrases) {
+          for (let i = 0; i < reps; i++) localNpc.learnPhrase(phrase);
+        }
+      }
+    }
+
+    // If this is a remote entity (no getSoulContext), relay through server
     if (isRemote) {
       const targetName = npc.getName?.() || npc.playerId || 'them';
       this._addLog(`You → ${targetName}: ${text}`, '#ffddaa');
@@ -271,6 +299,35 @@ export class ChatBox {
     }
 
     const playerId = this._getPlayerId();
+
+    const carryMatch = text.match(/\b(carry|drag|haul|take)\b(.+?)\b(away|off|with you|over there)?\b/i);
+    if (carryMatch) {
+      const resolved = this._resolveCarryTarget((carryMatch[2] || '').trim().toLowerCase());
+      if (resolved) {
+        const reply = `I'll haul ${resolved.displayName} away.`;
+        npc.showBubble(reply, 3200, { silent: true });
+        npc.addMemory(`Player commanded: "${text}"`, 'command', playerId);
+        this._onCommands(npc, [resolved.command]);
+        this._addLog(`${npc.getName()}: ${reply}`);
+        return;
+      }
+    }
+
+    // Check for "talk to <name>" / "go talk to <name>" / "chat with <name>" — socialize command
+    const talkMatch = text.match(/\b(?:go\s+)?(?:talk|chat|speak|socialize)\s+(?:to|with)\s+(.+)/i);
+    if (talkMatch) {
+      const targetName = talkMatch[1].trim().toLowerCase();
+      const resolved = this._resolveSocializeTarget(targetName);
+      if (resolved) {
+        const reply = `Going to have a chat with ${resolved.displayName}.`;
+        npc.showBubble(reply, 3000, { silent: true });
+        npc.addMemory(`Player commanded: "${text}"`, 'command', playerId);
+        this._onCommands(npc, [resolved.command]);
+        this._addLog(`${npc.getName()}: ${reply}`);
+        return;
+      }
+      // No target found — fall through to LLM
+    }
 
     // Check for "attack <target_name>" pattern — resolve to specific player/NPC
     const attackMatch = text.match(/\b(attack|fight|kill)\s+(.+)/i);
@@ -346,13 +403,31 @@ export class ChatBox {
     const playerId = this._getPlayerId();
     try {
       const soulCtx = npc.getSoulContext(playerId);
-      const data = await generateDialogue(soulCtx, text);
+      // Add nearby world context so the NPC can answer questions about surroundings
+      soulCtx.nearby_entities = this._buildNearbyContext(npc);
+      const topicEntity = this._findMentionedEntity(text, soulCtx.nearby_entities);
+      if (topicEntity) {
+        soulCtx.topic_entity = npc.getContextAboutEntity(topicEntity.id, topicEntity.name);
+      }
+      const ownerId = this._scene?.playerId || 'default';
+      const data = await generateDialogue(soulCtx, text, {
+        speakingPlayer: playerId,
+        owner: ownerId,
+      });
 
       const reply = data.dialogue ?? '...';
       const actual = data.emotion_deltas ? npc.applyEmotionDeltas(data.emotion_deltas, playerId) : null;
       const deltaStr = _formatDeltas(actual);
       const bubbleText = deltaStr ? `${reply}\n${deltaStr}` : reply;
       npc.showBubble(bubbleText, deltaStr ? 8000 : 6000, { silent: true });
+
+      this._scene?._processOverheardConversation?.({
+        speakerNpc: npc,
+        playerText: text,
+        npcReply: reply,
+        topicEntity,
+        playerId,
+      });
 
       npc.addMemory(`Player said: "${text}" → responded: "${reply}"`, 'dialogue', playerId);
 
@@ -395,6 +470,133 @@ export class ChatBox {
     }
 
     return null;
+  }
+
+  _resolveSocializeTarget(targetName) {
+    const scene = this._scene;
+
+    // Check remote NPCs (other players' NPCs)
+    for (const rnpc of Object.values(scene._remoteNPCSprites || {})) {
+      if (rnpc.isDead?.()) continue;
+      const name = rnpc.getName?.() || rnpc.npcId || '';
+      if (name.toLowerCase().includes(targetName)) {
+        return {
+          command: { task: 'socialize_npc', target_owner: rnpc.ownerPid, target_npc_id: rnpc.npcId, target_name: name },
+          displayName: name,
+        };
+      }
+    }
+
+    // If generic name like "him" / "that robot" — pick nearest remote NPC
+    if (/\b(him|her|them|that|it|that\s+(?:robot|npc|guy|one))\b/i.test(targetName)) {
+      const npc = this._selectedNPC;
+      let nearest = null;
+      let nearestDist = Infinity;
+      for (const rnpc of Object.values(scene._remoteNPCSprites || {})) {
+        if (rnpc.isDead?.()) continue;
+        const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rnpc.x, rnpc.y);
+        if (dist < nearestDist) { nearestDist = dist; nearest = rnpc; }
+      }
+      if (nearest) {
+        const name = nearest.getName?.() || nearest.npcId || 'that robot';
+        return {
+          command: { task: 'socialize_npc', target_owner: nearest.ownerPid, target_npc_id: nearest.npcId, target_name: name },
+          displayName: name,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  _resolveCarryTarget(targetName) {
+    const scene = this._scene;
+    const knocked = [];
+
+    for (const rp of Object.values(scene._remotePlayers || {})) {
+      if (rp.isDead?.() || !rp.isKnockedOut?.()) continue;
+      knocked.push({
+        entity: rp,
+        displayName: rp.playerId,
+        command: { task: 'carry_away_player', target_id: rp.playerId, target_name: rp.playerId },
+      });
+    }
+
+    for (const rnpc of Object.values(scene._remoteNPCSprites || {})) {
+      if (rnpc.isDead?.() || !rnpc.isKnockedOut?.()) continue;
+      const name = rnpc.getName?.() || rnpc.npcId || 'them';
+      knocked.push({
+        entity: rnpc,
+        displayName: name,
+        command: {
+          task: 'carry_away_npc',
+          target_owner: rnpc.ownerPid,
+          target_npc_id: rnpc.npcId,
+          target_name: name,
+        },
+      });
+    }
+
+    if (knocked.length === 0) return null;
+    const generic = !targetName || /\b(body|them|him|her|that|target|one)\b/.test(targetName);
+    if (generic && knocked.length === 1) return knocked[0];
+    return knocked.find(entry => entry.displayName.toLowerCase().includes(targetName)) || null;
+  }
+
+  /** Build a short list of nearby entities so the NPC can answer world-awareness questions. */
+  _buildNearbyContext(npc) {
+    const scene = this._scene;
+    if (!scene) return [];
+    const TILE = 48; // TILE_SIZE
+    const RANGE = TILE * 10; // ~10 tiles
+    const nearby = [];
+
+    // Owner player
+    const player = scene.player;
+    if (player) {
+      const dist = Math.round(Phaser.Math.Distance.Between(npc.x, npc.y, player.x, player.y) / TILE);
+      nearby.push({ id: scene.playerId || 'default', type: 'player', name: scene.playerId || 'owner', relation: 'owner', distance: dist });
+    }
+
+    // Remote players
+    for (const [pid, rp] of Object.entries(scene._remotePlayers || {})) {
+      if (rp.isDead?.()) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rp.x, rp.y);
+      if (dist > RANGE) continue;
+      nearby.push({ id: pid, type: 'player', name: pid, relation: 'stranger', distance: Math.round(dist / TILE) });
+    }
+
+    // Remote NPCs
+    for (const rnpc of Object.values(scene._remoteNPCSprites || {})) {
+      if (rnpc.isDead?.()) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rnpc.x, rnpc.y);
+      if (dist > RANGE) continue;
+      nearby.push({
+        id: `npc:${rnpc.npcId}`, type: 'npc', name: rnpc.getName?.() || rnpc.npcId,
+        owner: rnpc.ownerPid, relation: 'rival',
+        distance: Math.round(dist / TILE),
+      });
+    }
+
+    // Sibling NPCs (same owner)
+    for (const other of scene.npcs || []) {
+      if (other === npc || other.isDead?.()) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, other.x, other.y);
+      if (dist > RANGE) continue;
+      nearby.push({ id: `npc:${other.id}`, type: 'npc', name: other.getName(), relation: 'ally', distance: Math.round(dist / TILE) });
+    }
+
+    return nearby;
+  }
+
+  _findMentionedEntity(text, nearbyEntities = []) {
+    const lowered = (text || '').toLowerCase();
+    if (!lowered) return null;
+    const candidates = nearbyEntities
+      .filter(e => e?.id && e?.name)
+      .slice()
+      .sort((a, b) => b.name.length - a.name.length);
+    return candidates.find(e => lowered.includes(String(e.name).toLowerCase())) || null;
   }
 
   _close() {

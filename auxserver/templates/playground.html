@@ -134,6 +134,7 @@
           <button class="tab" data-tab="scenarios">Scenarios</button>
           <button class="tab" data-tab="flowchart">Flowchart</button>
           <button class="tab" data-tab="reports">Reports</button>
+          <button class="tab" data-tab="model-compare">Model Compare</button>
         </div>
 
         <div id="chatLog" class="chat-log"></div>
@@ -338,6 +339,9 @@
             </div>
           </div>
 
+          <!-- World Dashboard: per-NPC per-relationship gauges -->
+          <div id="fcWorldDashboard" class="fc-world-dashboard"></div>
+
           <!-- Bottom: execution log -->
           <div class="fc-exec-bar">
             <div class="fc-exec-header">
@@ -378,6 +382,42 @@
             <label>Logs</label><input type="number" id="npcBLogs" value="5" min="0" />
           </div>
           <button id="npcChatBtn">Run NPC Chat</button>
+        </div>
+
+        <!-- Model Compare Area -->
+        <div id="modelCompareArea" class="model-compare-area hidden">
+          <div class="mc-config">
+            <h4>Compare Models — Phrase Learning &amp; Usage</h4>
+            <div class="mc-row">
+              <div class="mc-models">
+                <label>Models (select 2-4):</label>
+                <select id="mcModelList" multiple size="4"></select>
+              </div>
+              <div class="mc-scenario-pick">
+                <label>Scenario:</label>
+                <select id="mcScenario">
+                  <option value="learn-insult">Learn insult → use on NPC</option>
+                  <option value="learn-friendly">Learn friendly phrase → greet owner</option>
+                  <option value="learn-nickname">Learn nickname → address others</option>
+                  <option value="custom">Custom messages</option>
+                </select>
+                <div id="mcCustomInputs" class="hidden" style="margin-top:6px">
+                  <label>Phase 1 — Teach phrase (player→NPC):</label>
+                  <input type="text" id="mcTeachMsg" placeholder="e.g. call him a dumb clanker" style="width:100%" />
+                  <label>Phase 2 — Trigger usage (player→NPC):</label>
+                  <input type="text" id="mcTriggerMsg" placeholder="e.g. what do you think of that guy?" style="width:100%" />
+                </div>
+              </div>
+            </div>
+            <div class="mc-row" style="gap:8px;align-items:center">
+              <label>Runs per model:</label>
+              <input type="number" id="mcRuns" value="1" min="1" max="5" style="width:50px" />
+              <button id="mcRunBtn" class="accent-btn">Run Compare</button>
+              <button id="mcStopBtn" class="hidden">Stop</button>
+              <span id="mcStatus"></span>
+            </div>
+          </div>
+          <div id="mcResults" class="mc-results"></div>
         </div>
       </div>
 

@@ -24,6 +24,8 @@ PICKUP_DIST = TILE_SIZE * 0.6
 PVP_ATTACK_RANGE = TILE_SIZE * 1.5
 PVP_COOLDOWN = 0.8
 PLAYER_RESPAWN_TIME = 5.0
+KNOCKOUT_MIN_TIME = 10.0
+KNOCKOUT_MAX_TIME = 20.0
 PVP_XP_KILL = 25
 
 SHEET_COLS = 57
@@ -182,6 +184,11 @@ class GameState:
             "level": 1, "xp": 0,
             "logs": 0,
             "dead": False,
+            "knocked_out": False,
+            "knocked_until": None,
+            "carried_by": None,
+            "carried_by_type": None,
+            "carrying": None,
             "respawn_at": None,
             "last_hit_by_player": {},  # attacker_pid -> timestamp
             "npcs": {},  # npc_id -> { hp, maxHp, str, def, x, y, owner }
@@ -201,9 +208,8 @@ class GameState:
 
         msg_type = data.get("type")
 
-        # Allow sync_npcs and move even when dead (move will be no-op on server)
-        # Block combat actions when dead
-        if p.get("dead") and msg_type not in ("move", "sync_npcs", "admin"):
+        # Block most actions while dead or knocked out.
+        if (p.get("dead") or p.get("knocked_out")) and msg_type not in ("sync_npcs", "admin"):
             return
 
         if msg_type == "move":
@@ -262,7 +268,8 @@ class GameState:
         elif msg_type == "npc_attack_dummy":
             dummy_id = data.get("dummy_id")
             npc_str = data.get("str", 1)
-            self._npc_attack_dummy(dummy_id, npc_str)
+            npc_id = data.get("npc_id", "npc")
+            self._npc_attack_dummy(pid, npc_id, dummy_id, npc_str)
 
         elif msg_type == "attack_player":
             target_pid = data.get("target_id")
@@ -272,6 +279,42 @@ class GameState:
             target_owner = data.get("owner_id")
             target_npc_id = data.get("npc_id")
             self._try_attack_npc(pid, target_owner, target_npc_id)
+
+        elif msg_type == "finish_player":
+            self._finish_player(pid, data.get("target_id"))
+
+        elif msg_type == "finish_npc":
+            self._finish_npc(pid, data.get("owner_id"), data.get("npc_id"))
+
+        elif msg_type == "rob_player":
+            self._rob_player(pid, data.get("target_id"))
+
+        elif msg_type == "rob_npc":
+            self._rob_npc(pid, data.get("owner_id"), data.get("npc_id"))
+
+        elif msg_type == "carry_player":
+            self._carry_player(pid, data.get("target_id"))
+
+        elif msg_type == "carry_npc":
+            self._carry_npc(pid, data.get("owner_id"), data.get("npc_id"))
+
+        elif msg_type == "drop_carried":
+            self._drop_carried(pid)
+
+        elif msg_type == "npc_carry_player":
+            self._npc_carry_player(pid, data.get("npc_id"), data.get("target_id"))
+
+        elif msg_type == "npc_carry_npc":
+            self._npc_carry_npc(pid, data.get("npc_id"), data.get("owner_id"), data.get("target_npc_id"))
+
+        elif msg_type == "npc_drop_carried":
+            self._npc_drop_carried(pid, data.get("npc_id"))
+
+        elif msg_type == "npc_rob_player":
+            self._npc_rob_player(pid, data.get("npc_id"), data.get("target_id"))
+
+        elif msg_type == "npc_rob_npc":
+            self._npc_rob_npc(pid, data.get("npc_id"), data.get("owner_id"), data.get("target_npc_id"))
 
         elif msg_type == "npc_attack_player":
             target_pid = data.get("target_id")
@@ -333,8 +376,29 @@ class GameState:
         elif field == "def":
             p["def"] += int(value)
 
-    def _npc_attack_dummy(self, dummy_id, npc_str):
+    def _grant_xp(self, entity, amount):
+        xp = max(0, int(amount or 0))
+        if xp <= 0 or not entity:
+            return False
+        entity["xp"] = int(entity.get("xp", 0)) + xp
+        leveled = False
+        while entity["xp"] >= max(1, int(entity.get("level", 1))) * 20:
+            needed = max(1, int(entity.get("level", 1))) * 20
+            entity["xp"] -= needed
+            entity["level"] = int(entity.get("level", 1)) + 1
+            entity["maxHp"] = int(entity.get("maxHp", 1)) + 2
+            entity["hp"] = entity["maxHp"]
+            entity["str"] = int(entity.get("str", 1)) + 1
+            entity["def"] = int(entity.get("def", 1)) + 1
+            leveled = True
+        return leveled
+
+    def _npc_attack_dummy(self, owner_pid, npc_id, dummy_id, npc_str):
         if not dummy_id:
+            return
+        owner = self.players.get(owner_pid)
+        npc_state = owner.get("npcs", {}).get(npc_id) if owner else None
+        if not npc_state or npc_state.get("dead") or npc_state.get("knocked_out"):
             return
         dummy = self.dummies.get(dummy_id)
         if not dummy or dummy["dead"]:
@@ -346,6 +410,7 @@ class GameState:
         dummy.setdefault("last_hit_by", {})["npc"] = now
         dmg = max(1, npc_str + random.randint(0, max(1, npc_str // 2)))
         dummy["hp"] = max(0, dummy["hp"] - dmg)
+        self._grant_xp(npc_state, 5)
         if dummy["hp"] <= 0:
             dummy["dead"] = True
 
@@ -359,7 +424,7 @@ class GameState:
         target = self.players.get(target_pid)
         if not attacker or not target:
             return
-        if attacker.get("dead") or target.get("dead"):
+        if attacker.get("dead") or attacker.get("knocked_out") or target.get("dead") or target.get("knocked_out"):
             return
 
         d = dist(attacker["x"], attacker["y"], target["x"], target["y"])
@@ -384,18 +449,10 @@ class GameState:
         attacker["punch_until"] = now + 0.3
 
         # XP for hitting a player
-        attacker["xp"] += 8
-        needed = attacker["level"] * 20
-        if attacker["xp"] >= needed:
-            attacker["xp"] -= needed
-            attacker["level"] += 1
-            attacker["maxHp"] += 2
-            attacker["hp"] = attacker["maxHp"]
-            attacker["str"] += 1
-            attacker["def"] += 1
+        self._grant_xp(attacker, 8)
 
         if target["hp"] <= 0:
-            self._kill_player(target, attacker)
+            self._knock_out_player(target)
 
     def _try_attack_npc(self, attacker_pid, target_owner_pid, target_npc_id):
         """Player attacks another player's NPC."""
@@ -403,11 +460,11 @@ class GameState:
         owner = self.players.get(target_owner_pid)
         if not attacker or not owner:
             return
-        if attacker.get("dead"):
+        if attacker.get("dead") or attacker.get("knocked_out"):
             return
 
         npc_state = owner.get("npcs", {}).get(target_npc_id)
-        if not npc_state or npc_state.get("dead"):
+        if not npc_state or npc_state.get("dead") or npc_state.get("knocked_out"):
             return
 
         d = dist(attacker["x"], attacker["y"], npc_state["x"], npc_state["y"])
@@ -432,25 +489,21 @@ class GameState:
         attacker["punch_until"] = now + 0.3
 
         # XP
-        attacker["xp"] += 5
-        needed = attacker["level"] * 20
-        if attacker["xp"] >= needed:
-            attacker["xp"] -= needed
-            attacker["level"] += 1
-            attacker["maxHp"] += 2
-            attacker["hp"] = attacker["maxHp"]
-            attacker["str"] += 1
-            attacker["def"] += 1
+        self._grant_xp(attacker, 5)
 
         if npc_state["hp"] <= 0:
-            npc_state["dead"] = True
+            self._knock_out_npc(npc_state)
 
     def _npc_attack_player(self, owner_pid, target_pid, npc_str, npc_id):
         """An NPC (owned by owner_pid) attacks a player."""
         if owner_pid == target_pid:
             return  # NPCs don't attack their own owner
+        owner = self.players.get(owner_pid)
+        npc_state = owner.get("npcs", {}).get(npc_id) if owner else None
+        if not npc_state or npc_state.get("dead") or npc_state.get("knocked_out"):
+            return
         target = self.players.get(target_pid)
-        if not target or target.get("dead"):
+        if not target or target.get("dead") or target.get("knocked_out"):
             return
 
         # Cooldown
@@ -464,31 +517,27 @@ class GameState:
         d_def = target["def"]
         dmg = max(1, npc_str + random.randint(0, max(1, npc_str // 2)) - d_def // 2)
         target["hp"] = max(0, target["hp"] - dmg)
+        self._grant_xp(npc_state, 8)
 
         if target["hp"] <= 0:
             # Credit kill XP to the NPC's owner
-            owner = self.players.get(owner_pid)
             if owner:
-                owner["xp"] += PVP_XP_KILL
-                needed = owner["level"] * 20
-                if owner["xp"] >= needed:
-                    owner["xp"] -= needed
-                    owner["level"] += 1
-                    owner["maxHp"] += 2
-                    owner["hp"] = owner["maxHp"]
-                    owner["str"] += 1
-                    owner["def"] += 1
-            self._kill_player(target, owner)
+                self._grant_xp(owner, PVP_XP_KILL)
+            self._knock_out_player(target)
 
     def _npc_attack_npc(self, owner_pid, attacker_npc_id, target_owner_pid, target_npc_id, npc_str):
         """An NPC attacks another player's NPC."""
         if owner_pid == target_owner_pid:
             return  # Don't attack own NPCs
+        owner = self.players.get(owner_pid)
+        attacker_npc = owner.get("npcs", {}).get(attacker_npc_id) if owner else None
+        if not attacker_npc or attacker_npc.get("dead") or attacker_npc.get("knocked_out"):
+            return
         target_owner = self.players.get(target_owner_pid)
         if not target_owner:
             return
         npc_state = target_owner.get("npcs", {}).get(target_npc_id)
-        if not npc_state or npc_state.get("dead"):
+        if not npc_state or npc_state.get("dead") or npc_state.get("knocked_out"):
             return
 
         now = time.time()
@@ -501,9 +550,11 @@ class GameState:
         npc_def = npc_state.get("def", 1)
         dmg = max(1, npc_str + random.randint(0, max(1, npc_str // 2)) - npc_def // 2)
         npc_state["hp"] = max(0, npc_state["hp"] - dmg)
+        npc_state["_last_attacked_by"] = {"type": "npc", "id": attacker_npc_id, "owner": owner_pid}
+        self._grant_xp(attacker_npc, 5)
 
         if npc_state["hp"] <= 0:
-            npc_state["dead"] = True
+            self._knock_out_npc(npc_state)
 
     def _npc_steal_logs(self, owner_pid, attacker_npc_id, target_owner_pid, target_npc_id, npc_str, steal_amount):
         """An NPC smacks another player's NPC and steals logs from it."""
@@ -513,7 +564,7 @@ class GameState:
         if not target_owner:
             return
         npc_state = target_owner.get("npcs", {}).get(target_npc_id)
-        if not npc_state or npc_state.get("dead"):
+        if not npc_state or npc_state.get("dead") or npc_state.get("knocked_out"):
             return
 
         # Cooldown — use same mechanism as npc_attack_npc
@@ -544,11 +595,258 @@ class GameState:
             }
 
         if npc_state["hp"] <= 0:
-            npc_state["dead"] = True
+            self._knock_out_npc(npc_state)
+
+    def _knockout_duration(self):
+        return random.uniform(KNOCKOUT_MIN_TIME, KNOCKOUT_MAX_TIME)
+
+    def _knock_out_player(self, target):
+        if target.get("carried_by"):
+            self._drop_any_carrier(target.get("carried_by"), target.get("carried_by_type"))
+        target["dead"] = False
+        target["hp"] = 0
+        target["vx"] = 0
+        target["vy"] = 0
+        target["punching"] = False
+        target["knocked_out"] = True
+        target["knocked_until"] = time.time() + self._knockout_duration()
+        target["carried_by"] = None
+        target["carried_by_type"] = None
+        self._drop_carried(target["id"])
+
+    def _knock_out_npc(self, npc_state):
+        carrier_id = npc_state.get("carried_by")
+        if carrier_id:
+            self._drop_any_carrier(carrier_id, npc_state.get("carried_by_type"))
+        npc_state["dead"] = False
+        npc_state["hp"] = 0
+        npc_state["knocked_out"] = True
+        npc_state["knocked_until"] = time.time() + self._knockout_duration()
+        npc_state["carried_by"] = None
+        npc_state["carried_by_type"] = None
+
+    def _is_in_interact_range(self, ax, ay, bx, by):
+        return dist(ax, ay, bx, by) <= PVP_ATTACK_RANGE
+
+    def _get_knocked_player_target(self, target_pid):
+        target = self.players.get(target_pid)
+        if not target or target.get("dead") or not target.get("knocked_out"):
+            return None
+        return target
+
+    def _get_knocked_npc_target(self, owner_pid, npc_id):
+        owner = self.players.get(owner_pid)
+        if not owner:
+            return None, None
+        npc_state = owner.get("npcs", {}).get(npc_id)
+        if not npc_state or npc_state.get("dead") or not npc_state.get("knocked_out"):
+            return owner, None
+        return owner, npc_state
+
+    def _finish_player(self, attacker_pid, target_pid):
+        attacker = self.players.get(attacker_pid)
+        target = self._get_knocked_player_target(target_pid)
+        if not attacker or not target:
+            return
+        if not self._is_in_interact_range(attacker["x"], attacker["y"], target["x"], target["y"]):
+            return
+        self._kill_player(target, attacker)
+
+    def _finish_npc(self, attacker_pid, target_owner_pid, target_npc_id):
+        attacker = self.players.get(attacker_pid)
+        _owner, npc_state = self._get_knocked_npc_target(target_owner_pid, target_npc_id)
+        if not attacker or not npc_state:
+            return
+        if not self._is_in_interact_range(attacker["x"], attacker["y"], npc_state["x"], npc_state["y"]):
+            return
+        carrier_id = npc_state.get("carried_by")
+        if carrier_id:
+            self._drop_any_carrier(carrier_id, npc_state.get("carried_by_type"))
+        npc_state["dead"] = True
+        npc_state["knocked_out"] = False
+        npc_state["knocked_until"] = None
+        npc_state["carried_by"] = None
+        npc_state["carried_by_type"] = None
+
+    def _rob_player(self, attacker_pid, target_pid):
+        attacker = self.players.get(attacker_pid)
+        target = self._get_knocked_player_target(target_pid)
+        if not attacker or not target:
+            return
+        if not self._is_in_interact_range(attacker["x"], attacker["y"], target["x"], target["y"]):
+            return
+        amount = max(0, int(target.get("logs", 0)))
+        if amount <= 0:
+            return
+        attacker["logs"] += amount
+        target["logs"] = 0
+
+    def _rob_npc(self, attacker_pid, target_owner_pid, target_npc_id):
+        attacker = self.players.get(attacker_pid)
+        _owner, npc_state = self._get_knocked_npc_target(target_owner_pid, target_npc_id)
+        if not attacker or not npc_state:
+            return
+        if not self._is_in_interact_range(attacker["x"], attacker["y"], npc_state["x"], npc_state["y"]):
+            return
+        amount = max(0, int(npc_state.get("logs", 0)))
+        if amount <= 0:
+            return
+        attacker["logs"] += amount
+        npc_state["logs"] = 0
+        now = time.time()
+        npc_state["_logs_stolen_at"] = now
+        npc_state["_last_robbed_by"] = {
+            "npc_id": None,
+            "owner": attacker_pid,
+            "amount": amount,
+            "at": now,
+        }
+
+    def _carry_player(self, carrier_pid, target_pid):
+        carrier = self.players.get(carrier_pid)
+        target = self._get_knocked_player_target(target_pid)
+        if not carrier or not target or carrier.get("carrying") or target.get("carried_by"):
+            return
+        if not self._is_in_interact_range(carrier["x"], carrier["y"], target["x"], target["y"]):
+            return
+        carrier["carrying"] = {"type": "player", "id": target_pid}
+        target["carried_by"] = carrier_pid
+        target["carried_by_type"] = "player"
+
+    def _carry_npc(self, carrier_pid, target_owner_pid, target_npc_id):
+        carrier = self.players.get(carrier_pid)
+        _owner, npc_state = self._get_knocked_npc_target(target_owner_pid, target_npc_id)
+        if not carrier or not npc_state or carrier.get("carrying") or npc_state.get("carried_by"):
+            return
+        if not self._is_in_interact_range(carrier["x"], carrier["y"], npc_state["x"], npc_state["y"]):
+            return
+        carrier["carrying"] = {"type": "npc", "owner": target_owner_pid, "id": target_npc_id}
+        npc_state["carried_by"] = carrier_pid
+        npc_state["carried_by_type"] = "player"
+
+    def _drop_carried(self, carrier_pid):
+        carrier = self.players.get(carrier_pid)
+        if not carrier:
+            return
+        carried = carrier.get("carrying")
+        if not carried:
+            return
+        if carried.get("type") == "player":
+            target = self.players.get(carried.get("id"))
+            if target:
+                target["carried_by"] = None
+                target["carried_by_type"] = None
+                target["x"] = carrier["x"]
+                target["y"] = carrier["y"] + TILE_SIZE * 0.35
+        elif carried.get("type") == "npc":
+            owner = self.players.get(carried.get("owner"))
+            target = owner.get("npcs", {}).get(carried.get("id")) if owner else None
+            if target:
+                target["carried_by"] = None
+                target["carried_by_type"] = None
+                target["x"] = carrier["x"]
+                target["y"] = carrier["y"] + TILE_SIZE * 0.35
+        carrier["carrying"] = None
+
+    def _get_local_npc(self, owner_pid, npc_id):
+        owner = self.players.get(owner_pid)
+        if not owner:
+            return None, None
+        return owner, owner.get("npcs", {}).get(npc_id)
+
+    def _npc_carrier_key(self, owner_pid, npc_id):
+        return f"{owner_pid}:{npc_id}"
+
+    def _drop_any_carrier(self, carried_by, carried_by_type):
+        if not carried_by:
+            return
+        if carried_by_type == "npc":
+            owner_pid, npc_id = str(carried_by).split(":", 1)
+            self._npc_drop_carried(owner_pid, npc_id)
+        else:
+            self._drop_carried(carried_by)
+
+    def _npc_carry_player(self, owner_pid, carrier_npc_id, target_pid):
+        owner, carrier = self._get_local_npc(owner_pid, carrier_npc_id)
+        target = self._get_knocked_player_target(target_pid)
+        if not owner or not carrier or not target or carrier.get("carrying") or target.get("carried_by"):
+            return
+        if not self._is_in_interact_range(carrier["x"], carrier["y"], target["x"], target["y"]):
+            return
+        carrier["carrying"] = {"type": "player", "id": target_pid}
+        target["carried_by"] = self._npc_carrier_key(owner_pid, carrier_npc_id)
+        target["carried_by_type"] = "npc"
+
+    def _npc_carry_npc(self, owner_pid, carrier_npc_id, target_owner_pid, target_npc_id):
+        owner, carrier = self._get_local_npc(owner_pid, carrier_npc_id)
+        _target_owner, target = self._get_knocked_npc_target(target_owner_pid, target_npc_id)
+        if not owner or not carrier or not target or carrier.get("carrying") or target.get("carried_by"):
+            return
+        if not self._is_in_interact_range(carrier["x"], carrier["y"], target["x"], target["y"]):
+            return
+        carrier["carrying"] = {"type": "npc", "owner": target_owner_pid, "id": target_npc_id}
+        target["carried_by"] = self._npc_carrier_key(owner_pid, carrier_npc_id)
+        target["carried_by_type"] = "npc"
+
+    def _npc_drop_carried(self, owner_pid, carrier_npc_id):
+        _owner, carrier = self._get_local_npc(owner_pid, carrier_npc_id)
+        if not carrier:
+            return
+        carried = carrier.get("carrying")
+        if not carried:
+            return
+        if carried.get("type") == "player":
+            target = self.players.get(carried.get("id"))
+            if target:
+                target["carried_by"] = None
+                target["carried_by_type"] = None
+                target["x"] = carrier["x"]
+                target["y"] = carrier["y"] + TILE_SIZE * 0.35
+        elif carried.get("type") == "npc":
+            owner = self.players.get(carried.get("owner"))
+            target = owner.get("npcs", {}).get(carried.get("id")) if owner else None
+            if target:
+                target["carried_by"] = None
+                target["carried_by_type"] = None
+                target["x"] = carrier["x"]
+                target["y"] = carrier["y"] + TILE_SIZE * 0.35
+        carrier["carrying"] = None
+
+    def _npc_rob_player(self, owner_pid, npc_id, target_pid):
+        _owner, carrier = self._get_local_npc(owner_pid, npc_id)
+        target = self._get_knocked_player_target(target_pid)
+        if not carrier or not target:
+            return
+        if not self._is_in_interact_range(carrier["x"], carrier["y"], target["x"], target["y"]):
+            return
+        amount = max(0, int(target.get("logs", 0)))
+        if amount <= 0:
+            return
+        carrier["logs"] = min(carrier.get("maxLogs", 10), carrier.get("logs", 0) + amount)
+        target["logs"] = 0
+
+    def _npc_rob_npc(self, owner_pid, npc_id, target_owner_pid, target_npc_id):
+        _owner, carrier = self._get_local_npc(owner_pid, npc_id)
+        _target_owner, target = self._get_knocked_npc_target(target_owner_pid, target_npc_id)
+        if not carrier or not target:
+            return
+        if not self._is_in_interact_range(carrier["x"], carrier["y"], target["x"], target["y"]):
+            return
+        amount = max(0, int(target.get("logs", 0)))
+        if amount <= 0:
+            return
+        carrier["logs"] = min(carrier.get("maxLogs", 10), carrier.get("logs", 0) + amount)
+        target["logs"] = 0
 
     def _kill_player(self, target, killer=None):
         """Handle player death — drop all logs as ground items."""
+        if target.get("carried_by"):
+            self._drop_any_carrier(target["carried_by"], target.get("carried_by_type"))
         target["dead"] = True
+        target["knocked_out"] = False
+        target["knocked_until"] = None
+        target["carried_by"] = None
+        target["carried_by_type"] = None
         target["hp"] = 0
         target["vx"] = 0
         target["vy"] = 0
@@ -590,13 +888,29 @@ class GameState:
             if existing and existing.get("hp", 0) < npc_data.get("hp", 0):
                 # Server HP was reduced by combat — don't let client overwrite it
                 npc_data["hp"] = existing["hp"]
+            if existing and not existing.get("knocked_out") and existing.get("hp", 0) > 0 and npc_data.get("hp", 0) <= 0:
+                npc_data["hp"] = existing["hp"]
             if existing:
                 # Logs stolen by another NPC — only protect if steal happened recently
+                for field in ("maxHp", "str", "def", "level", "xp", "maxLogs"):
+                    if field in existing:
+                        npc_data[field] = existing[field]
                 steal_ts = existing.get("_logs_stolen_at", 0)
                 if steal_ts and now - steal_ts < 2.0 and existing.get("logs", 0) < npc_data.get("logs", 0):
                     npc_data["logs"] = existing["logs"]
             if existing and existing.get("dead"):
                 npc_data["dead"] = True
+            if existing and existing.get("knocked_out"):
+                npc_data["knocked_out"] = True
+                npc_data["knocked_until"] = existing.get("knocked_until")
+                npc_data["carried_by"] = existing.get("carried_by")
+                npc_data["carried_by_type"] = existing.get("carried_by_type")
+                npc_data["hp"] = existing.get("hp", 0)
+                if existing.get("carried_by"):
+                    npc_data["x"] = existing.get("x", npc_data.get("x", 0))
+                    npc_data["y"] = existing.get("y", npc_data.get("y", 0))
+            if existing and existing.get("carrying"):
+                npc_data["carrying"] = existing.get("carrying")
             # Fence collision — reject NPC position if it would be inside a fence
             new_x = npc_data.get("x", 0)
             new_y = npc_data.get("y", 0)
@@ -915,16 +1229,78 @@ class GameState:
                 p["dead"] = False
                 p["hp"] = p["maxHp"]
                 p["respawn_at"] = None
+                p["carrying"] = None
+                p["carried_by_type"] = None
                 # Respawn at center
                 sx, sy = tile_pos(10, 10)
                 p["x"] = sx + random.randint(-48, 48)
                 p["y"] = sy + random.randint(-48, 48)
 
+        for p in self.players.values():
+            if p.get("knocked_out") and p.get("knocked_until") and now >= p["knocked_until"]:
+                if p.get("carried_by"):
+                    self._drop_any_carrier(p["carried_by"], p.get("carried_by_type"))
+                self._drop_carried(p["id"])
+                p["knocked_out"] = False
+                p["knocked_until"] = None
+                p["carried_by"] = None
+                p["carried_by_type"] = None
+                p["hp"] = max(1, p["maxHp"] // 2)
+
+        for owner in self.players.values():
+            for npc in owner.get("npcs", {}).values():
+                if npc.get("knocked_out") and npc.get("knocked_until") and now >= npc["knocked_until"]:
+                    carrier_id = npc.get("carried_by")
+                    if carrier_id:
+                        self._drop_any_carrier(carrier_id, npc.get("carried_by_type"))
+                    npc["knocked_out"] = False
+                    npc["knocked_until"] = None
+                    npc["carried_by"] = None
+                    npc["carried_by_type"] = None
+                    npc["hp"] = max(1, npc.get("maxHp", 1) // 2)
+
+        for pid, p in self.players.items():
+            carried = p.get("carrying")
+            if not carried:
+                continue
+            if p.get("dead") or p.get("knocked_out"):
+                self._drop_carried(pid)
+                continue
+            if carried.get("type") == "player":
+                target = self.players.get(carried.get("id"))
+            else:
+                owner = self.players.get(carried.get("owner"))
+                target = owner.get("npcs", {}).get(carried.get("id")) if owner else None
+            if not target or target.get("dead") or not target.get("knocked_out"):
+                self._drop_carried(pid)
+                continue
+            target["x"] = p["x"]
+            target["y"] = p["y"] + TILE_SIZE * 0.35
+
+        for owner_pid, owner in self.players.items():
+            for npc_id, carrier in owner.get("npcs", {}).items():
+                carried = carrier.get("carrying")
+                if not carried:
+                    continue
+                if carrier.get("dead") or carrier.get("knocked_out"):
+                    self._npc_drop_carried(owner_pid, npc_id)
+                    continue
+                if carried.get("type") == "player":
+                    target = self.players.get(carried.get("id"))
+                else:
+                    target_owner = self.players.get(carried.get("owner"))
+                    target = target_owner.get("npcs", {}).get(carried.get("id")) if target_owner else None
+                if not target or target.get("dead") or not target.get("knocked_out"):
+                    self._npc_drop_carried(owner_pid, npc_id)
+                    continue
+                target["x"] = carrier["x"]
+                target["y"] = carrier["y"] + TILE_SIZE * 0.35
+
         # Move players
         world_w = MAP_COLS * TILE_SIZE
         world_h = MAP_ROWS * TILE_SIZE
         for p in self.players.values():
-            if p.get("dead"):
+            if p.get("dead") or p.get("knocked_out") or p.get("carried_by"):
                 p["vx"] = 0
                 p["vy"] = 0
                 continue
@@ -948,9 +1324,9 @@ class GameState:
                     p["vx"] = 0
                     p["vy"] = 0
 
-        # Pickup ground items (skip dead players)
+        # Pickup ground items (skip dead or knocked-out players)
         for p in self.players.values():
-            if p.get("dead"):
+            if p.get("dead") or p.get("knocked_out") or p.get("carried_by"):
                 continue
             remaining = []
             for item in self.ground_items:

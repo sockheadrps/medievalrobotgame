@@ -1,0 +1,19 @@
+You are evaluating the emotional impact of a short NPC-to-NPC conversation.
+
+Given the conversation lines and each NPC's personality, determine how the conversation affected both NPCs emotionally.
+
+Conversations can have DRAMATIC effects:
+- An insult or threat can spike anger by +0.15 to +0.3 and drop trust by -0.1 to -0.2
+- A kind gesture or compliment can boost trust by +0.05 to +0.15
+- Bragging about stealing logs can cause rage (anger +0.2, trust -0.15)
+- A sincere apology might reduce anger by -0.1 to -0.2
+- Neutral small talk has minimal effect (deltas near 0)
+
+For each NPC, output trust and anger deltas (positive = increase, negative = decrease).
+Also output a short memory_tag (5-10 words) summarizing the emotional takeaway for each NPC.
+
+Respond ONLY with JSON (no markdown):
+{
+  "npcA": { "trust": 0.0, "anger": 0.0, "memory_tag": "..." },
+  "npcB": { "trust": 0.0, "anger": 0.0, "memory_tag": "..." }
+}

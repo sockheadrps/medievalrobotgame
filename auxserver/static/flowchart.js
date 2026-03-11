@@ -12,57 +12,99 @@ const PG = () => window.Playground; // lazy ref, available after playground.js r
 // swapped in/out as we execute nodes targeting different NPCs.
 
 const world = {
-  npcs: {},    // keyed by name: { owner, personality, trust, fear, anger, ..., memories }
+  npcs: {},    // keyed by name: { owner, personalityType, personality, relationships: { [playerId]: rel }, memories }
   players: {}, // keyed by id:   { hp, maxHp, npcs: [npcName, ...] }
 };
 
+function makeRelationship(overrides = {}) {
+  return {
+    trust: overrides.trust ?? 0.70, fear: overrides.fear ?? 0.05, anger: overrides.anger ?? 0.02,
+    trust_baseline: overrides.trust_baseline ?? 0.50,
+    fear_baseline: overrides.fear_baseline ?? 0.00,
+    anger_baseline: overrides.anger_baseline ?? 0.00,
+    cooperation_mod: 0, aggression_mod: 0,
+    escalation: 1, lastInteraction: 0,
+  };
+}
+
 function makeNpcState(p) {
+  const ownerRel = makeRelationship({
+    trust: p.trust, fear: p.fear, anger: p.anger,
+    trust_baseline: p.trust_baseline, fear_baseline: p.fear_baseline, anger_baseline: p.anger_baseline,
+  });
+  const relationships = {};
+  if (p.owner) relationships[p.owner] = ownerRel;
   return {
     owner: p.owner || '',
     personalityType: p.personalityType || '',
     personality: { cooperation: p.cooperation ?? 0.7, aggression: p.aggression ?? 0.15, neuroticism: p.neuroticism ?? 0.35 },
-    trust: p.trust ?? 0.70, fear: p.fear ?? 0.05, anger: p.anger ?? 0.02,
-    trust_baseline: p.trust_baseline ?? 0.50, fear_baseline: p.fear_baseline ?? 0.00, anger_baseline: p.anger_baseline ?? 0.00,
-    escalation: 1, lastInteraction: 0,
+    relationships,
     memories: [],
     npcName: p.name,
-    playerId: p.owner || 'player_test',
   };
 }
 
-function swapIn(npcName) {
-  // Save current playground state back to whichever NPC was loaded
+// Get or create a relationship for a given NPC toward a given entity
+function getNpcRelationship(npcName, targetId) {
+  const npc = world.npcs[npcName];
+  if (!npc) return null;
+  if (!npc.relationships[targetId]) {
+    // New relationship — start neutral (lower trust for non-owners)
+    const isOwner = targetId === npc.owner;
+    npc.relationships[targetId] = makeRelationship({
+      trust: isOwner ? 0.70 : 0.30,
+      fear: 0.05, anger: 0.05,
+      trust_baseline: isOwner ? 0.50 : 0.25,
+    });
+  }
+  return npc.relationships[targetId];
+}
+
+// Which player relationship is currently loaded in the playground
+let _currentNpc = null;
+let _currentRelTarget = null;
+
+function swapIn(npcName, relTargetId) {
+  // Save current playground state back
   saveCurrent();
-  // Load target NPC into playground
   const npc = world.npcs[npcName];
   if (!npc) return;
+  const targetId = relTargetId || npc.owner || 'default';
+  const rel = getNpcRelationship(npcName, targetId);
+
   const s = PG().state;
   s.personality = { ...npc.personality };
-  s.trust = npc.trust; s.fear = npc.fear; s.anger = npc.anger;
-  s.trust_baseline = npc.trust_baseline; s.fear_baseline = npc.fear_baseline; s.anger_baseline = npc.anger_baseline;
-  s.escalation = npc.escalation; s.lastInteraction = npc.lastInteraction;
+  s.personalityType = npc.personalityType || 'Pragmatist';
+  s.trust = rel.trust; s.fear = rel.fear; s.anger = rel.anger;
+  s.trust_baseline = rel.trust_baseline; s.fear_baseline = rel.fear_baseline; s.anger_baseline = rel.anger_baseline;
+  s.escalation = rel.escalation; s.lastInteraction = rel.lastInteraction;
   s.memories = npc.memories.map(m => ({ ...m }));
-  s.npcName = npc.npcName; s.playerId = npc.playerId;
+  s.npcName = npc.npcName; s.playerId = targetId;
   document.getElementById('npcName').value = npc.npcName;
-  document.getElementById('playerId').value = npc.playerId;
+  document.getElementById('playerId').value = targetId;
+  if (document.getElementById('ptypeSelect')) {
+    document.getElementById('ptypeSelect').value = npc.personalityType || 'Pragmatist';
+  }
   PG().syncSlidersFromState();
   PG().updateGauges();
   PG().updateRelLabel();
   PG().renderMemories();
   _currentNpc = npcName;
+  _currentRelTarget = targetId;
+  renderWorldDashboard();
 }
 
-let _currentNpc = null; // which NPC is currently loaded in playground
-
 function saveCurrent() {
-  if (!_currentNpc || !world.npcs[_currentNpc]) return;
+  if (!_currentNpc || !world.npcs[_currentNpc] || !_currentRelTarget) return;
   const s = PG().state;
   const npc = world.npcs[_currentNpc];
   npc.personality = { ...s.personality };
-  npc.trust = s.trust; npc.fear = s.fear; npc.anger = s.anger;
-  npc.trust_baseline = s.trust_baseline; npc.fear_baseline = s.fear_baseline; npc.anger_baseline = s.anger_baseline;
-  npc.escalation = s.escalation; npc.lastInteraction = s.lastInteraction;
+  const rel = getNpcRelationship(_currentNpc, _currentRelTarget);
+  rel.trust = s.trust; rel.fear = s.fear; rel.anger = s.anger;
+  rel.trust_baseline = s.trust_baseline; rel.fear_baseline = s.fear_baseline; rel.anger_baseline = s.anger_baseline;
+  rel.escalation = s.escalation; rel.lastInteraction = s.lastInteraction;
   npc.memories = s.memories.map(m => ({ ...m }));
+  renderWorldDashboard();
 }
 
 // Get list of NPC names for dropdowns
@@ -138,14 +180,15 @@ const NODE_DEFS = {
   },
   set_emotions: {
     label: 'Set Emotions', icon: '💭', category: 'setup',
-    defaults: { npc: '', trust: 0.50, fear: 0.00, anger: 0.00 },
+    defaults: { npc: '', player: '', trust: 0.50, fear: 0.00, anger: 0.00 },
     params: [
       { key: 'npc', label: 'NPC', type: 'npc_select' },
+      { key: 'player', label: 'Toward (player/NPC)', type: 'player_select' },
       { key: 'trust', label: 'Trust', type: 'number', min: 0, max: 1, step: 0.01 },
       { key: 'fear', label: 'Fear', type: 'number', min: 0, max: 1, step: 0.01 },
       { key: 'anger', label: 'Anger', type: 'number', min: 0, max: 1, step: 0.01 },
     ],
-    summary: (p) => `${p.npc || '?'}: T=${p.trust} F=${p.fear} A=${p.anger}`,
+    summary: (p) => `${p.npc || '?'}→${p.player || 'owner'}: T=${p.trust} F=${p.fear} A=${p.anger}`,
   },
   add_memory: {
     label: 'Add Memory', icon: '🧠', category: 'setup',
@@ -745,33 +788,36 @@ async function executeNode(node) {
       if (!world.players[p.owner].npcs.includes(p.name)) {
         world.players[p.owner].npcs.push(p.name);
       }
-      // Load into playground
-      swapIn(p.name);
+      swapIn(p.name, p.owner);
       pg.addChat('system', `Spawned NPC "${p.name}" owned by ${p.owner}`);
-      return `Spawned "${p.name}" [${p.owner}] coop=${p.cooperation} aggr=${p.aggression} neur=${p.neuroticism}`;
+      renderWorldDashboard();
+      return `Spawned "${p.name}" [${p.owner}] ${p.personalityType} coop=${p.cooperation} aggr=${p.aggression} neur=${p.neuroticism}`;
     }
 
     case 'spawn_player': {
       world.players[p.playerId] = { hp: p.playerHp, maxHp: p.playerHp, npcs: world.players[p.playerId]?.npcs || [] };
       pg.addChat('system', `Player "${p.playerId}" entered (HP=${p.playerHp})`);
+      renderWorldDashboard();
       return `Player "${p.playerId}" (HP=${p.playerHp})`;
     }
 
     case 'set_emotions': {
       const npc = resolveNpc(p);
       if (!npc) return 'Skipped: no NPC';
-      swapIn(npc);
+      // Set emotions on the owner relationship by default
+      const targetId = p.player || world.npcs[npc]?.owner || 'default';
+      swapIn(npc, targetId);
       pg.state.trust = p.trust; pg.state.fear = p.fear; pg.state.anger = p.anger;
       pg.syncSlidersFromState(); pg.updateGauges(); pg.updateRelLabel();
       saveCurrent();
-      return `${npc}: T=${p.trust} F=${p.fear} A=${p.anger}`;
+      return `${npc}→${targetId}: T=${p.trust} F=${p.fear} A=${p.anger}`;
     }
 
     case 'add_memory': {
       const npc = resolveNpc(p);
       if (!npc) return 'Skipped: no NPC';
       if (!p.text) return 'Skipped: no memory text';
-      swapIn(npc);
+      swapIn(npc, world.npcs[npc]?.owner);
       pg.state.memories.push({ text: p.text, type: p.memType, ts: Date.now(), importance: p.importance, bucket: p.bucket });
       pg.renderMemories();
       saveCurrent();
@@ -782,57 +828,58 @@ async function executeNode(node) {
       const npc = resolveNpc(p);
       if (!npc) return 'Skipped: no NPC';
       if (!p.message) return 'Skipped: no message';
-      swapIn(npc);
-      // Check ownership
-      const isOwner = world.npcs[npc]?.owner === p.player;
-      if (!isOwner && p.player) {
-        pg.addChat('system', `[${p.player} is NOT ${npc}'s owner (${world.npcs[npc]?.owner})]`);
+      const speakingPlayer = p.player || world.npcs[npc]?.owner || 'default';
+      swapIn(npc, speakingPlayer);
+      const isOwner = world.npcs[npc]?.owner === speakingPlayer;
+      if (!isOwner && speakingPlayer) {
+        pg.addChat('system', `[${speakingPlayer} is NOT ${npc}'s owner (${world.npcs[npc]?.owner})]`);
       }
-      // Pass speaking player so LLM knows who it's talking to
-      await pg.runDialogue(p.message, { speakingPlayer: p.player, owner: world.npcs[npc]?.owner });
+      await pg.runDialogue(p.message, { speakingPlayer, owner: world.npcs[npc]?.owner });
       saveCurrent();
-      const s = world.npcs[npc];
-      return `${p.player}→${npc}: "${p.message}" → T=${s.trust.toFixed(2)} F=${s.fear.toFixed(2)} A=${s.anger.toFixed(2)}`;
+      const rel = getNpcRelationship(npc, speakingPlayer);
+      return `${speakingPlayer}→${npc}: "${p.message}" → T=${rel.trust.toFixed(2)} F=${rel.fear.toFixed(2)} A=${rel.anger.toFixed(2)}`;
     }
 
     case 'command': {
       const npc = resolveNpc(p);
       if (!npc) return 'Skipped: no NPC';
       if (!p.message) return 'Skipped: no command';
-      swapIn(npc);
-      const isOwner = world.npcs[npc]?.owner === p.player;
-      if (!isOwner && p.player) {
-        pg.addChat('system', `[${p.player} is NOT ${npc}'s owner — NPC may refuse]`);
+      const cmdPlayer = p.player || world.npcs[npc]?.owner || 'default';
+      swapIn(npc, cmdPlayer);
+      const isOwner = world.npcs[npc]?.owner === cmdPlayer;
+      if (!isOwner && cmdPlayer) {
+        pg.addChat('system', `[${cmdPlayer} is NOT ${npc}'s owner — NPC may refuse]`);
       }
       await pg.runCommand(p.message);
       saveCurrent();
-      return `${p.player}→${npc}: command "${p.message}"`;
+      return `${cmdPlayer}→${npc}: command "${p.message}"`;
     }
 
     case 'coerce_command': {
       const npc = resolveNpc(p);
       if (!npc) return 'Skipped: no NPC';
       if (!p.message) return 'Skipped: no command';
-      swapIn(npc);
+      const coercer = p.player || 'stranger';
+      swapIn(npc, coercer);
       const s = pg.state;
       s.fear = p.coercerFear;
       pg.syncSlidersFromState(); pg.updateGauges();
 
       const obeys = s.fear > 0.6;
-      pg.addChat('system', `[Non-owner ${p.player} coerces ${npc} — fear=${p.coercerFear.toFixed(2)}, ${obeys ? 'OBEYS' : 'REFUSES'}]`);
+      pg.addChat('system', `[Non-owner ${coercer} coerces ${npc} — fear=${p.coercerFear.toFixed(2)}, ${obeys ? 'OBEYS' : 'REFUSES'}]`);
       if (obeys) {
         await pg.runCommand(p.message);
       } else {
         await pg.runDialogue(`[Non-owner player demands]: ${p.message}`);
       }
       saveCurrent();
-      return `Coerce ${npc} (fear=${p.coercerFear}): ${obeys ? 'obeyed' : 'refused'}`;
+      return `Coerce ${npc} by ${coercer} (fear=${p.coercerFear}): ${obeys ? 'obeyed' : 'refused'}`;
     }
 
     case 'decision': {
       const npc = resolveNpc(p);
       if (!npc) return 'Skipped: no NPC';
-      swapIn(npc);
+      swapIn(npc, world.npcs[npc]?.owner);
       pg.loadDecisionFields({
         hp: p.hp, maxHp: p.maxHp, logs: p.logs, maxLogs: p.maxLogs,
         status: p.status, command: p.currentCommand, cmdAge: p.cmdAge,
@@ -842,17 +889,20 @@ async function executeNode(node) {
       });
       await pg.runDecision();
       saveCurrent();
-      const s = world.npcs[npc];
-      return `${npc} decision — T=${s.trust.toFixed(2)} F=${s.fear.toFixed(2)} A=${s.anger.toFixed(2)}`;
+      const rel = getNpcRelationship(npc, world.npcs[npc]?.owner);
+      return `${npc} decision — T=${rel.trust.toFixed(2)} F=${rel.fear.toFixed(2)} A=${rel.anger.toFixed(2)}`;
     }
 
     case 'emotion_reaction': {
       const npc = resolveNpc(p);
       if (!npc) return 'Skipped: no NPC';
-      const s = world.npcs[npc];
+      const npcData = world.npcs[npc];
       const reactions = [];
-      if (s.anger > 0.7) reactions.push(`anger ${s.anger.toFixed(2)} > 0.7 → ATTACK`);
-      if (s.fear > 0.5) reactions.push(`fear ${s.fear.toFixed(2)} > 0.5 → FLEE`);
+      // Check all relationships for reaction triggers
+      for (const [targetId, rel] of Object.entries(npcData.relationships)) {
+        if (rel.anger > 0.7) reactions.push(`anger→${targetId} ${rel.anger.toFixed(2)} > 0.7 → ATTACK`);
+        if (rel.fear > 0.5) reactions.push(`fear→${targetId} ${rel.fear.toFixed(2)} > 0.5 → FLEE`);
+      }
       if (reactions.length === 0) reactions.push('No reaction triggered');
       const msg = `${npc}: ${reactions.join('; ')}`;
       pg.addChat('system', `Emotion scan — ${msg}`);
@@ -865,20 +915,21 @@ async function executeNode(node) {
       if (!npcA || !npcB) return 'Skipped: need 2 NPCs';
       if (npcA === npcB) return 'Skipped: NPC A and B are the same';
 
-      // Load NPC A as primary, NPC B params into UI fields
-      swapIn(npcA);
+      // Load NPC A's relationship toward NPC B
+      swapIn(npcA, npcB);
       const b = world.npcs[npcB];
+      const relAtoB = getNpcRelationship(npcA, npcB);
       document.getElementById('npcBName').value = b.npcName;
       document.getElementById('npcBCoop').value = b.personality.cooperation;
       document.getElementById('npcBAggr').value = b.personality.aggression;
-      document.getElementById('npcBTrust').value = b.trust;
-      document.getElementById('npcBAnger').value = b.anger;
+      document.getElementById('npcBTrust').value = relAtoB.trust;
+      document.getElementById('npcBAnger').value = relAtoB.anger;
       document.getElementById('npcBLogs').value = 5;
 
       await pg.runNPCChat();
       saveCurrent();
-      const sa = world.npcs[npcA];
-      return `${npcA} ↔ ${npcB} chat — A: T=${sa.trust.toFixed(2)} A=${sa.anger.toFixed(2)}`;
+      const relAfter = getNpcRelationship(npcA, npcB);
+      return `${npcA} ↔ ${npcB} chat — A→B: T=${relAfter.trust.toFixed(2)} A=${relAfter.anger.toFixed(2)}`;
     }
 
     case 'npc_steal': {
@@ -886,8 +937,8 @@ async function executeNode(node) {
       const victim = resolveNpc(p, 'victim');
       if (!thief || !victim) return 'Skipped: need thief and victim';
 
-      // Apply to victim's state
-      swapIn(victim);
+      // Victim's feelings toward thief
+      swapIn(victim, thief);
       const stolenMsg = `${thief} stole ${p.stolenCount} log(s) from ${victim}!`;
       pg.addChat('system', stolenMsg);
       pg.applyDeltas({ trust: -0.10, fear: 0.0, anger: 0.15 }, 0.3);
@@ -895,8 +946,8 @@ async function executeNode(node) {
       pg.renderMemories();
       saveCurrent();
 
-      // Apply to thief's state
-      swapIn(thief);
+      // Thief's feelings toward victim
+      swapIn(thief, victim);
       pg.applyDeltas({ trust: -0.05, fear: 0, anger: 0.1 }, 0.3);
       pg.state.memories.push({ text: `I stole logs from ${victim}`, type: 'event', ts: Date.now(), importance: 0.85 });
       pg.renderMemories();
@@ -911,36 +962,35 @@ async function executeNode(node) {
       if (!npcA || !npcB) return 'Skipped: need 2 NPCs';
 
       const a = world.npcs[npcA];
-      const socScore = a.personality.cooperation * 0.6 + a.trust * 0.3 + (1 - a.personality.aggression) * 0.1;
-      const stealScore = a.personality.aggression * 0.5 + (1 - a.personality.cooperation) * 0.3 + a.anger * 0.4;
-      const friendPenalty = a.trust > 0.7 ? 0.8 : 0;
+      const relAB = getNpcRelationship(npcA, npcB);
+      const socScore = a.personality.cooperation * 0.6 + relAB.trust * 0.3 + (1 - a.personality.aggression) * 0.1;
+      const stealScore = a.personality.aggression * 0.5 + (1 - a.personality.cooperation) * 0.3 + relAB.anger * 0.4;
+      const friendPenalty = relAB.trust > 0.7 ? 0.8 : 0;
       const adjStealScore = stealScore * (1 - friendPenalty);
 
       pg.addChat('system', `Encounter ${npcA}→${npcB}: soc=${socScore.toFixed(2)} steal=${adjStealScore.toFixed(2)}`);
 
       if (socScore > adjStealScore && socScore > 0.35) {
         pg.addChat('system', `${npcA} decides to SOCIALIZE with ${npcB}`);
-        // Run NPC chat
-        swapIn(npcA);
-        const b = world.npcs[npcB];
-        document.getElementById('npcBName').value = b.npcName;
-        document.getElementById('npcBCoop').value = b.personality.cooperation;
-        document.getElementById('npcBAggr').value = b.personality.aggression;
-        document.getElementById('npcBTrust').value = b.trust;
-        document.getElementById('npcBAnger').value = b.anger;
+        swapIn(npcA, npcB);
+        const bData = world.npcs[npcB];
+        document.getElementById('npcBName').value = bData.npcName;
+        document.getElementById('npcBCoop').value = bData.personality.cooperation;
+        document.getElementById('npcBAggr').value = bData.personality.aggression;
+        document.getElementById('npcBTrust').value = relAB.trust;
+        document.getElementById('npcBAnger').value = relAB.anger;
         document.getElementById('npcBLogs').value = 5;
         await pg.runNPCChat();
         saveCurrent();
         return `Encounter → socialize (soc=${socScore.toFixed(2)})`;
       } else if (adjStealScore > 0.3) {
         pg.addChat('system', `${npcA} decides to STEAL from ${npcB}`);
-        // Simulate steal
-        swapIn(npcB);
+        swapIn(npcB, npcA);
         pg.applyDeltas({ trust: -0.10, fear: 0, anger: 0.15 }, 0.3);
         pg.state.memories.push({ text: `${npcA} stole my logs`, type: 'event', ts: Date.now(), importance: 0.9 });
         pg.renderMemories();
         saveCurrent();
-        swapIn(npcA);
+        swapIn(npcA, npcB);
         pg.applyDeltas({ trust: -0.05, fear: 0, anger: 0.1 }, 0.3);
         pg.state.memories.push({ text: `I stole logs from ${npcB}`, type: 'event', ts: Date.now(), importance: 0.85 });
         pg.renderMemories();
@@ -955,7 +1005,8 @@ async function executeNode(node) {
     case 'damage_npc': {
       const npc = resolveNpc(p);
       if (!npc) return 'Skipped: no NPC';
-      swapIn(npc);
+      // Damage affects NPC's relationship toward the attacker
+      swapIn(npc, p.attackerName);
       const s = pg.state;
       const hpAfter = p.currentHp - p.damage;
       const hpPct = hpAfter / p.maxHp;
@@ -973,13 +1024,14 @@ async function executeNode(node) {
       s.memories.push({ text: `Took ${p.damage} damage from ${p.attackerName}`, type: 'event', ts: Date.now(), importance: 0.8 });
       pg.renderMemories();
       saveCurrent();
-      return `${npc}: ${p.damage} dmg → ${hpAfter}/${p.maxHp} HP`;
+      return `${npc}: ${p.damage} dmg from ${p.attackerName} → ${hpAfter}/${p.maxHp} HP`;
     }
 
     case 'kill_event': {
       const npc = resolveNpc(p);
       if (!npc) return 'Skipped: no NPC';
-      swapIn(npc);
+      // Kill event affects NPC's relationship toward the killer
+      swapIn(npc, p.killerName);
       const s = pg.state;
       pg.addChat('system', `Kill event near ${npc}: ${p.victimName} (${p.victimType}) killed by ${p.killerName}`);
 
@@ -1006,16 +1058,22 @@ async function executeNode(node) {
     case 'time_forward': {
       const targetNpc = p.npc && world.npcs[p.npc] ? p.npc : null;
       if (targetNpc) {
-        swapIn(targetNpc);
-        pg.fastForward(p.seconds);
-        saveCurrent();
-        return `${targetNpc}: +${p.seconds}s`;
-      } else {
-        // Apply to all NPCs
-        for (const name of npcNames()) {
-          swapIn(name);
+        // Time forward decays all relationships for this NPC
+        const npcData = world.npcs[targetNpc];
+        for (const targetId of Object.keys(npcData.relationships)) {
+          swapIn(targetNpc, targetId);
           pg.fastForward(p.seconds);
           saveCurrent();
+        }
+        return `${targetNpc}: +${p.seconds}s (${Object.keys(npcData.relationships).length} relationships)`;
+      } else {
+        for (const name of npcNames()) {
+          const npcData = world.npcs[name];
+          for (const targetId of Object.keys(npcData.relationships)) {
+            swapIn(name, targetId);
+            pg.fastForward(p.seconds);
+            saveCurrent();
+          }
         }
         return `All NPCs: +${p.seconds}s`;
       }
@@ -1024,12 +1082,15 @@ async function executeNode(node) {
     case 'assert_emotion': {
       const npc = resolveNpc(p);
       if (!npc) return 'Skipped: no NPC';
-      const s = world.npcs[npc];
-      const actual = s[p.emotion];
+      // Check the owner relationship by default (or the last interacted relationship)
+      const npcData = world.npcs[npc];
+      const targetId = p.player || npcData.owner || Object.keys(npcData.relationships)[0] || 'default';
+      const rel = getNpcRelationship(npc, targetId);
+      const actual = rel[p.emotion];
       const expected = p.value;
       const ops = { '>=': actual >= expected, '<=': actual <= expected, '>': actual > expected, '<': actual < expected, '==': Math.abs(actual - expected) < 0.001 };
       const pass = ops[p.operator] ?? false;
-      const msg = `${npc}: ${p.emotion} ${p.operator} ${expected} — actual=${actual.toFixed(3)} → ${pass ? 'PASS' : 'FAIL'}`;
+      const msg = `${npc}→${targetId}: ${p.emotion} ${p.operator} ${expected} — actual=${actual.toFixed(3)} → ${pass ? 'PASS' : 'FAIL'}`;
       pg.addChat(pass ? 'system' : 'error', msg);
       if (!pass) throw new Error(msg);
       return msg;
@@ -1232,6 +1293,8 @@ function init() {
     for (const k of Object.keys(world.npcs)) delete world.npcs[k];
     for (const k of Object.keys(world.players)) delete world.players[k];
     _currentNpc = null;
+    _currentRelTarget = null;
+    renderWorldDashboard();
     all.forEach(n => { n.status = 'pending'; n.result = null; });
     runNodeList(all);
   };
@@ -1322,8 +1385,10 @@ function init() {
     for (const k of Object.keys(world.npcs)) delete world.npcs[k];
     for (const k of Object.keys(world.players)) delete world.players[k];
     _currentNpc = null;
+    _currentRelTarget = null;
     $('fcExecLog').innerHTML = '';
     $('fcExecStatus').textContent = '';
+    renderWorldDashboard();
     refreshFlowSelect();
     render();
   };
@@ -1387,6 +1452,104 @@ function init() {
   render();
 }
 
+// ── World Dashboard — per-NPC per-relationship gauges ────────────────────────
+function renderWorldDashboard() {
+  const el = $('fcWorldDashboard');
+  if (!el) return;
+  const npcEntries = Object.entries(world.npcs);
+  const playerEntries = Object.entries(world.players);
+  if (npcEntries.length === 0 && playerEntries.length === 0) {
+    el.innerHTML = '';
+    el.classList.remove('visible');
+    return;
+  }
+  el.classList.add('visible');
+
+  let html = '<div class="wd-title">World State</div><div class="wd-grid">';
+
+  // Players summary
+  for (const [pid, pl] of playerEntries) {
+    html += `<div class="wd-player"><span class="wd-player-icon">👤</span> <strong>${esc(pid)}</strong> HP ${pl.hp}/${pl.maxHp}`;
+    if (pl.npcs.length) html += ` — NPCs: ${pl.npcs.map(n => esc(n)).join(', ')}`;
+    html += `</div>`;
+  }
+
+  // NPCs with per-relationship gauges
+  for (const [name, npc] of npcEntries) {
+    const isActive = name === _currentNpc;
+    html += `<div class="wd-npc${isActive ? ' wd-active' : ''}">`;
+    html += `<div class="wd-npc-header"><span class="wd-npc-icon">🤖</span> <strong>${esc(name)}</strong>`;
+    html += ` <span class="wd-npc-type">${esc(npc.personalityType || '?')}</span>`;
+    if (npc.owner) html += ` <span class="wd-npc-owner">owner: ${esc(npc.owner)}</span>`;
+    html += ` <span class="wd-npc-mem">${npc.memories.length} mem</span>`;
+    html += `</div>`;
+
+    // Personality traits
+    html += `<div class="wd-traits">`;
+    html += miniBar('C', npc.personality.cooperation, '#4fc3f7');
+    html += miniBar('A', npc.personality.aggression, '#ef5350');
+    html += miniBar('N', npc.personality.neuroticism, '#ab47bc');
+    html += `</div>`;
+
+    // Relationships
+    const rels = Object.entries(npc.relationships);
+    if (rels.length === 0) {
+      html += `<div class="wd-no-rels">No relationships yet</div>`;
+    } else {
+      html += `<div class="wd-rels">`;
+      for (const [targetId, rel] of rels) {
+        const isActiveRel = isActive && targetId === _currentRelTarget;
+        const isOwnerRel = targetId === npc.owner;
+        html += `<div class="wd-rel${isActiveRel ? ' wd-rel-active' : ''}" data-npc="${esc(name)}" data-target="${esc(targetId)}">`;
+        html += `<div class="wd-rel-label">→ ${esc(targetId)}${isOwnerRel ? ' ★' : ''}</div>`;
+        html += `<div class="wd-rel-bars">`;
+        html += emotionBar('T', rel.trust, rel.trust_baseline, '#4caf50');
+        html += emotionBar('F', rel.fear, rel.fear_baseline, '#ff9800');
+        html += emotionBar('A', rel.anger, rel.anger_baseline, '#f44336');
+        html += `</div>`;
+        html += `<div class="wd-rel-meta">esc:${rel.escalation}× ${relLabel(rel.trust, rel.fear, rel.anger)}</div>`;
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+
+  // Click a relationship to swap it into the playground
+  el.querySelectorAll('.wd-rel').forEach(relEl => {
+    relEl.addEventListener('click', () => {
+      const npcName = relEl.dataset.npc;
+      const target = relEl.dataset.target;
+      if (npcName && target) swapIn(npcName, target);
+    });
+  });
+}
+
+function miniBar(label, value, color) {
+  const pct = Math.round((value || 0) * 100);
+  return `<span class="wd-mini"><span class="wd-mini-lbl">${label}</span><span class="wd-mini-bar"><span class="wd-mini-fill" style="width:${pct}%;background:${color}"></span></span><span class="wd-mini-val">${(value || 0).toFixed(2)}</span></span>`;
+}
+
+function emotionBar(label, value, baseline, color) {
+  const pct = Math.round((value || 0) * 100);
+  const blPct = Math.round((baseline || 0) * 100);
+  return `<span class="wd-emo"><span class="wd-emo-lbl">${label}</span><span class="wd-emo-bar"><span class="wd-emo-fill" style="width:${pct}%;background:${color}"></span><span class="wd-emo-bl" style="left:${blPct}%"></span></span><span class="wd-emo-val">${(value || 0).toFixed(2)}</span></span>`;
+}
+
+function relLabel(trust, fear, anger) {
+  if (trust > 0.75 && anger < 0.15) return 'allied';
+  if (trust > 0.50) return 'friendly';
+  if (anger > 0.60 || fear > 0.60) return 'hostile';
+  if (fear > 0.40) return 'fearful';
+  if (anger > 0.35) return 'wary';
+  return 'neutral';
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
 // ── Public API (for playground.js scenarios) ────────────────────────────────
 function loadFlowData(flowData, name) {
   const nodeList = Array.isArray(flowData) ? flowData : (flowData.nodes || []);
@@ -1406,6 +1569,7 @@ function loadFlowData(flowData, name) {
   for (const k of Object.keys(world.npcs)) delete world.npcs[k];
   for (const k of Object.keys(world.players)) delete world.players[k];
   _currentNpc = null;
+  _currentRelTarget = null;
   $('fcExecLog').innerHTML = '';
   $('fcExecStatus').textContent = '';
   renderChunkList();
@@ -1413,6 +1577,7 @@ function loadFlowData(flowData, name) {
   refreshFlowSelect();
   render();
   $('fcDetail').innerHTML = '<div class="fc-detail-empty">Select a node to edit its parameters</div>';
+  renderWorldDashboard();
   execLog(`Loaded scenario: ${name || 'unnamed'} (${nodes.length} nodes, ${chunks.length} chunks)`, 'fc-log-ok');
 }
 
@@ -1423,6 +1588,8 @@ function runAllNodes() {
   for (const k of Object.keys(world.npcs)) delete world.npcs[k];
   for (const k of Object.keys(world.players)) delete world.players[k];
   _currentNpc = null;
+  _currentRelTarget = null;
+  renderWorldDashboard();
   all.forEach(n => { n.status = 'pending'; n.result = null; });
   runNodeList(all);
 }

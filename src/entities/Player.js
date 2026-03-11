@@ -62,6 +62,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     // Simple log counter
     this.logs = 0;
     this._punching = false;
+    this._knockedOut = false;
   }
 
   _createAnims(scene) {
@@ -124,6 +125,16 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   update(delta) {
+    if (this._knockedOut) {
+      this.stop();
+      this.setTint(0x999999);
+      this.setAlpha(0.6);
+      if (this._bubble) this._bubble.setPosition(this.x, this.y - this.displayHeight + 4);
+      return;
+    }
+    this.clearTint();
+    this.setAlpha(1);
+
     // HP regen
     if (this.hp < this.maxHp) {
       this._regenAccum += delta;

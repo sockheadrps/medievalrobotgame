@@ -11,6 +11,8 @@ VALID_CATEGORIES = {
     "combat",
     "follow",
     "idle",
+    "build",
+    "chat",
 }
 
 VALID_TASKS = {
@@ -18,8 +20,12 @@ VALID_TASKS = {
     "follow",
     "idle",
     "attack_nearest_enemy",
+    "attack_player",
+    "attack_npc",
     "defend_player",
     "train",
+    "give_logs",
+    "build_fence",
 }
 VALID_GOALS = {
     "gather",
@@ -90,6 +96,7 @@ async def route_category(text: str, client: httpx.AsyncClient) -> str:
                 {"role": "user", "content": text},
             ],
             "stream": False,
+            "think": False,
             "options": {"temperature": 0, "num_predict": 5},
         },
     )
@@ -132,6 +139,7 @@ async def specialist_commands(category: str, request: ChatRequest, client: httpx
                 {"role": "user", "content": request.text},
             ],
             "stream": False,
+            "think": False,
             "options": {"temperature": 0, "num_predict": 300},
         },
     )
@@ -145,5 +153,8 @@ async def specialist_commands(category: str, request: ChatRequest, client: httpx
 async def parse_command(request: ChatRequest) -> tuple[str, list]:
     async with httpx.AsyncClient(timeout=60.0) as client:
         category = await route_category(request.text, client)
+        # Chat is conversation, not a command — return idle to fall through to dialogue
+        if category == "chat":
+            return category, [{"task": "idle"}]
         commands = await specialist_commands(category, request, client)
     return category, commands

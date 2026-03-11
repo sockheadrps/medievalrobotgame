@@ -43,6 +43,80 @@ export class NPCTaskRunner {
     return { running: this._tasks.length > 0, tasks: this._tasks };
   }
 
+  _targetIsDown(target) {
+    return !!(target?.isDead?.() || target?._dead || target?.isKnockedOut?.());
+  }
+
+  _completeCombatTaskOnTargetDown(targetName = 'them') {
+    const scene = this._scene;
+    const npc = this._npc;
+    const currentTask = this._tasks[0]?.task || 'attack';
+    const line = scene._buildKnockoutVictoryLine?.(npc, currentTask) || `They're down.`;
+    npc.showBubble(line, 3200, { silent: true });
+    scene._addNPCSpeechToChat?.(npc, line);
+    npc.addMemory(`I knocked ${targetName} down during a fight.`, 'event', scene.playerId, 0.65);
+    this.setTasks([{ task: 'idle' }]);
+  }
+
+  _getOwnServerNPCState() {
+    return this._scene?._lastServerState?.players?.[this._scene.playerId]?.npcs?.[this._npc.id] ?? null;
+  }
+
+  _npcIsCarryingTarget(cmd) {
+    const carrying = this._getOwnServerNPCState()?.carrying;
+    if (!carrying) return false;
+    if (cmd.task === 'carry_away_player') {
+      return carrying.type === 'player' && carrying.id === cmd.target_id;
+    }
+    return carrying.type === 'npc' && carrying.owner === cmd.target_owner && carrying.id === cmd.target_npc_id;
+  }
+
+  _maybeOpportunisticRob(cmd, target) {
+    if (cmd._robAttempted) return;
+    cmd._robAttempted = true;
+    const npc = this._npc;
+    const pers = npc.soul?.personality || {};
+    const robScore = (pers.aggression ?? 0.3) * 0.55 + (1 - (pers.cooperation ?? 0.5)) * 0.25 + (pers.neuroticism ?? 0.3) * 0.2;
+    if (robScore < 0.52 || (target?.logs ?? 0) <= 0) return;
+    if (cmd.task === 'carry_away_player') {
+      this._scene._conn?.send({ type: 'npc_rob_player', npc_id: npc.id, target_id: cmd.target_id });
+    } else {
+      this._scene._conn?.send({
+        type: 'npc_rob_npc',
+        npc_id: npc.id,
+        owner_id: cmd.target_owner,
+        target_npc_id: cmd.target_npc_id,
+      });
+    }
+    const line = `Took their stuff too.`;
+    npc.showBubble(line, 2600, { silent: true });
+    this._scene._addNPCSpeechToChat?.(npc, line, '#ffccaa');
+  }
+
+  _finishCarryAway(cmd, targetName = 'them') {
+    const npc = this._npc;
+    const scene = this._scene;
+    const line = (npc.soul?.personality?.aggression ?? 0.3) > 0.6
+      ? `${targetName} woke up stranded. Hah.`
+      : `I dumped ${targetName} far off and came back.`;
+    npc.showBubble(line, 3600, { silent: true });
+    scene._addNPCSpeechToChat?.(npc, line, '#ffccaa');
+    npc.addMemory(`I carried ${targetName} away while they were unconscious.`, 'event', scene.playerId, 0.82);
+    this.setTasks([{ task: 'follow' }]);
+  }
+
+  _carryAwayDestination() {
+    const npc = this._npc;
+    const player = this._scene.player;
+    const dx = npc.x - player.x;
+    const dy = npc.y - player.y;
+    const len = Math.max(1, Math.hypot(dx, dy));
+    return {
+      x: npc.x + (dx / len) * TILE_SIZE * 5,
+      y: npc.y + (dy / len) * TILE_SIZE * 5,
+    };
+  }
+
   /** Called every frame from GameScene update. */
   update(delta) {
     if (this._npc.isDead()) return;
@@ -63,6 +137,8 @@ export class NPCTaskRunner {
       case 'steal_logs':           this._doStealLogs(delta); break;
       case 'socialize_npc':        this._doSocializeNPC(delta); break;
       case 'build_fence':          this._doBuildFence(delta); break;
+      case 'carry_away_player':    this._doCarryAwayPlayer(delta); break;
+      case 'carry_away_npc':       this._doCarryAwayNPC(delta); break;
       default:
         console.warn(`[TaskRunner] Unknown task: ${cmd.task}`);
         this._tasks.shift();
@@ -212,7 +288,7 @@ export class NPCTaskRunner {
     if (this._attackCooldown > 0) { this._attackCooldown -= _delta; return; }
 
     // Re-acquire target if current one is dead or missing
-    if (!this._target || this._target._dead || this._target.isDead?.()) {
+    if (!this._target || this._target._dead || this._target.isDead?.() || this._target.isKnockedOut?.()) {
       this._target = null;
       let bestDist = Infinity;
 
@@ -273,12 +349,14 @@ export class NPCTaskRunner {
       } else if (this._targetType === 'npc' && conn?.connected) {
         conn.send({ type: 'npc_attack_npc', target_owner: target.ownerPid, target_npc_id: target.npcId, str: npc.str, npc_id: npc.id });
       } else if (this._targetType === 'dummy' && conn?.connected && target._serverId) {
-        conn.send({ type: 'npc_attack_dummy', dummy_id: target._serverId, str: npc.str });
+        conn.send({ type: 'npc_attack_dummy', dummy_id: target._serverId, str: npc.str, npc_id: npc.id });
       } else if (this._targetType === 'dummy') {
         target.npcAttack(npc);
       }
 
-      if (target.isDead?.() || target._dead) {
+      if (this._targetIsDown(target)) {
+        const targetName = target.getName?.() || target.playerId || target.npcId || 'them';
+        this._completeCombatTaskOnTargetDown(targetName);
         this._target = null;
       }
     }
@@ -323,7 +401,7 @@ export class NPCTaskRunner {
       const conn = this._scene._conn;
       if (conn?.connected && target._serverId) {
         npc.playAttack?.(target.x);
-        conn.send({ type: 'npc_attack_dummy', dummy_id: target._serverId, str: npc.str });
+        conn.send({ type: 'npc_attack_dummy', dummy_id: target._serverId, str: npc.str, npc_id: npc.id });
       } else {
         target.npcAttack(npc);
       }
@@ -348,6 +426,10 @@ export class NPCTaskRunner {
     if (!rp || rp.isDead?.()) {
       npc.showBubble('Target lost…', 2000);
       this._tasks.shift();
+      return;
+    }
+    if (rp.isKnockedOut?.()) {
+      this._completeCombatTaskOnTargetDown(rp.getName?.() || rp.playerId || 'them');
       return;
     }
 
@@ -386,6 +468,10 @@ export class NPCTaskRunner {
       this._tasks.shift();
       return;
     }
+    if (rnpc.isKnockedOut?.()) {
+      this._completeCombatTaskOnTargetDown(rnpc.getName?.() || cmd.target_npc_id || 'them');
+      return;
+    }
 
     const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rnpc.x, rnpc.y);
     if (dist > ATTACK_RANGE) {
@@ -408,6 +494,86 @@ export class NPCTaskRunner {
     }
   }
 
+  _doCarryAwayPlayer(_delta) {
+    const scene = this._scene;
+    const npc = this._npc;
+    const cmd = this._tasks[0];
+    const rp = scene._remotePlayers?.[cmd.target_id];
+    const targetName = rp?.playerId || cmd.target_name || 'them';
+    if (!rp || rp.isDead?.()) {
+      npc.showBubble('Body got away...', 2000);
+      this.setTasks([{ task: 'follow' }]);
+      return;
+    }
+    if (!rp.isKnockedOut?.() && !this._npcIsCarryingTarget(cmd)) {
+      this._finishCarryAway(cmd, targetName);
+      return;
+    }
+    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rp.x, rp.y);
+    if (!this._npcIsCarryingTarget(cmd)) {
+      if (dist > ATTACK_RANGE) {
+        npc.moveTo(rp.x, rp.y);
+        return;
+      }
+      npc.stopMoving();
+      this._faceTarget(npc, rp);
+      this._maybeOpportunisticRob(cmd, rp);
+      scene._conn?.send({ type: 'npc_carry_player', npc_id: npc.id, target_id: cmd.target_id });
+      return;
+    }
+    if (rp.isKnockedOut?.()) {
+      if (!cmd._dest) cmd._dest = this._carryAwayDestination();
+      const dd = Phaser.Math.Distance.Between(npc.x, npc.y, cmd._dest.x, cmd._dest.y);
+      if (dd > TILE_SIZE * 1.2) npc.moveTo(cmd._dest.x, cmd._dest.y);
+      else npc.stopMoving();
+      return;
+    }
+    this._finishCarryAway(cmd, targetName);
+  }
+
+  _doCarryAwayNPC(_delta) {
+    const scene = this._scene;
+    const npc = this._npc;
+    const cmd = this._tasks[0];
+    const key = `${cmd.target_owner}_${cmd.target_npc_id}`;
+    const rnpc = scene._remoteNPCSprites?.[key];
+    const targetName = rnpc?.getName?.() || cmd.target_name || 'them';
+    if (!rnpc || rnpc.isDead?.()) {
+      npc.showBubble('Body got away...', 2000);
+      this.setTasks([{ task: 'follow' }]);
+      return;
+    }
+    if (!rnpc.isKnockedOut?.() && !this._npcIsCarryingTarget(cmd)) {
+      this._finishCarryAway(cmd, targetName);
+      return;
+    }
+    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rnpc.x, rnpc.y);
+    if (!this._npcIsCarryingTarget(cmd)) {
+      if (dist > ATTACK_RANGE) {
+        npc.moveTo(rnpc.x, rnpc.y);
+        return;
+      }
+      npc.stopMoving();
+      this._faceTarget(npc, rnpc);
+      this._maybeOpportunisticRob(cmd, rnpc);
+      scene._conn?.send({
+        type: 'npc_carry_npc',
+        npc_id: npc.id,
+        owner_id: cmd.target_owner,
+        target_npc_id: cmd.target_npc_id,
+      });
+      return;
+    }
+    if (rnpc.isKnockedOut?.()) {
+      if (!cmd._dest) cmd._dest = this._carryAwayDestination();
+      const dd = Phaser.Math.Distance.Between(npc.x, npc.y, cmd._dest.x, cmd._dest.y);
+      if (dd > TILE_SIZE * 1.2) npc.moveTo(cmd._dest.x, cmd._dest.y);
+      else npc.stopMoving();
+      return;
+    }
+    this._finishCarryAway(cmd, targetName);
+  }
+
   // ── Flee from a specific player ─────────────────────────────────────────
 
   _doFleePlayer(_delta) {
@@ -415,6 +581,45 @@ export class NPCTaskRunner {
     const npc = this._npc;
     const cmd = this._tasks[0];
     const targetId = cmd.target_id;
+
+    if (targetId?.startsWith?.('npc:')) {
+      const targetKey = cmd.target_owner && cmd.target_npc_id
+        ? `${cmd.target_owner}_${cmd.target_npc_id}`
+        : null;
+      let target = targetKey ? scene._remoteNPCSprites?.[targetKey] : null;
+      if (!target) {
+        const npcId = targetId.replace('npc:', '');
+        target = Object.values(scene._remoteNPCSprites || {}).find(r => r.npcId === npcId);
+      }
+      if (!target || target.isDead?.()) {
+        this._tasks.shift();
+        return;
+      }
+
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, target.x, target.y);
+      const FLEE_RANGE = TILE_SIZE * 8;
+      const SAFE_RANGE = TILE_SIZE * 10;
+
+      if (dist >= SAFE_RANGE) {
+        npc.stopMoving();
+        this._tasks.shift();
+        return;
+      }
+
+      const dx = npc.x - target.x;
+      const dy = npc.y - target.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const fleeX = npc.x + (dx / len) * FLEE_RANGE;
+      const fleeY = npc.y + (dy / len) * FLEE_RANGE;
+
+      const worldW = (scene._mapCols || 60) * TILE_SIZE;
+      const worldH = (scene._mapRows || 60) * TILE_SIZE;
+      npc.moveTo(
+        Math.max(TILE_SIZE, Math.min(worldW - TILE_SIZE, fleeX)),
+        Math.max(TILE_SIZE, Math.min(worldH - TILE_SIZE, fleeY)),
+      );
+      return;
+    }
 
     const rp = scene._remotePlayers?.[targetId];
     if (!rp || rp.isDead?.()) {
@@ -501,7 +706,7 @@ export class NPCTaskRunner {
       } else if (nearestTarget.type === 'npc' && conn?.connected) {
         conn.send({ type: 'npc_attack_npc', target_owner: nearestTarget.ownerId, target_npc_id: nearestTarget.npcId, str: npc.str, npc_id: npc.id });
       } else if (nearestTarget.type === 'dummy' && conn?.connected && nearestTarget.entity._serverId) {
-        conn.send({ type: 'npc_attack_dummy', dummy_id: nearestTarget.entity._serverId, str: npc.str });
+        conn.send({ type: 'npc_attack_dummy', dummy_id: nearestTarget.entity._serverId, str: npc.str, npc_id: npc.id });
       }
     } else if (nearestTarget && nearestDist <= DEFEND_RANGE) {
       // Move toward nearest threat
@@ -562,7 +767,9 @@ export class NPCTaskRunner {
       // Add stolen logs to own inventory
       npc.logs = Math.min(npc.logs + stealAmount, npc.maxLogs);
 
-      npc.showBubble(`Swiped ${stealAmount} log${stealAmount > 1 ? 's' : ''}! Heh.`, 3000);
+      const stealLine = `Swiped ${stealAmount} log${stealAmount > 1 ? 's' : ''}! Heh.`;
+      npc.showBubble(stealLine, 3000, { silent: true });
+      scene._addNPCSpeechToChat?.(npc, stealLine, '#ffccaa');
 
       // Record grudge — the victim's owner will see this via events
       const brain = scene._npcBrains?.get(npc.id);
@@ -615,7 +822,13 @@ export class NPCTaskRunner {
       };
       const npcBCtx = {
         id: rnpc.npcId, name: targetName, logs: rnpc.logs ?? 0,
-        soul: { personality: {}, relationships: {}, memories: {} },
+        ownerPid: rnpc.ownerPid,
+        soul: {
+          personality: rnpc._personality || {},
+          relationships: rnpc._soul || {},
+          memories: {},
+          learned_phrases: [],
+        },
       };
 
       // Fire off LLM conversation (async)
@@ -629,6 +842,8 @@ export class NPCTaskRunner {
           for (const entry of lines) {
             const isOurs = entry.speakerId === npc.id;
             scene.time.delayedCall(delay, () => {
+              const fromName = isOurs ? (npc.getName?.() || entry.speaker || npc.id) : (targetName || entry.speaker || rnpc.npcId);
+              const toName = isOurs ? (targetName || rnpc.getName?.() || rnpc.npcId) : (npc.getName?.() || npc.id);
               if (isOurs) {
                 npc.showBubble(entry.line, 4000, { silent: true });
               } else {
@@ -636,7 +851,7 @@ export class NPCTaskRunner {
                 rnpc.showBubble?.(entry.line, 4000);
               }
               // Log to chat
-              scene.chatBox?._addLog(`${entry.speaker}: ${entry.line}`, '#aaccff');
+              scene._addNPCDirectedSpeechToChat?.(fromName, toName, entry.line, '#aaccff');
             });
             delay += 3000; // 3s between lines
           }

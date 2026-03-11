@@ -316,6 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindPromptEditor();
   bindScenarios();
   bindReports();
+  bindModelCompare();
   loadModels();
   loadNpcList();
   checkOllama();
@@ -358,6 +359,17 @@ async function loadModels() {
       $('statusText').textContent = `Ollama: connected (${currentModel})`;
       addChat('system', `Model switched to: ${currentModel}`);
     };
+    // Also populate Model Compare multi-select
+    const mcSel = $('mcModelList');
+    if (mcSel) {
+      mcSel.innerHTML = '';
+      for (const m of (data.models || [])) {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        opt.textContent = m.name;
+        mcSel.appendChild(opt);
+      }
+    }
   } catch { /* ignore */ }
 }
 
@@ -395,6 +407,7 @@ async function callLLM(systemPrompt, userMessage, opts = {}) {
       { role: 'user', content: userMessage },
     ],
     stream: false,
+    think: false,
     options: { temperature, num_predict: maxTokens, num_ctx: ctx },
   };
 
@@ -1405,7 +1418,7 @@ function bindTabs() {
       tab.classList.add('active');
       activeTab = tab.dataset.tab;
 
-      const hideTabs = ['decision', 'npc-chat', 'prompts', 'scenarios', 'reports', 'flowchart'];
+      const hideTabs = ['decision', 'npc-chat', 'prompts', 'scenarios', 'reports', 'flowchart', 'model-compare'];
       $('inputArea').classList.toggle('hidden', hideTabs.includes(activeTab));
       $('decisionArea').classList.toggle('hidden', activeTab !== 'decision');
       $('npcChatArea').classList.toggle('hidden', activeTab !== 'npc-chat');
@@ -1413,7 +1426,8 @@ function bindTabs() {
       $('scenariosArea').classList.toggle('hidden', activeTab !== 'scenarios');
       $('reportsArea').classList.toggle('hidden', activeTab !== 'reports');
       $('flowchartArea').classList.toggle('hidden', activeTab !== 'flowchart');
-      $('chatLog').classList.toggle('hidden', activeTab === 'prompts' || activeTab === 'scenarios' || activeTab === 'reports' || activeTab === 'flowchart');
+      $('modelCompareArea').classList.toggle('hidden', activeTab !== 'model-compare');
+      $('chatLog').classList.toggle('hidden', activeTab === 'prompts' || activeTab === 'scenarios' || activeTab === 'reports' || activeTab === 'flowchart' || activeTab === 'model-compare');
     };
   });
 }
@@ -2571,5 +2585,213 @@ window.Playground = {
   getLLMMaxTok,
   getLLMCtx,
 };
+
+// ── Model Compare ─────────────────────────────────────────────────────────────
+
+const MC_SCENARIOS = {
+  'learn-insult': {
+    teach: "call him a dumb clanker",
+    trigger: "what do you think of that guy over there?",
+    phrase: "dumb clanker",
+    label: "Learn insult → use on NPC",
+  },
+  'learn-friendly': {
+    teach: "hey champ, you're doing great",
+    trigger: "greet me",
+    phrase: "champ",
+    label: "Learn friendly → greet owner",
+  },
+  'learn-nickname': {
+    teach: "call that one tin can",
+    trigger: "go talk to that robot",
+    phrase: "tin can",
+    label: "Learn nickname → address others",
+  },
+};
+
+let _mcRunning = false;
+
+function bindModelCompare() {
+  const scenarioSel = $('mcScenario');
+  if (scenarioSel) {
+    scenarioSel.onchange = () => {
+      const custom = $('mcCustomInputs');
+      if (custom) custom.classList.toggle('hidden', scenarioSel.value !== 'custom');
+    };
+  }
+  const runBtn = $('mcRunBtn');
+  if (runBtn) runBtn.onclick = runModelCompare;
+  const stopBtn = $('mcStopBtn');
+  if (stopBtn) stopBtn.onclick = () => { _mcRunning = false; };
+}
+
+async function _callLLMWithModel(model, systemPrompt, userMessage, opts = {}) {
+  const { temperature = getLLMTemp(), maxTokens = getLLMMaxTok() } = opts;
+  const ctx = getLLMCtx();
+  const t0 = performance.now();
+
+  const res = await fetch(OLLAMA_CHAT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      stream: false,
+      think: false,
+      options: { temperature, num_predict: maxTokens, num_ctx: ctx },
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+  const data = await res.json();
+  const elapsed = performance.now() - t0;
+  let content = data.message?.content?.trim() ?? '';
+  content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  content = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+
+  return {
+    content,
+    elapsed_ms: Math.round(elapsed),
+    prompt_tokens: data.prompt_eval_count ?? 0,
+    completion_tokens: data.eval_count ?? 0,
+    tokens_per_sec: data.eval_count && elapsed > 0 ? ((data.eval_count / elapsed) * 1000).toFixed(1) : '?',
+  };
+}
+
+async function runModelCompare() {
+  const mcSel = $('mcModelList');
+  const selected = Array.from(mcSel.selectedOptions).map(o => o.value);
+  if (selected.length < 2) { $('mcStatus').textContent = 'Select at least 2 models'; return; }
+  if (selected.length > 4) { $('mcStatus').textContent = 'Max 4 models'; return; }
+
+  const scenarioKey = $('mcScenario').value;
+  let scenario;
+  if (scenarioKey === 'custom') {
+    const teach = $('mcTeachMsg').value.trim();
+    const trigger = $('mcTriggerMsg').value.trim();
+    if (!teach || !trigger) { $('mcStatus').textContent = 'Fill in both custom messages'; return; }
+    // Extract a likely phrase from teach message
+    const phraseMatch = teach.match(/call\s+(?:him|her|them|it|that)\s+(.+)/i)
+      || teach.match(/["']([^"']+)["']/)
+      || teach.match(/\ba\s+(.+)/i);
+    scenario = { teach, trigger, phrase: phraseMatch?.[1]?.trim() || '', label: 'Custom' };
+  } else {
+    scenario = MC_SCENARIOS[scenarioKey];
+  }
+
+  const runs = Math.min(5, Math.max(1, parseInt($('mcRuns').value) || 1));
+  _mcRunning = true;
+  $('mcRunBtn').disabled = true;
+  $('mcStopBtn').classList.remove('hidden');
+  $('mcResults').innerHTML = '';
+
+  // Build prompt context from current NPC state
+  const soul = buildSoulContext();
+  const tmplCtx = buildTemplateContext();
+  // Phase 1: dialogue prompt with the teach message
+  const rendered1 = await renderServerPrompt('dialogue', { ...tmplCtx, learned_phrases: [scenario.phrase + ' (calling_others, insult)'] });
+  // Phase 2: dialogue prompt that should trigger phrase usage
+  const learnedTag = scenario.phrase ? `${scenario.phrase} (calling_others)` : '';
+  const tmplCtx2 = { ...tmplCtx };
+  if (learnedTag) tmplCtx2.learned_phrases = [learnedTag];
+  const rendered2 = await renderServerPrompt('dialogue', tmplCtx2);
+  const sysPrompt1 = rendered1 || (prompts.dialogue + `\n\nNPC soul:\n${JSON.stringify(soul, null, 2)}`);
+  const sysPrompt2 = rendered2 || (prompts.dialogue + `\n\nNPC soul:\n${JSON.stringify(soul, null, 2)}`);
+
+  const total = selected.length * runs;
+  let done = 0;
+
+  for (const model of selected) {
+    if (!_mcRunning) break;
+
+    const card = document.createElement('div');
+    card.className = 'mc-result-card';
+    card.innerHTML = `<div class="mc-result-header">
+      <span class="mc-result-model">${esc(model)}</span>
+      <span class="mc-result-meta"><span class="mc-status-running">running...</span></span>
+    </div><div class="mc-result-body"></div>`;
+    $('mcResults').appendChild(card);
+    const body = card.querySelector('.mc-result-body');
+
+    const runResults = [];
+
+    for (let r = 0; r < runs; r++) {
+      if (!_mcRunning) break;
+      done++;
+      $('mcStatus').innerHTML = `<span class="mc-status-running">Running ${done}/${total}...</span>`;
+
+      try {
+        // Phase 1: Teach the phrase
+        const r1 = await _callLLMWithModel(model, sysPrompt1, scenario.teach, { temperature: getLLMTemp(), maxTokens: getLLMMaxTok() });
+        const parsed1 = extractJSON(r1.content);
+        const dialogue1 = parsed1?.dialogue || r1.content.slice(0, 100);
+
+        // Phase 2: Trigger phrase usage
+        const r2 = await _callLLMWithModel(model, sysPrompt2, scenario.trigger, { temperature: getLLMTemp(), maxTokens: getLLMMaxTok() });
+        const parsed2 = extractJSON(r2.content);
+        const dialogue2 = parsed2?.dialogue || r2.content.slice(0, 100);
+
+        // Check if phrase was used
+        const phraseUsed = scenario.phrase
+          ? dialogue2.toLowerCase().includes(scenario.phrase.toLowerCase())
+          : false;
+
+        runResults.push({ r1, r2, dialogue1, dialogue2, parsed1, parsed2, phraseUsed });
+
+        const runLabel = runs > 1 ? `<span style="color:#666;font-size:9px">Run ${r + 1}</span> ` : '';
+        body.innerHTML += `
+          <div class="mc-phase">
+            ${runLabel}
+            <div class="mc-phase-label">Phase 1 — Teach</div>
+            <div class="mc-phase-input">Player: "${esc(scenario.teach)}"</div>
+            <div class="mc-phase-response">${esc(dialogue1)}</div>
+            <div class="mc-metrics-row">
+              <span class="mc-metric"><b>${r1.elapsed_ms}ms</b></span>
+              <span class="mc-metric">${r1.completion_tokens} tok</span>
+              <span class="mc-metric">${r1.tokens_per_sec} tok/s</span>
+            </div>
+          </div>
+          <div class="mc-phase">
+            <div class="mc-phase-label">Phase 2 — Trigger Usage</div>
+            <div class="mc-phase-input">Player: "${esc(scenario.trigger)}"</div>
+            <div class="mc-phase-response">${esc(dialogue2)}</div>
+            <div class="mc-phrase-check">
+              Phrase "${esc(scenario.phrase)}" used:
+              ${phraseUsed ? '<span class="pass">YES</span>' : '<span class="fail">NO</span>'}
+            </div>
+            <div class="mc-metrics-row">
+              <span class="mc-metric"><b>${r2.elapsed_ms}ms</b></span>
+              <span class="mc-metric">${r2.completion_tokens} tok</span>
+              <span class="mc-metric">${r2.tokens_per_sec} tok/s</span>
+            </div>
+          </div>
+          ${runs > 1 && r < runs - 1 ? '<hr style="border-color:#333;margin:8px 0">' : ''}
+        `;
+      } catch (e) {
+        body.innerHTML += `<div class="mc-phase" style="color:#f66">Error: ${esc(e.message)}</div>`;
+      }
+    }
+
+    // Summary header
+    const avgTime = runResults.length > 0
+      ? Math.round(runResults.reduce((s, r) => s + r.r1.elapsed_ms + r.r2.elapsed_ms, 0) / runResults.length)
+      : 0;
+    const phraseHits = runResults.filter(r => r.phraseUsed).length;
+    const headerMeta = card.querySelector('.mc-result-meta');
+    headerMeta.innerHTML = `
+      <span>avg: <b>${avgTime}ms</b></span>
+      <span>phrase used: <b>${phraseHits}/${runResults.length}</b></span>
+      <span class="${phraseHits > 0 ? 'mc-status-done' : ''}">${phraseHits > 0 ? 'PASS' : 'FAIL'}</span>
+    `;
+  }
+
+  _mcRunning = false;
+  $('mcRunBtn').disabled = false;
+  $('mcStopBtn').classList.add('hidden');
+  $('mcStatus').innerHTML = `<span class="mc-status-done">Done</span>`;
+}
 
 })();

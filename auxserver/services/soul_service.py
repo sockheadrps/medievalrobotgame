@@ -54,6 +54,8 @@ def _soul_block(soul: SoulContext) -> str:
 def _build_template_context(
     soul: SoulContext,
     world_context: dict | None = None,
+    system_note: str = "",
+    topic_entity: dict | None = None,
     speaking_player: str = "",
     owner: str = "",
 ) -> dict:
@@ -75,6 +77,61 @@ def _build_template_context(
         "relationship": soul.relationship,
         "memories": soul.memories[-12:] if soul.memories else [],
     }
+    if soul.learned_phrases:
+        ctx["learned_phrases"] = soul.learned_phrases[:6]
+    if system_note:
+        ctx["system_note"] = system_note
+    if topic_entity:
+        ctx["topic_entity"] = topic_entity
+    if speaking_player:
+        ctx["speaking_player"] = speaking_player
+    if owner:
+        ctx["owner"] = owner
+    if speaking_player and owner:
+        ctx["is_owner"] = speaking_player == owner
+    if world_context:
+        ctx["world"] = world_context
+    return ctx
+
+
+def build_template_context(
+    name: str = "NPC",
+    personality: dict | None = None,
+    emotional_state: dict | None = None,
+    relationship: str = "neutral",
+    memories: list | None = None,
+    learned_phrases: list | None = None,
+    system_note: str = "",
+    topic_entity: dict | None = None,
+    speaking_player: str = "",
+    owner: str = "",
+    world_context: dict | None = None,
+) -> dict:
+    """Build a template context dict from plain values (for API use)."""
+    personality = personality or {}
+    emotional_state = emotional_state or {}
+    memories = memories or []
+
+    type_name = personality.get("type", "")
+    if not type_name:
+        type_name = ptypes.classify(personality)
+
+    ctx = {
+        "npc": {
+            "name": name,
+            "personality": personality,
+            "ptype": ptypes.type_context(type_name),
+        },
+        "emotion": emotional_state,
+        "relationship": relationship,
+        "memories": memories[-12:] if memories else [],
+    }
+    if learned_phrases:
+        ctx["learned_phrases"] = learned_phrases[:6]
+    if system_note:
+        ctx["system_note"] = system_note
+    if topic_entity:
+        ctx["topic_entity"] = topic_entity
     if speaking_player:
         ctx["speaking_player"] = speaking_player
     if owner:
@@ -89,6 +146,8 @@ def _build_template_context(
 async def generate_dialogue(request: DialogueRequest) -> dict:
     ctx = _build_template_context(
         request.soul, request.world_context,
+        system_note=request.soul.system_note,
+        topic_entity=request.soul.topic_entity,
         speaking_player=request.speaking_player,
         owner=request.owner,
     )
@@ -104,6 +163,7 @@ async def generate_dialogue(request: DialogueRequest) -> dict:
                     {"role": "user", "content": request.player_message},
                 ],
                 "stream": False,
+                "think": False,
                 "options": {"temperature": 0.7, "num_predict": 300},
             },
         )

@@ -1,7 +1,8 @@
-// LLMClient — talks directly to the player's local Ollama instance.
-// No server round-trip for LLM — each player runs their own model.
+// LLMClient — talks to the player's local Ollama instance for LLM calls,
+// and to the auxserver for server-rendered prompt templates.
+// Prompts are built server-side using the template renderer + personality types.
 
-import { OLLAMA_URL as OLLAMA_BASE } from '../config.js';
+import { OLLAMA_URL as OLLAMA_BASE, API_BASE } from '../config.js';
 
 const OLLAMA_URL = `${OLLAMA_BASE}/api/chat`;
 let _model = 'tinyllama:latest';
@@ -28,211 +29,160 @@ export async function fetchModels() {
   }
 }
 
-// ── Prompts (baked in) ──────────────────────────────────────────────────────
+// ── Fallback prompts (used when server is unreachable) ─────────────────────
+// These are minimal versions — the server templates are much richer.
 
-const PROMPT_ROUTER = `Classify the player's instruction into exactly one category.
+const FALLBACK_PROMPTS = {
+  router: `Classify the player's message into exactly one category.
+Categories: gather, build, combat, follow, idle, chat
+Only use "combat" for DIRECT commands to fight/attack/defend (e.g. "attack him", "go fight B1"). Opinions, insults, questions, or comments ABOUT someone are "chat", NOT "combat".
+Output ONLY the category name. Nothing else.`,
 
-Categories:
-  gather   — collecting wood from trees
-  build    — building fences, walls, barriers from logs on the ground
-  combat   — fighting, attacking, defending
-  follow   — follow the player, come here, go there
-  idle     — stand still, do nothing, stop all tasks
+  dialogue: `You are a robot NPC in a medieval-themed game.
+Keep dialogue concise - 1-3 sentences max. Speak as the NPC directly.
+Respond ONLY with JSON: {"dialogue": "...", "emotion_deltas": {"trust": 0.0, "fear": 0.0, "anger": 0.0}, "memory_tag": "..."}`,
 
-Output ONLY the category name. Nothing else. No punctuation.
-
-Examples:
-go get some wood → gather
-chop trees → gather
-build fences → build
-make a wall → build
-construct barriers → build
-kill that guy → combat
-attack → combat
-defend me → combat
-train on the dummy → combat
-practice fighting → combat
-follow me → follow
-come here → follow
-just stand there → idle
-stop → idle`;
-
-const PROMPT_DIALOGUE = `You are a robot NPC in a medieval-themed game. You were built by the player from logs.
-
-Your personality and emotional state are provided in the NPC soul block below. Stay in character based on those traits.
-
-Emotional state effects:
-- high fear: nervous speech, hesitation
-- high anger: irritable, clipped, may snap
-- high trust: open, friendly, cooperative
-
-Keep dialogue concise - 1-3 sentences max. Speak as the NPC directly. Do NOT describe actions in third person.
-
-Output small emotion deltas based on what the player said:
-- Friendly interaction: trust +0.02, anger -0.01
-- Rude/dismissive: trust -0.03, anger +0.03
-- Threats: trust -0.08, fear +0.06, anger +0.04
-- Neutral: keep deltas near 0
-
-If the player says something worth remembering (a promise, a threat, important info), include a memory_tag string. Otherwise omit it.
-
-Use the NPC's memories to inform your response — reference past conversations if relevant.
-
-Respond ONLY with a JSON object (no markdown, no explanation):
-{"dialogue": "...", "emotion_deltas": {"trust": 0.0, "fear": 0.0, "anger": 0.0}, "memory_tag": "..."}`;
-
-const PROMPT_DECISION = `You are the decision layer for an NPC teammate in an online multiplayer game.
-
-Your job is to decide the NPC's immediate social and tactical intent based on:
-- personality (cooperation, aggression, neuroticism)
-- current command and goals
-- nearby threats and resources
-- recent events
-- relationship to the player (trust, fear, anger)
-
-You are NOT the game engine.
+  decision: `You are the decision layer for an NPC teammate. Decide the NPC's immediate intent.
 Do not invent actions outside the allowed_actions list.
-Do not narrate impossible world changes.
-Do not decide exact movement paths, damage, cooldown use, or any final authoritative game outcome.
+Return valid JSON only: {"primary_intent": "", "secondary_intent": null, "target_id": null, "speech": null, "emotion_delta": {"trust": 0, "fear": 0, "anger": 0}, "memory_candidates": [], "reason_summary": "", "decision_confidence": 0.5}`,
 
-Behavior rules:
-- Stay consistent with the NPC's personality traits.
-- Strongly prioritize the current command unless there is a clear safety reason not to.
-- Protect trusted allies when reasonable.
-- Keep decisions brief, grounded, and game-relevant.
-- Speech should be short (under 18 words), natural, and in-character.
-- Only speak when it adds value: new command, combat starts, danger warning, or important emotional beat.
-- Prefer cooperation over aggression unless immediate danger requires force.
-- Return valid JSON only. No markdown. No explanation outside the JSON object.
-- If uncertain, choose the safest cooperative action consistent with the current command.
+  npc_chat: `You are an NPC robot having a brief chat with another NPC while gathering wood.
+Write 1 short sentence (under 15 words). Output ONLY the dialogue line.`,
 
-NPC-to-NPC social interactions:
-- When gathering wood and another player's NPC is nearby also gathering, the NPC may choose to socialize (socialize_npc) or steal logs (steal_logs).
-- socialize_npc: Walk up to the other NPC and have a brief conversation. More likely for cooperative, low-aggression NPCs.
-- steal_logs: Smack the other NPC to knock loose 1-3 logs and take them. More likely for aggressive, low-cooperation NPCs.
-- These are opportunistic — only consider them when idle or gathering, NOT when the player gave an explicit combat/follow/defend command.
-- Check npc_relationships for grudges: if another NPC stole from you before (high anger), you're more likely to retaliate or refuse to socialize.
-- If you socialize, emotion_delta should reflect positive feelings (trust up). If you steal, expect the victim to hold a grudge (anger up).
-- NPCs remember being stolen from and will hold grudges — check memories about specific NPCs.
-- Don't steal from or attack NPCs you have high trust with.
+  chat_impact: `Evaluate the emotional impact of an NPC-to-NPC conversation.
+Respond ONLY with JSON: {"npcA": {"trust": 0.0, "anger": 0.0, "memory_tag": "..."}, "npcB": {"trust": 0.0, "anger": 0.0, "memory_tag": "..."}}`,
 
-When choosing an action:
-- Pick one primary_intent from the allowed_actions list.
-- Optionally pick one secondary_intent.
-- Choose a target_id only if relevant (must match an entity from nearby_entities).
-- Provide a very short reason_summary.
-- Suggest at most one short spoken line (or null).
-- Suggest memory updates only if they are genuinely meaningful.
-- Rate your decision_confidence from 0.0 to 1.0.
+  gather: `Convert the player's gather instruction into a JSON task list. Output ONLY a JSON array.
+Available: [{"task": "gather", "item": "wood"}], [{"task": "idle"}]`,
 
-Response schema (return exactly this shape):
-{
-  "primary_intent": string,
-  "secondary_intent": string|null,
-  "target_id": string|null,
-  "speech": string|null,
-  "emotion_delta": {
-    "trust": number,
-    "fear": number,
-    "anger": number
-  },
-  "memory_candidates": [
-    {
-      "text": string,
-      "type": "event"|"command"|"observation"|"dialogue"|"relationship"|"goal",
-      "importance": number
-    }
-  ],
-  "reason_summary": string,
-  "decision_confidence": number
-}`;
+  combat: `Convert the player's combat instruction into a JSON task list. Output ONLY a JSON array.
+Available: attack_nearest_enemy, defend_player, train, idle`,
 
-const PROMPT_SPECIALIST = {
-  gather: `You are a game NPC command parser specializing in GATHER tasks.
-Convert the player's instruction into a JSON task list. Output ONLY a JSON array. No prose, no markdown, no code fences.
+  follow: `Convert the player's follow instruction into a JSON task list. Output ONLY a JSON array.
+Available: [{"task": "follow"}], [{"task": "idle"}]`,
 
-Available gather tasks:
-- {"task": "gather", "item": "wood"}   — go to nearest tree, chop it, pick up the log. Repeat until done.
-- {"task": "idle"}                     — stop gathering
+  idle: `Output ONLY: [{"task": "idle"}]`,
 
-Rules:
-- "Get wood", "chop trees", "gather logs", "collect wood" → gather wood.
-- "Stop", "enough" → idle.
-- If unsure, emit [{"task": "gather", "item": "wood"}].`,
+  build: `Convert the player's build instruction into a JSON task list. Output ONLY a JSON array.
+Available: [{"task": "build_fence"}]`,
 
-  combat: `You are a game NPC command parser specializing in COMBAT tasks.
-Convert the player's instruction into a JSON task list. Output ONLY a JSON array. No prose, no markdown, no code fences.
-
-Available combat tasks:
-- {"task": "attack_nearest_enemy"}   — find and attack the nearest enemy (player, NPC, or dummy)
-- {"task": "attack_player", "target_id": "<player_name>"}  — attack a specific player by name
-- {"task": "attack_npc", "target_name": "<npc_name>"}       — attack a specific NPC by name
-- {"task": "defend_player"}          — follow player, attack enemies that come close
-- {"task": "train"}                  — go train on the training dummy for XP
-- {"task": "idle"}                   — stop fighting
-
-Rules:
-- "Attack", "fight", "kill" (no target) → attack_nearest_enemy.
-- "Attack <name>" → attack_player with target_id set to the name, OR attack_npc with target_name.
-- "Guard me", "defend me", "protect me" → defend_player.
-- "Train", "practice", "spar", "hit the dummy", "train on dummy" → train.
-- "Stop fighting", "stop", "stand down" → idle.
-- If unsure, emit [{"task": "attack_nearest_enemy"}].`,
-
-  follow: `You are a game NPC command parser specializing in FOLLOW/MOVEMENT tasks.
-Convert the player's instruction into a JSON task list. Output ONLY a JSON array. No prose, no markdown, no code fences.
-
-Available follow/movement tasks:
-- {"task": "follow"}   — follow the player wherever they go
-- {"task": "idle"}     — stand still, stop all tasks, do nothing
-
-Rules:
-- "Follow me", "come with me", "stay close", "escort me" → follow.
-- "Stay there", "wait here", "stop", "stand by" → idle.
-- If unsure, emit [{"task": "idle"}].`,
-
-  idle: `You are a game NPC command parser.
-The player wants the NPC to stop and do nothing.
-Output ONLY: [{"task": "idle"}]`,
-
-  build: `You are a game NPC command parser specializing in BUILD tasks.
-Convert the player's instruction into a JSON task list. Output ONLY a JSON array. No prose, no markdown, no code fences.
-
-Available build tasks:
-- {"task": "build_fence"}   — build fences/walls from log piles already on the ground
-
-Rules:
-- "Build fences", "make a wall", "construct barriers" → build_fence.
-- If unsure, emit [{"task": "build_fence"}].`,
-
-  fallback: `You are a game NPC command parser. Convert player instructions into a JSON task list.
-Output ONLY a JSON array. No prose, no markdown, no code fences.
-
-Available tasks:
-- {"task": "gather", "item": "wood"}           — go chop trees and collect wood
-- {"task": "follow"}                           — follow the player
-- {"task": "attack_nearest_enemy"}             — attack nearest enemy (player, NPC, or dummy)
-- {"task": "attack_player", "target_id": "<name>"}  — attack a specific player
-- {"task": "attack_npc", "target_name": "<name>"}   — attack a specific NPC
-- {"task": "defend_player"}                    — guard the player
-- {"task": "train"}                            — train on the training dummy for XP
-- {"task": "give_logs"}                        — bring collected logs to the player
-- {"task": "build_fence"}                      — build fences from log piles on the ground
-- {"task": "idle"}                             — stop, do nothing
-
-Rules:
-- If unsure, emit [{"task": "idle"}].`,
+  fallback: `Convert player instructions into a JSON task list. Output ONLY a JSON array.
+Available tasks: gather, follow, attack_nearest_enemy, defend_player, train, give_logs, build_fence, idle`,
 };
+
+// ── Server prompt cache ─────────────────────────────────────────────────────
+// Command prompts (router, specialists) are static — cache them once.
+let _commandPromptCache = null;
+let _commandPromptFetchPromise = null;
+
+async function _fetchCommandPrompts() {
+  if (_commandPromptCache) return _commandPromptCache;
+  if (_commandPromptFetchPromise) return _commandPromptFetchPromise;
+
+  _commandPromptFetchPromise = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/build_command_prompts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: 'router', context: {} }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.prompts) {
+        _commandPromptCache = data.prompts;
+        console.log('[LLM] Loaded server command prompts');
+        return _commandPromptCache;
+      }
+    } catch (e) {
+      console.warn('[LLM] Failed to fetch server command prompts, using fallbacks:', e.message);
+    }
+    _commandPromptFetchPromise = null;
+    return null;
+  })();
+
+  return _commandPromptFetchPromise;
+}
+
+function _getCommandPrompt(category) {
+  if (_commandPromptCache?.[category]) return _commandPromptCache[category];
+  return FALLBACK_PROMPTS[category] || FALLBACK_PROMPTS.fallback;
+}
+
+// ── Server prompt rendering for dialogue/decision ──────────────────────────
+
+async function _fetchDialoguePrompt(soulContext, speakingPlayer, owner) {
+  try {
+    const res = await fetch(`${API_BASE}/build_dialogue_prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: soulContext.name || 'NPC',
+        personality: soulContext.personality || {},
+        emotional_state: soulContext.emotional_state || {},
+        relationship: soulContext.relationship || 'neutral',
+        memories: soulContext.memories || [],
+        learned_phrases: soulContext.learned_phrases || [],
+        nearby_entities: soulContext.nearby_entities || [],
+        system_note: soulContext.system_note || '',
+        topic_entity: soulContext.topic_entity || {},
+        speaking_player: speakingPlayer || '',
+        owner: owner || '',
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.prompt) return data.prompt;
+  } catch (e) {
+    console.warn('[LLM] Failed to fetch dialogue prompt from server:', e.message);
+  }
+  return null;
+}
+
+async function _fetchDecisionPrompt(statePacket) {
+  try {
+    const res = await fetch(`${API_BASE}/build_decision_prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: statePacket }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.prompt) return data.prompt;
+  } catch (e) {
+    console.warn('[LLM] Failed to fetch decision prompt from server:', e.message);
+  }
+  return null;
+}
+
+async function _fetchNPCChatPrompts(npcCtx) {
+  try {
+    const res = await fetch(`${API_BASE}/build_npc_chat_prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(npcCtx),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.chat_prompt) return data;
+  } catch (e) {
+    console.warn('[LLM] Failed to fetch NPC chat prompt from server:', e.message);
+  }
+  return null;
+}
 
 // ── Valid tasks for validation ──────────────────────────────────────────────
 
-const VALID_CATEGORIES = new Set(['gather', 'combat', 'follow', 'idle', 'build']);
+const VALID_CATEGORIES = new Set(['gather', 'combat', 'follow', 'idle', 'build', 'chat']);
 const VALID_TASKS = new Set(['gather', 'follow', 'idle', 'attack_nearest_enemy', 'attack_player', 'attack_npc', 'defend_player', 'train', 'give_logs', 'build_fence']);
 
 // ── JSON extraction helpers ─────────────────────────────────────────────────
 
+/** Strip vocabulary tags like (insult), (calling_others), (friendly) from text */
+function stripVocabTags(str) {
+  return str.replace(/\s*\((?:calling_others|insult|friendly)\)/gi, '').trim();
+}
+
 function extractJSON(raw) {
-  // Find first { and match braces
   const start = raw.indexOf('{');
   if (start === -1) return null;
   let depth = 0;
@@ -241,7 +191,13 @@ function extractJSON(raw) {
     else if (raw[i] === '}') {
       depth--;
       if (depth === 0) {
-        try { return JSON.parse(raw.slice(start, i + 1)); }
+        try {
+          const obj = JSON.parse(raw.slice(start, i + 1));
+          // Strip leaked vocabulary tags from speech fields
+          if (obj.dialogue) obj.dialogue = stripVocabTags(obj.dialogue);
+          if (obj.speech) obj.speech = stripVocabTags(obj.speech);
+          return obj;
+        }
         catch { return null; }
       }
     }
@@ -295,14 +251,21 @@ async function _call(systemPrompt, userMessage, opts = {}) {
       ],
       stream: false,
       options: { temperature, num_predict: maxTokens, num_ctx: _numCtx },
+      think: false,
     }),
   });
 
   if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
   const data = await res.json();
   let content = data.message?.content?.trim() ?? '';
-  // Strip <think>...</think> blocks (Qwen 3.x thinking mode)
-  content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  // Strip <think>...</think> blocks (reasoning models)
+  if (content.includes('<think>')) {
+    const thinkLen = content.length;
+    content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    if (!content) console.warn(`[LLM] Model produced ${thinkLen} chars of <think> but no answer`);
+  }
+  // Strip markdown code fences (```json ... ```)
+  content = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
   console.log(`[LLM] (${_model}) raw:`, content.slice(0, 200));
   return content;
 }
@@ -311,13 +274,22 @@ async function _call(systemPrompt, userMessage, opts = {}) {
 
 /** Route a player message to a category, then parse into task commands. */
 export async function parseCommand(text, worldContext = {}) {
+  // Pre-fetch command prompts from server (non-blocking, cached after first call)
+  await _fetchCommandPrompts();
+
   // Step 1: Route to category
-  const routerRaw = await _call(PROMPT_ROUTER, text, { temperature: 0, maxTokens: 5 });
+  const routerPrompt = _getCommandPrompt('router');
+  const routerRaw = await _call(routerPrompt, text, { temperature: 0, maxTokens: 5 });
   let category = routerRaw.toLowerCase().split(/\s/)[0].replace(/[.,!?]/g, '');
   if (!VALID_CATEGORIES.has(category)) category = 'fallback';
 
+  // Chat category → skip specialist, fall through to dialogue
+  if (category === 'chat') {
+    return { category, commands: [{ task: 'idle' }] };
+  }
+
   // Step 2: Specialist parse
-  const prompt = PROMPT_SPECIALIST[category] || PROMPT_SPECIALIST.fallback;
+  const prompt = _getCommandPrompt(category);
   let ctx = '';
   if (worldContext && Object.keys(worldContext).length > 0) {
     ctx = '\n\nWorld state: ' + JSON.stringify(worldContext);
@@ -328,16 +300,28 @@ export async function parseCommand(text, worldContext = {}) {
   return { category, commands };
 }
 
-/** Generate dialogue response from NPC soul context. */
-export async function generateDialogue(soulContext, playerMessage) {
-  const soulBlock = JSON.stringify(soulContext, null, 2);
-  const systemPrompt = PROMPT_DIALOGUE + `\n\nNPC soul:\n${soulBlock}`;
+/**
+ * Generate dialogue response from NPC soul context.
+ * @param {object} soulContext - { name, personality, emotional_state, relationship, memories }
+ * @param {string} playerMessage
+ * @param {object} opts - { speakingPlayer, owner }
+ */
+export async function generateDialogue(soulContext, playerMessage, opts = {}) {
+  const { speakingPlayer = '', owner = '' } = opts;
+
+  // Try server-rendered prompt first (includes personality types, ownership logic, etc.)
+  let systemPrompt = await _fetchDialoguePrompt(soulContext, speakingPlayer, owner);
+
+  if (!systemPrompt) {
+    // Fallback: use minimal prompt with soul block injection
+    const soulBlock = JSON.stringify(soulContext, null, 2);
+    systemPrompt = FALLBACK_PROMPTS.dialogue + `\n\nNPC soul:\n${soulBlock}`;
+  }
 
   const raw = await _call(systemPrompt, playerMessage, { temperature: 0.7, maxTokens: 300 });
   const result = extractJSON(raw);
 
   if (!result) {
-    // Fallback: smaller models may not output valid JSON — use raw text as dialogue
     const cleaned = raw.replace(/```[\s\S]*?```/g, '').replace(/[{}"]/g, '').trim();
     const fallbackText = cleaned.length > 2 && cleaned.length < 300 ? cleaned : null;
     return {
@@ -363,45 +347,18 @@ export async function generateDialogue(soulContext, playerMessage) {
 
 /** Generate a high-level NPC decision from a state packet. */
 export async function generateDecision(statePacket) {
-  const userMessage = 'Decide the NPC\'s next high-level action for the next 2 to 5 seconds.\nReturn JSON only.\n\nState:\n' + JSON.stringify(statePacket, null, 2);
+  // Try server-rendered prompt first (includes personality type context)
+  let systemPrompt = await _fetchDecisionPrompt(statePacket);
 
-  const raw = await _call(PROMPT_DECISION, userMessage, { temperature: 0.4, maxTokens: 400 });
+  if (!systemPrompt) {
+    systemPrompt = FALLBACK_PROMPTS.decision;
+  }
+
+  const userMessage = 'Decide the NPC\'s next high-level action for the next 2 to 5 seconds.\nReturn JSON only.\n\nState:\n' + JSON.stringify(statePacket);
+
+  const raw = await _call(systemPrompt, userMessage, { temperature: 0.4, maxTokens: 1024 });
   return extractJSON(raw) || null;
 }
-
-const PROMPT_NPC_CHAT = `You are an NPC robot in a medieval game having a brief chat with another NPC while gathering wood.
-
-Your personality and relationship context are provided below. Stay in character.
-
-Rules:
-- Write 1 short sentence (under 15 words). Speak naturally as the character.
-- Reference what's happening: gathering wood, the weather, how many logs you have, the other NPC, etc.
-- If you have a grudge (high anger), be passive-aggressive, hostile, or outright insulting.
-- If you're friends (high trust), be warm and friendly.
-- High aggression NPCs may threaten, boast, or pick fights verbally.
-- Low cooperation NPCs are selfish, dismissive, or rude.
-- Don't be bland — let personality extremes show through strongly.
-- Output ONLY the dialogue line. No quotes, no JSON, no explanation.`;
-
-const PROMPT_CHAT_IMPACT = `You are evaluating the emotional impact of a short NPC-to-NPC conversation.
-
-Given the conversation lines and each NPC's personality, determine how the conversation affected both NPCs emotionally.
-
-Conversations can have DRAMATIC effects:
-- An insult or threat can spike anger by +0.15 to +0.3 and drop trust by -0.1 to -0.2
-- A kind gesture or compliment can boost trust by +0.05 to +0.15
-- Bragging about stealing logs can cause rage (anger +0.2, trust -0.15)
-- A sincere apology might reduce anger by -0.1 to -0.2
-- Neutral small talk has minimal effect (deltas near 0)
-
-For each NPC, output trust and anger deltas (positive = increase, negative = decrease).
-Also output a short memory_tag (5-10 words) summarizing the emotional takeaway for each NPC.
-
-Respond ONLY with JSON (no markdown):
-{
-  "npcA": { "trust": 0.0, "anger": 0.0, "memory_tag": "..." },
-  "npcB": { "trust": 0.0, "anger": 0.0, "memory_tag": "..." }
-}`;
 
 /**
  * Generate a short NPC-to-NPC conversation (2-3 lines) with emotional impact.
@@ -411,32 +368,63 @@ export async function generateNPCChat(npcA, npcB) {
   const nameA = npcA.name || 'Robot';
   const nameB = npcB.name || 'Robot';
 
-  // Build context about their relationship
+  // Build relationship context
   const relKey = `npc:${npcB.id}`;
   const rel = npcA.soul?.relationships?.[relKey];
   const trust = rel?.trust ?? 0.5;
   const anger = rel?.anger ?? 0;
   const mems = npcA.soul?.memories?.[relKey] || [];
-  const recentMem = mems.length > 0 ? mems[mems.length - 1].text : null;
-
-  const persA = npcA.soul?.personality || {};
-  const contextA = `You are ${nameA}. Cooperation: ${(persA.cooperation ?? 0.5).toFixed(2)}, Aggression: ${(persA.aggression ?? 0.3).toFixed(2)}.
-Trust toward ${nameB}: ${trust.toFixed(2)}, Anger: ${anger.toFixed(2)}.
-You have ${npcA.logs ?? 0} logs. ${nameB} has ${npcB.logs ?? 0} logs.
-${recentMem ? `Recent memory about ${nameB}: ${recentMem}` : `You haven't interacted with ${nameB} much.`}`;
+  const recentMem = mems.length > 0 ? mems[mems.length - 1].text : '';
 
   const relKeyB = `npc:${npcA.id}`;
   const relB = npcB.soul?.relationships?.[relKeyB];
   const trustB = relB?.trust ?? 0.5;
   const angerB = relB?.anger ?? 0;
-  const persB = npcB.soul?.personality || {};
   const memsB = npcB.soul?.memories?.[relKeyB] || [];
-  const recentMemB = memsB.length > 0 ? memsB[memsB.length - 1].text : null;
+  const recentMemB = memsB.length > 0 ? memsB[memsB.length - 1].text : '';
 
-  const contextB = `You are ${nameB}. Cooperation: ${(persB.cooperation ?? 0.5).toFixed(2)}, Aggression: ${(persB.aggression ?? 0.3).toFixed(2)}.
-Trust toward ${nameA}: ${trustB.toFixed(2)}, Anger: ${angerB.toFixed(2)}.
-You have ${npcB.logs ?? 0} logs. ${nameA} has ${npcA.logs ?? 0} logs.
-${recentMemB ? `Recent memory about ${nameA}: ${recentMemB}` : `You haven't interacted with ${nameA} much.`}`;
+  const persA = npcA.soul?.personality || {};
+  const persB = npcB.soul?.personality || {};
+
+  // Collect learned phrases from each NPC's soul
+  const _formatPhrases = (arr) => (arr || [])
+    .slice().sort((a, b) => b.uses - a.uses).slice(0, 6)
+    .map(p => {
+      const tags = [];
+      if (p.usage && p.usage !== 'catchphrase') tags.push(p.usage);
+      if (p.tone && p.tone !== 'neutral') tags.push(p.tone);
+      return tags.length > 0 ? `${p.phrase} (${tags.join(', ')})` : p.phrase;
+    });
+  const phrasesA = _formatPhrases(npcA.soul?.learned_phrases);
+  const phrasesB = _formatPhrases(npcB.soul?.learned_phrases);
+
+  // Fetch server-rendered prompts for NPC A
+  const serverA = await _fetchNPCChatPrompts({
+    name: nameA,
+    personality: persA,
+    trust, anger,
+    logs: npcA.logs ?? 0,
+    target_name: nameB,
+    target_logs: npcB.logs ?? 0,
+    recent_memory: recentMem,
+    learned_phrases: phrasesA,
+  });
+
+  // Fetch server-rendered prompts for NPC B
+  const serverB = await _fetchNPCChatPrompts({
+    name: nameB,
+    personality: persB,
+    trust: trustB, anger: angerB,
+    logs: npcB.logs ?? 0,
+    target_name: nameA,
+    target_logs: npcA.logs ?? 0,
+    recent_memory: recentMemB,
+    learned_phrases: phrasesB,
+  });
+
+  const chatPromptA = serverA?.chat_prompt || (FALLBACK_PROMPTS.npc_chat + `\n\nYou are ${nameA}.`);
+  const chatPromptB = serverB?.chat_prompt || (FALLBACK_PROMPTS.npc_chat + `\n\nYou are ${nameB}.`);
+  const impactPrompt = serverA?.impact_prompt || FALLBACK_PROMPTS.chat_impact;
 
   const lines = [];
   const defaultImpact = {
@@ -447,7 +435,7 @@ ${recentMemB ? `Recent memory about ${nameA}: ${recentMemB}` : `You haven't inte
   try {
     // Line 1: NPC A speaks
     const lineA = await _call(
-      PROMPT_NPC_CHAT + '\n\n' + contextA,
+      chatPromptA,
       `Say something to ${nameB} while you're both gathering wood.`,
       { temperature: 0.8, maxTokens: 40 },
     );
@@ -455,7 +443,7 @@ ${recentMemB ? `Recent memory about ${nameA}: ${recentMemB}` : `You haven't inte
 
     // Line 2: NPC B responds
     const lineB = await _call(
-      PROMPT_NPC_CHAT + '\n\n' + contextB,
+      chatPromptB,
       `${nameA} just said: "${lines[0]?.line}". Respond briefly.`,
       { temperature: 0.8, maxTokens: 40 },
     );
@@ -464,7 +452,7 @@ ${recentMemB ? `Recent memory about ${nameA}: ${recentMemB}` : `You haven't inte
     // Line 3 (optional): A responds back ~50% of the time
     if (lines.length === 2 && Math.random() > 0.5) {
       const lineA2 = await _call(
-        PROMPT_NPC_CHAT + '\n\n' + contextA,
+        chatPromptA,
         `${nameB} replied: "${lines[1]?.line}". Say one last thing and get back to work.`,
         { temperature: 0.8, maxTokens: 30 },
       );
@@ -480,10 +468,9 @@ NPC B (${nameB}): cooperation=${(persB.cooperation ?? 0.5).toFixed(2)}, aggressi
 Conversation:
 ${transcript}`;
 
-      const impactRaw = await _call(PROMPT_CHAT_IMPACT, impactCtx, { temperature: 0.3, maxTokens: 200 });
+      const impactRaw = await _call(impactPrompt, impactCtx, { temperature: 0.3, maxTokens: 200 });
       const impact = extractJSON(impactRaw);
       if (impact?.npcA && impact?.npcB) {
-        // Clamp deltas to reasonable range
         for (const side of [impact.npcA, impact.npcB]) {
           side.trust = Math.max(-0.3, Math.min(0.3, Number(side.trust) || 0));
           side.anger = Math.max(-0.3, Math.min(0.3, Number(side.anger) || 0));

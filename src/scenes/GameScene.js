@@ -29,6 +29,11 @@ const DUMMY_KEY  = 'trainingdummy';
 const DUMMY_PATH = 'assets/trainingdummy.png';
 import { API_BASE } from '../config.js';
 const AUTOSAVE_MS = 30000;
+const HUD_SCALE = 0.7;
+const PLAYER_FRAME_SCALE = 0.7;
+const TARGET_FRAME_RELATIVE_TO_PLAYER = 1.2;
+const TOP_HUD_MARGIN = Math.round(190 * HUD_SCALE);
+const RIGHT_HUD_MARGIN = 360;
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -71,8 +76,12 @@ export default class GameScene extends Phaser.Scene {
     this.npcs        = [];
     this.dummies     = [];
     this.selectedNPC = null;
-    this._pvpTarget     = null;  // Ctrl+clicked remote entity for PvP (red)
-    this._focusedRemote = null;  // left-clicked remote entity for chat/inspect (yellow)
+    this._focusedRemote = null;  // selected remote entity for chat/inspect
+    this._armedAction = null;    // explicit click-to-act mode, e.g. attack
+    this._playerKnockedOut = false;
+    this._contextMenuEls = null;
+    this._contextMenuBounds = null;
+    this._overhearInterjectCooldowns = {};
     this._remotePlayers = {};
 
     // Map dimensions — updated after map loads
@@ -102,11 +111,14 @@ export default class GameScene extends Phaser.Scene {
 
     // Camera
     const cam = this.cameras.main;
+    const screenW = this._screenWidth();
+    const screenH = this._screenHeight();
+    cam.setViewport(0, TOP_HUD_MARGIN, screenW - RIGHT_HUD_MARGIN, screenH - TOP_HUD_MARGIN);
     cam.setBounds(0, 0, worldW, worldH);
     cam.startFollow(this.player, true, 0.1, 0.1);
 
     // HUD camera — fixed at zoom=1, only renders HUD-flagged objects
-    this._hudCam = this.cameras.add(0, 0, cam.width, cam.height);
+    this._hudCam = this.cameras.add(0, 0, screenW, screenH);
     this._hudCam.setScroll(0, 0);
     this._hudCam.transparent = true;
 
@@ -129,6 +141,7 @@ export default class GameScene extends Phaser.Scene {
 
     // Scroll-wheel zoom (current zoom=1 is the max-out; scroll to zoom in)
     this._zoomLevel = 1;
+    this.input.mouse?.disableContextMenu();
     this.input.on('wheel', (_pointer, _gos, _dx, dy) => {
       if (this.chatBox?.isOpen()) return; // don't zoom while typing
       const step = 0.1;
@@ -138,20 +151,38 @@ export default class GameScene extends Phaser.Scene {
     });
 
     // ── Player unit frame (top-left) ──────────────────────────────────────────
+    this._topHudBand = this.addHud(
+      this.add.rectangle(screenW / 2, TOP_HUD_MARGIN / 2, screenW, TOP_HUD_MARGIN, 0x0b1020, 0.96)
+        .setDepth(45)
+    );
+    this._topHudBandBorder = this.addHud(
+      this.add.rectangle(screenW / 2, TOP_HUD_MARGIN - 1, screenW, 2, 0x2a3f63, 0.95)
+        .setDepth(46)
+    );
     this._buildPlayerFrame();
 
     // ── Target unit frame (top-center, shown when something is selected) ─────
     this._targetFrame = null;
     this._targetFrameElements = [];
+    this._armedStatus = this.addHud(this.add.text(screenW / 2, screenH - 72, '', {
+      fontSize: '18px', color: '#ff6666', backgroundColor: '#000000aa',
+      padding: { x: 10, y: 6 },
+    }).setDepth(60).setOrigin(0.5, 1).setVisible(false));
+    this._knockedStatus = this.addHud(this.add.text(screenW / 2, screenH - 112, '', {
+      fontSize: '18px', color: '#dddddd', backgroundColor: '#000000aa',
+      padding: { x: 10, y: 6 },
+    }).setDepth(60).setOrigin(0.5, 1).setVisible(false));
 
-    // Build / Dummy buttons (below player frame)
-    this._buildBtn = this.addHud(this.add.text(16, 170, '[B] Build Robot (10 logs)', {
-      fontSize: '20px', color: '#ffcc44', backgroundColor: '#00000099',
+    // Build / Dummy buttons (top gutter, right side)
+    const actionX = screenW - RIGHT_HUD_MARGIN + 18;
+    const actionY = 16;
+    this._buildBtn = this.addHud(this.add.text(actionX, actionY, '[B] Build Robot (10 logs)', {
+      fontSize: '16px', color: '#ffcc44', backgroundColor: '#00000099',
       padding: { x: 12, y: 7 },
     }).setDepth(50).setVisible(false));
 
-    this._dummyBtn = this.addHud(this.add.text(16, 210, '[T] Build Training Dummy (10 logs)', {
-      fontSize: '20px', color: '#cc8844', backgroundColor: '#00000099',
+    this._dummyBtn = this.addHud(this.add.text(actionX, actionY + 38, '[T] Build Training Dummy (10 logs)', {
+      fontSize: '16px', color: '#cc8844', backgroundColor: '#00000099',
       padding: { x: 12, y: 7 },
     }).setDepth(50).setVisible(false));
 
@@ -167,39 +198,65 @@ export default class GameScene extends Phaser.Scene {
     this._buildHotbar();
 
     // Connection status
-    this._netStatus = this.addHud(this.add.text(cam.width - 12, 8, 'Connecting...', {
+    this._netStatus = this.addHud(this.add.text(screenW - 12, 8, 'Connecting...', {
       fontSize: '16px', color: '#ffaa44', backgroundColor: '#00000088',
       padding: { x: 8, y: 4 },
     }).setDepth(50).setOrigin(1, 0));
 
     // NPC double-click selection
-    this._lastClickTime = 0;
-    this._lastClickNPC = null;
-    this._lastGroundClickTime = 0;
     this.input.on('pointerdown', (ptr) => {
-      if (ptr.rightButtonDown()) return;
+      if (ptr._fgHandled) {
+        ptr._fgHandled = false;
+        return;
+      }
+      if (this._isPointerOverContextMenu(ptr)) return;
+      if (!this._isPointerInWorldViewport(ptr)) {
+        if (ptr.rightButtonDown() || ptr.button === 2) this._closeContextMenu();
+        return;
+      }
+      const isRightClick = ptr.rightButtonDown() || ptr.button === 2;
+      if (!isRightClick && this._isCarryingSomeone()) {
+        this._closeContextMenu();
+        this._conn?.send({ type: 'drop_carried' });
+        return;
+      }
       const npc = this._findNpcAtPointer(ptr);
-      const now = Date.now();
+      const remoteEntity = !npc ? this._findRemoteEntityAtPointer(ptr) : null;
+      const carriedEntity = !npc && !remoteEntity && isRightClick ? this._getCarriedEntityByPlayer() : null;
 
       if (npc) {
-        if (npc === this._lastClickNPC && now - this._lastClickTime < 400) {
-          this._selectNPC(npc);
-          this._lastClickNPC = null;
-        } else {
-          this._lastClickNPC = npc;
-          this._lastClickTime = now;
-          if (this.selectedNPC) this.selectedNPC.deselect();
-          this.selectedNPC = npc;
-          npc.select();
-        }
-      } else if (!this.chatBox?.isOpen()) {
-        // Shift+click on ground to deselect everything
-        if (ptr.event.shiftKey) {
-          this._selectNPC(null);
-          if (this._focusedRemote) { this._focusedRemote.clearTint(); this._focusedRemote = null; }
-          if (this._pvpTarget) { this._pvpTarget.clearTint(); this._pvpTarget = null; }
-        }
-        this._lastClickNPC = null;
+        this._handleOwnNPCPointerDown(npc, ptr);
+        return;
+      }
+
+      if (remoteEntity && isRightClick) {
+        this._selectRemote(remoteEntity);
+        this._openContextMenu(remoteEntity, ptr);
+        return;
+      }
+
+      if (carriedEntity && isRightClick) {
+        if (carriedEntity.soul) this._selectNPC(carriedEntity);
+        else this._selectRemote(carriedEntity);
+        this._openContextMenu(carriedEntity, ptr);
+        return;
+      }
+
+      if (remoteEntity && this._armedAction === 'attack' && !isRightClick) {
+        ptr._fgHandled = true;
+        if (this._isAttackableEntity(remoteEntity)) this._executeAttack(remoteEntity);
+        this._disarmActionMode();
+        return;
+      }
+
+      if (isRightClick) {
+        this._closeContextMenu();
+        return;
+      }
+
+      this._closeContextMenu();
+      if (this._armedAction) {
+        this._disarmActionMode();
       }
     });
 
@@ -217,7 +274,7 @@ export default class GameScene extends Phaser.Scene {
     // ChatBox — returns own selected NPC or focused remote entity
     this.chatBox = new ChatBox(
       this,
-      () => this.selectedNPC || this._focusedRemote,
+      () => this._getChatTarget(),
       (npc, commands) => this._onNPCCommands(npc, commands),
       (npc) => this._selectNPC(npc),
       () => this.playerId,
@@ -225,43 +282,46 @@ export default class GameScene extends Phaser.Scene {
 
     // Interact key
     this.player.onInteract(() => {
-      if (this.chatBox.isOpen()) return;
-      if (this.selectedNPC) {
+      if (this.chatBox.isOpen() || this._playerKnockedOut) return;
+      if (this._getChatTarget()) {
         this.chatBox.open();
       }
     });
 
     // Enter key — open chat
     this.input.keyboard.on('keydown', (event) => {
-      if (this._namingNPC || this._escMenuOpen) return;
+      if (this._namingNPC || this._escMenuOpen || this._playerKnockedOut) return;
       if (event.key === 'Enter' && !this.chatBox.isOpen()) {
-        this.chatBox.open();
+        if (this._getChatTarget()) this.chatBox.open();
       }
     });
 
-    // Tab key — cycle through own NPCs
+    // Tab key — cycle through nearby targets.
+    // Priority: own NPCs by distance, then remote players/NPCs by distance.
     this.input.keyboard.on('keydown-TAB', (event) => {
       event.preventDefault();
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
-      if (this.npcs.length === 0) return;
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._playerKnockedOut) return;
+      const cycle = this._buildTabCycleList();
+      if (cycle.length === 0) return;
 
-      const alive = this.npcs.filter(n => !n.isDead());
-      if (alive.length === 0) return;
+      const current = this._focusedRemote || this.selectedNPC || null;
+      const curIdx = current ? cycle.findIndex(entry => entry.entity === current) : -1;
+      const next = cycle[(curIdx + 1 + cycle.length) % cycle.length];
+      if (!next) return;
 
-      const curIdx = this.selectedNPC ? alive.indexOf(this.selectedNPC) : -1;
-      const next = alive[(curIdx + 1) % alive.length];
-      this._selectNPC(next);
+      if (next.kind === 'own_npc') this._selectNPC(next.entity);
+      else this._selectRemote(next.entity);
     });
 
     // B key — build NPC (client-side, NPCs stay local)
     this.input.keyboard.on('keydown-B', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._playerKnockedOut) return;
       this._tryBuildNPC();
     });
 
     // T key — build training dummy (server-side)
     this.input.keyboard.on('keydown-T', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._playerKnockedOut) return;
       this._tryBuildDummy();
     });
 
@@ -275,7 +335,7 @@ export default class GameScene extends Phaser.Scene {
 
     // Number keys — hotbar actions (1-5)
     this.input.keyboard.on('keydown', (event) => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._inventoryOpen) return;
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._inventoryOpen || this._playerKnockedOut) return;
       const slot = parseInt(event.key, 10);
       if (slot >= 1 && slot <= 5) {
         this._useHotbarSlot(slot - 1);
@@ -284,7 +344,7 @@ export default class GameScene extends Phaser.Scene {
 
     // I key — toggle inventory
     this.input.keyboard.on('keydown-I', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._playerKnockedOut) return;
       this._toggleInventory();
     });
 
@@ -293,6 +353,9 @@ export default class GameScene extends Phaser.Scene {
     this._escMenuEls = null;
     this.input.keyboard.on('keydown-ESC', () => {
       if (this.chatBox?.isOpen() || this._namingNPC) return;
+      if (this._contextMenuEls) { this._closeContextMenu(); return; }
+      if (this._armedAction) { this._disarmActionMode(); return; }
+      if (this.selectedNPC || this._focusedRemote) { this._clearSelection(); return; }
       this._toggleEscMenu();
     });
 
@@ -333,6 +396,14 @@ export default class GameScene extends Phaser.Scene {
         this.player.def = me.def ?? this.player.def;
         this.player.level = me.level ?? this.player.level;
         this.player.xp = me.xp ?? this.player.xp;
+        this.player._knockedOut = !!me.knocked_out;
+        this._playerKnockedOut = !!me.knocked_out;
+        if (me.knocked_out && me.knocked_until) {
+          const secs = Math.max(0, Math.ceil(me.knocked_until - Date.now() / 1000));
+          this._knockedStatus.setText(`Knocked out ${secs}s`).setVisible(true);
+        } else {
+          this._knockedStatus.setVisible(false);
+        }
       }
 
       // Sync trees from server snapshot
@@ -368,7 +439,7 @@ export default class GameScene extends Phaser.Scene {
 
   update(time, delta) {
     // ── Send input to server + client-side prediction ─────────────────────────
-    if (this._conn.connected && !this.chatBox?.isOpen() && !this.player._punching && !this._namingNPC && !this._playerDead && !this._escMenuOpen) {
+    if (this._conn.connected && !this.chatBox?.isOpen() && !this.player._punching && !this._namingNPC && !this._playerDead && !this._playerKnockedOut && !this._escMenuOpen) {
       const keys = this.player._keys;
       let dx = 0, dy = 0;
       if (keys.left.isDown)  dx -= 1;
@@ -402,6 +473,7 @@ export default class GameScene extends Phaser.Scene {
     // Update NPCs + task runners + brains (client-side)
     for (const npc of this.npcs) {
       npc.update(delta);
+      if (npc.isKnockedOut?.()) continue;
       const runner = this._taskRunners.get(npc.id);
       if (runner) runner.update(delta);
       const brain = this._npcBrains.get(npc.id);
@@ -417,18 +489,30 @@ export default class GameScene extends Phaser.Scene {
       const runner = this._taskRunners.get(npc.id);
       if (!runner) continue;
 
+      const isNpcTarget = reaction.entityType === 'npc';
+      const attackTask = isNpcTarget ? 'attack_npc' : 'attack_player';
+      const fleeTask = 'flee_player'; // flee works the same regardless of entity type
+
       // Don't interrupt if already doing this emotion reaction
       const current = runner.getStatus()?.tasks?.[0];
-      if (current && (current.task === 'attack_player' || current.task === 'flee_player')
+      if (current && (current.task === attackTask || current.task === fleeTask)
           && current.target_id === reaction.playerId) continue;
 
       if (reaction.action === 'attack') {
-        const targetName = this._remotePlayers[reaction.playerId]?.getName?.() || reaction.playerId;
+        let targetName;
+        if (isNpcTarget) {
+          const npcId = reaction.playerId.replace('npc:', '');
+          // Find remote NPC sprite — key format is ${ownerPid}_${npcId}
+          const rnpc = Object.values(this._remoteNPCSprites).find(r => r.npcId === npcId);
+          targetName = rnpc?.getName?.() || npcId;
+        } else {
+          targetName = this._remotePlayers[reaction.playerId]?.getName?.() || reaction.playerId;
+        }
         npc.showBubble(`I won't forgive you, ${targetName}!`, 3000);
-        runner.setTasks([{ task: 'attack_player', target_id: reaction.playerId }]);
+        runner.setTasks([{ task: attackTask, target_id: reaction.playerId }]);
       } else if (reaction.action === 'flee') {
         npc.showBubble(`Stay away from me!`, 3000);
-        runner.setTasks([{ task: 'flee_player', target_id: reaction.playerId }]);
+        runner.setTasks([{ task: fleeTask, target_id: reaction.playerId }]);
       }
     }
 
@@ -447,6 +531,8 @@ export default class GameScene extends Phaser.Scene {
 
     // Update target unit frame
     this._updateTargetFrame();
+    this._refreshAttackIndicators();
+    this._updateArmedStatus();
 
     // Update hotbar counts
     this._updateHotbar();
@@ -468,6 +554,7 @@ export default class GameScene extends Phaser.Scene {
   // ── Server state sync ─────────────────────────────────────────────────────────
 
   _applyServerState(data) {
+    this._lastServerState = data;
     // Don't process state until we know our player ID
     if (this.playerId === 'default') return;
 
@@ -486,6 +573,23 @@ export default class GameScene extends Phaser.Scene {
       this.player.def = me.def ?? this.player.def;
       this.player.level = me.level ?? this.player.level;
       this.player.xp = me.xp ?? this.player.xp;
+      if (me.carrying) {
+        const offsetY = TILE_SIZE * 0.35;
+        if (me.carrying.type === 'player') {
+          const carried = this._remotePlayers?.[me.carrying.id];
+          if (carried) {
+            carried._targetX = this.player.x;
+            carried._targetY = this.player.y + offsetY;
+          }
+        } else if (me.carrying.type === 'npc') {
+          const key = `${me.carrying.owner}_${me.carrying.id}`;
+          const carried = this._remoteNPCSprites?.[key];
+          if (carried) {
+            carried._targetX = this.player.x;
+            carried._targetY = this.player.y + offsetY;
+          }
+        }
+      }
     }
 
     // Update/create/remove remote players
@@ -539,28 +643,107 @@ export default class GameScene extends Phaser.Scene {
       for (const npc of this.npcs) {
         const serverNPC = myData.npcs[npc.id];
         if (!serverNPC) continue;
+        const wasKnocked = npc.isKnockedOut?.() || false;
+        npc.maxHp = serverNPC.maxHp ?? npc.maxHp;
+        npc.str = serverNPC.str ?? npc.str;
+        npc.def = serverNPC.def ?? npc.def;
+        npc.level = serverNPC.level ?? npc.level;
+        npc.xp = serverNPC.xp ?? npc.xp;
+        npc.maxLogs = serverNPC.maxLogs ?? npc.maxLogs;
+        npc.setKnockedOut?.(!!serverNPC.knocked_out, {
+          knockedUntil: serverNPC.knocked_until ?? 0,
+          carriedBy: serverNPC.carried_by ?? null,
+        });
+        if (serverNPC.knocked_out && !wasKnocked) {
+          this._handleOwnNPCKnockoutTransition(npc, serverNPC);
+        } else if (!serverNPC.knocked_out && wasKnocked) {
+          this._handleOwnNPCWakeTransition(npc, serverNPC);
+        }
+        if (!serverNPC.knocked_out && wasKnocked) {
+          npc.hp = serverNPC.hp ?? npc.hp;
+        }
+        if (serverNPC.hp > npc.hp) {
+          npc.hp = serverNPC.hp;
+        }
+        if (serverNPC.knocked_out || serverNPC.carried_by) {
+          npc.x = serverNPC.x ?? npc.x;
+          npc.y = serverNPC.y ?? npc.y;
+        }
 
         // Detect HP damage from server
         if (serverNPC.hp < npc.hp) {
           const prevHp = npc.hp;
           npc.hp = serverNPC.hp;
 
-          // If an attacker is stamped and NPC is getting low, apply fear and flee
+          // If an attacker is stamped, use assessThreat to decide fight or flee
           const attackedBy = serverNPC._last_attacked_by;
-          if (attackedBy?.type === 'player' && attackedBy.id !== this.playerId) {
+          if (attackedBy && attackedBy.id !== this.playerId) {
+            const isNpcAttacker = attackedBy.type === 'npc';
+            const relKey = isNpcAttacker ? `npc:${attackedBy.id}` : attackedBy.id;
+
+            // Build attacker info for assessThreat
+            let attackerInfo;
+            if (isNpcAttacker) {
+              const spriteKey = attackedBy.owner ? `${attackedBy.owner}_${attackedBy.id}` : attackedBy.id;
+              const rnpc = this._remoteNPCSprites[spriteKey];
+              attackerInfo = {
+                type: 'npc', id: attackedBy.id,
+                level: rnpc?.level, str: rnpc?.str, def: rnpc?.def,
+                hp: rnpc?.hp, maxHp: rnpc?.maxHp,
+              };
+            } else {
+              const rp = this._remotePlayers[attackedBy.id];
+              attackerInfo = {
+                type: 'player', id: attackedBy.id,
+                level: rp?.level, str: rp?.str, def: rp?.def,
+                hp: rp?._hp, maxHp: rp?._maxHp,
+              };
+            }
+
+            // Push 'attacked' event to brain
+            const brain = this._npcBrains.get(npc.id);
+            if (brain) {
+              brain.pushEvent({
+                type: 'attacked',
+                attacker_type: attackedBy.type,
+                attacker_id: attackedBy.id,
+                damage: prevHp - npc.hp,
+                hp_remaining: npc.hp,
+              });
+            }
+
+            // Apply emotion based on damage severity
             const hpPct = npc.hp / npc.maxHp;
-            if (hpPct < 0.3 && hpPct > 0) {
-              // Spike fear of attacker, reduce anger (self-preservation)
-              npc.applyEmotionDeltas({ fear: 0.3, anger: -0.15 }, attackedBy.id);
-              npc.showBubble(`I can't take much more of this!`, 3000);
-              // Force flee — override current task
+            if (hpPct > 0) {
+              // Grow anger toward attacker (being hit makes you mad)
+              npc.applyEmotionDeltas({ anger: 0.12, fear: 0.05 }, relKey);
+
+              const assessment = npc.assessThreat(attackerInfo);
               const runner = this._taskRunners.get(npc.id);
               if (runner) {
-                runner.setTasks([{ task: 'flee_player', target_id: attackedBy.id }]);
+                if (assessment.action === 'fight') {
+                  npc.applyEmotionDeltas({ anger: 0.15, fear: -0.1 }, relKey);
+                  npc.showBubble(`You'll regret that!`, 3000);
+                  if (isNpcAttacker) {
+                    runner.setTasks([{
+                      task: 'attack_npc',
+                      target_owner: attackedBy.owner,
+                      target_npc_id: attackedBy.id,
+                    }]);
+                  } else {
+                    runner.setTasks([{ task: 'attack_player', target_id: attackedBy.id }]);
+                  }
+                } else {
+                  npc.applyEmotionDeltas({ fear: 0.25, anger: -0.1 }, relKey);
+                  npc.showBubble(`I can't take much more of this!`, 3000);
+                  runner.setTasks([{
+                    task: 'flee_player',
+                    target_id: relKey,
+                    target_owner: attackedBy.owner,
+                    target_npc_id: isNpcAttacker ? attackedBy.id : null,
+                  }]);
+                }
               }
-            } else if (hpPct < 0.6) {
-              // Moderate damage — grow fear gradually
-              npc.applyEmotionDeltas({ fear: 0.08, anger: -0.03 }, attackedBy.id);
             }
           }
 
@@ -594,7 +777,9 @@ export default class GameScene extends Phaser.Scene {
               thiefName = thiefSprite?.getName?.() || `${robbedBy.owner}'s NPC`;
             }
 
-            npc.showBubble(`${thiefName} stole ${stolen} log${stolen > 1 ? 's' : ''} from me!`, 4000);
+            const robbedLine = `${thiefName} stole ${stolen} log${stolen > 1 ? 's' : ''} from me!`;
+            npc.showBubble(robbedLine, 4000, { silent: true });
+            this._addNPCSpeechToChat(npc, robbedLine, '#ffaaaa');
 
             // Push grudge event to brain
             const brain = this._npcBrains?.get(npc.id);
@@ -811,10 +996,16 @@ export default class GameScene extends Phaser.Scene {
           this._remoteNPCSprites[key] = rnpc;
         }
         const wasDead = rnpc._dead;
+        const wasKnocked = rnpc.isKnockedOut?.() || false;
         rnpc.applyState(npcState);
         // Apply owner's chat color to NPC labels
         const ownerColor = pState.chatColor || '#cccccc';
         rnpc.setOwnerColor(ownerColor);
+        if (npcState.knocked_out && !wasKnocked) {
+          rnpc._koOrigin = { x: npcState.x ?? rnpc.x, y: npcState.y ?? rnpc.y };
+        } else if (!npcState.knocked_out && wasKnocked) {
+          this._handleRemoteNPCWakeTransition(rnpc, npcState);
+        }
         // Detect remote NPC just died
         if (npcState.dead && !wasDead) {
           this._notifyNearbyNPCsOfKill('npc', pid, npcId, rnpc.x, rnpc.y);
@@ -834,8 +1025,8 @@ export default class GameScene extends Phaser.Scene {
   // ── Player Death ───────────────────────────────────────────────────────────────
 
   _showDeathScreen() {
-    const W = this.cameras.main.width;
-    const H = this.cameras.main.height;
+    const W = this._screenWidth();
+    const H = this._screenHeight();
     this._deathEls = [];
 
     const overlay = this.addHud(this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.6)
@@ -956,8 +1147,8 @@ export default class GameScene extends Phaser.Scene {
     this._namingNPC = npc;
     this._namingInput = '';
 
-    const W = this.cameras.main.width;
-    const H = this.cameras.main.height;
+    const W = this._screenWidth();
+    const H = this._screenHeight();
     const els = [];
 
     const bg = this.addHud(this.add.rectangle(W / 2, H / 2, 300, 80, 0x111122, 0.95)
@@ -1065,22 +1256,38 @@ export default class GameScene extends Phaser.Scene {
   /** Unregister a HUD object (no-op, cameraFilter is per-object). */
   removeHud(_obj) { }
 
+  _screenWidth() {
+    return this.scale?.width ?? this.sys?.game?.config?.width ?? this.cameras.main.width;
+  }
+
+  _screenHeight() {
+    return this.scale?.height ?? this.sys?.game?.config?.height ?? this.cameras.main.height;
+  }
+
+  _isPointerInWorldViewport(ptr) {
+    const vp = this.cameras.main?.viewport;
+    if (!vp) return true; // fallback if camera not ready
+    return ptr.x >= vp.x && ptr.x <= vp.x + vp.width && ptr.y >= vp.y && ptr.y <= vp.y + vp.height;
+  }
+
   // ── Player Unit Frame (top-left) ──────────────────────────────────────────
 
   _buildPlayerFrame() {
-    const x = 10, y = 10, w = 510, h = 150;
+    const s = PLAYER_FRAME_SCALE;
+    const x = 10, y = 10, w = Math.round(510 * s), h = Math.round(150 * s);
 
     // Background panel
     this._pf_bg = this.addHud(this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x111122, 0.88)
       .setStrokeStyle(2, 0x334466).setDepth(50));
 
     // Portrait — player sprite face-down frame
-    const portraitSize = 96;
-    const portraitX = x + 18 + portraitSize / 2;
+    const portraitSize = Math.round(96 * s);
+    const portraitPad = Math.round(18 * s);
+    const portraitX = x + portraitPad + portraitSize / 2;
     const portraitY = y + h / 2;
     this._pf_portrait = this.addHud(
       this.add.sprite(portraitX, portraitY, PLAYER_KEY, 0)
-        .setScale(4.2).setDepth(51)
+        .setScale(4.2 * s).setDepth(51)
     );
     // Portrait border
     this._pf_portraitBorder = this.addHud(
@@ -1088,38 +1295,38 @@ export default class GameScene extends Phaser.Scene {
         .setStrokeStyle(2, 0x556688).setDepth(51)
     );
 
-    const textX = x + 18 + portraitSize + 18;
+    const textX = x + portraitPad + portraitSize + portraitPad;
 
     // Name
     this._pf_name = this.addHud(this.add.text(textX, y + 12, '', {
-      fontSize: '24px', color: '#ffffff', fontStyle: 'bold',
+      fontSize: `${Math.round(24 * s)}px`, color: '#ffffff', fontStyle: 'bold',
     }).setDepth(51));
 
     // Level
     this._pf_level = this.addHud(this.add.text(x + w - 18, y + 12, '', {
-      fontSize: '20px', color: '#aabb99',
+      fontSize: `${Math.round(20 * s)}px`, color: '#aabb99',
     }).setDepth(51).setOrigin(1, 0));
 
     // HP bar
-    const barX = textX, barY = y + 48, barW = w - textX + x - 20, barH = 30;
+    const barX = textX, barY = y + Math.round(48 * s), barW = w - textX + x - Math.round(20 * s), barH = Math.round(30 * s);
     this._pf_hpBg = this.addHud(this.add.rectangle(barX + barW / 2, barY + barH / 2, barW, barH, 0x331111)
       .setStrokeStyle(1, 0x442222).setDepth(51));
     this._pf_hpBar = this.addHud(this.add.rectangle(barX, barY, barW, barH, 0x44cc44)
       .setOrigin(0, 0).setDepth(52));
     this._pf_hpText = this.addHud(this.add.text(barX + barW / 2, barY + barH / 2, '', {
-      fontSize: '20px', color: '#ffffff', fontStyle: 'bold',
+      fontSize: `${Math.round(20 * s)}px`, color: '#ffffff', fontStyle: 'bold',
     }).setOrigin(0.5).setDepth(53));
     this._pf_barW = barW;
     this._pf_barH = barH;
 
     // Stats line
-    this._pf_stats = this.addHud(this.add.text(textX, y + 87, '', {
-      fontSize: '20px', color: '#99aacc',
+    this._pf_stats = this.addHud(this.add.text(textX, y + Math.round(87 * s), '', {
+      fontSize: `${Math.round(20 * s)}px`, color: '#99aacc',
     }).setDepth(51));
 
     // XP line
-    this._pf_xp = this.addHud(this.add.text(textX, y + 117, '', {
-      fontSize: '18px', color: '#778899',
+    this._pf_xp = this.addHud(this.add.text(textX, y + Math.round(117 * s), '', {
+      fontSize: `${Math.round(18 * s)}px`, color: '#778899',
     }).setDepth(51));
   }
 
@@ -1141,8 +1348,7 @@ export default class GameScene extends Phaser.Scene {
   // ── Target Unit Frame (top-center, shows selected entity) ─────────────────
 
   _updateTargetFrame() {
-    // Determine current target: PvP target > focused remote > selected own NPC
-    const target = this._pvpTarget || this._focusedRemote || this.selectedNPC;
+    const target = this._focusedRemote || this.selectedNPC;
 
     if (!target || target.isDead?.()) {
       this._hideTargetFrame();
@@ -1151,10 +1357,8 @@ export default class GameScene extends Phaser.Scene {
 
     if (!this._targetFrame) this._buildTargetFrame();
 
-    let name = '', hp = 0, maxHp = 1, spriteKey = '', frame = 0, isPvp = false;
+    let name = '', hp = 0, maxHp = 1, spriteKey = '', frame = 0;
     let extra = '';
-
-    if (target === this._pvpTarget) isPvp = true;
 
     if (target.playerId) {
       name = target.playerId;
@@ -1176,6 +1380,9 @@ export default class GameScene extends Phaser.Scene {
     }
 
     this._tf_name.setText(name);
+    if (target.isKnockedOut?.()) {
+      this._tf_name.setText(`${name} [KO]`);
+    }
     const hpPct = maxHp > 0 ? hp / maxHp : 0;
     this._tf_hpBar.setDisplaySize(this._tf_barW * Math.max(0, hpPct), this._tf_barH);
     const hpColor = hpPct > 0.5 ? 0x44cc44 : hpPct > 0.25 ? 0xddaa22 : 0xcc3333;
@@ -1190,18 +1397,22 @@ export default class GameScene extends Phaser.Scene {
       const es = target.getEmotionalState(this.playerId);
       const relLabel = target.getRelationshipLabel?.(this.playerId) || '?';
       soulInfo = [
-        `Feels: ${relLabel}  Trust: ${es.trust.toFixed(2)}  Fear: ${es.fear.toFixed(2)}  Anger: ${es.anger.toFixed(2)}`,
-        `Cooperation: ${target.soul.personality.cooperation.toFixed(2)}  Aggression: ${target.soul.personality.aggression.toFixed(2)}`,
+        `Feels: ${relLabel}`,
+        `Trust ${es.trust.toFixed(2)}   Fear ${es.fear.toFixed(2)}   Anger ${es.anger.toFixed(2)}`,
+        `Coop ${target.soul.personality.cooperation.toFixed(2)}   Aggro ${target.soul.personality.aggression.toFixed(2)}`,
       ].join('\n');
     } else if (target._soul) {
       // Remote NPC — pull from synced soul data
       const rel = target._soul[this.playerId];
       const pers = target._personality;
       if (rel) {
-        soulInfo = `Feels: ${rel.label}  Trust: ${rel.trust.toFixed(2)}  Fear: ${rel.fear.toFixed(2)}  Anger: ${rel.anger.toFixed(2)}`;
-        if (pers) soulInfo += `\nCooperation: ${pers.cooperation.toFixed(2)}  Aggression: ${pers.aggression.toFixed(2)}`;
+        soulInfo = [
+          `Feels: ${rel.label}`,
+          `Trust ${rel.trust.toFixed(2)}   Fear ${rel.fear.toFixed(2)}   Anger ${rel.anger.toFixed(2)}`,
+        ].join('\n');
+        if (pers) soulInfo += `\nCoop ${pers.cooperation.toFixed(2)}   Aggro ${pers.aggression.toFixed(2)}`;
       } else if (pers) {
-        soulInfo = `Cooperation: ${pers.cooperation.toFixed(2)}  Aggression: ${pers.aggression.toFixed(2)}`;
+        soulInfo = `Coop ${pers.cooperation.toFixed(2)}   Aggro ${pers.aggression.toFixed(2)}`;
       }
     }
     this._tf_soul.setText(soulInfo);
@@ -1209,75 +1420,86 @@ export default class GameScene extends Phaser.Scene {
     // Reposition hint below soul text and resize background to fit
     const soulBottom = soulInfo ? this._tf_soul.y + this._tf_soul.height + 4 : this._tf_extra.y + this._tf_extra.height + 4;
     this._tf_hint.setY(soulBottom);
-    const totalH = soulBottom + this._tf_hint.height + 8 - 10; // 10 = y origin
-    this._tf_bg.setSize(480, totalH);
-    this._tf_bg.setPosition(530 + 240, 10 + totalH / 2);
+    const baseY = this._tfBaseY ?? 10;
+    const totalH = soulBottom + this._tf_hint.height + 8 - baseY;
+    this._tf_bg.setSize(this._tf_bg.width, totalH);
+    this._tf_bg.setPosition(this._tf_bg.x, baseY + totalH / 2);
 
     if (this._tf_portrait.texture.key !== spriteKey) {
       this._tf_portrait.setTexture(spriteKey, frame);
     }
 
-    const borderColor = isPvp ? 0xff4444 : (target === this._focusedRemote ? 0xdddd44 : 0x4466aa);
-    this._tf_portraitBorder.setStrokeStyle(2, borderColor);
-    this._tf_hint.setText(isPvp ? 'PvP ON — left-click to attack' : 'Ctrl+click for PvP');
+    const borderColor = target === this._focusedRemote ? 0xff5555 : 0x44eeff;
+    this._tf_portraitBorder.setStrokeStyle(3, borderColor);
+    this._tf_bg.setStrokeStyle(3, borderColor, 0.95);
+    if (target.ownerPid) this._tf_hint.setText(this._armedAction === 'attack' ? 'Attack armed - left click a red target' : 'Left click selects, right click opens actions');
+    else if (target.playerId) this._tf_hint.setText(this._armedAction === 'attack' ? 'Attack armed - left click a red target' : 'Right click opens actions');
+    else this._tf_hint.setText('Left click selects, right click opens actions');
 
     for (const el of this._targetFrameElements) el.setVisible(true);
   }
 
   _buildTargetFrame() {
-    const cam = this.cameras.main;
-    const w = 480, h = 190;
-    // Position to the right of player frame (510 + 10 margin + 10 origin)
-    const x = 530, y = 10;
+    const s = PLAYER_FRAME_SCALE * TARGET_FRAME_RELATIVE_TO_PLAYER;
+    const x = this._screenWidth() - RIGHT_HUD_MARGIN + 12;
+    const y = TOP_HUD_MARGIN + 12;
+    const w = RIGHT_HUD_MARGIN - 24;
+    const h = Math.round(270 * s);
 
     const els = [];
     const add = (obj) => { this.addHud(obj); els.push(obj); return obj; };
+    this._tfBaseY = y;
 
     this._tf_bg = add(this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x111122, 0.88)
-      .setStrokeStyle(2, 0x334466).setDepth(50));
+      .setStrokeStyle(2, 0x334466).setDepth(50)
+      .setInteractive({ useHandCursor: true }));
+    this._tf_bg.on('pointerdown', () => {
+      if (this.selectedNPC && !this._focusedRemote) this._openNPCDetail(this.selectedNPC);
+    });
 
-    const portraitSize = 78;
-    const portraitX = x + 14 + portraitSize / 2;
-    const portraitY = y + 60;
+    const portraitSize = Math.round(92 * s);
+    const portraitPad = Math.round(16 * s);
+    const portraitX = x + portraitPad + portraitSize / 2;
+    const portraitY = y + Math.round(78 * s);
     this._tf_portrait = add(
-      this.add.sprite(portraitX, portraitY, PLAYER_KEY, 0).setScale(3.3).setDepth(51)
+      this.add.sprite(portraitX, portraitY, PLAYER_KEY, 0).setScale(3.5 * s).setDepth(51)
     );
     this._tf_portraitBorder = add(
       this.add.rectangle(portraitX, portraitY, portraitSize, portraitSize, 0x000000, 0)
         .setStrokeStyle(2, 0x556688).setDepth(51)
     );
 
-    const textX = x + 14 + portraitSize + 14;
-    const textMaxW = w - (textX - x) - 14;
+    const textX = x + portraitPad + portraitSize + portraitPad;
+    const textMaxW = w - (textX - x) - Math.round(18 * s);
 
-    this._tf_name = add(this.add.text(textX, y + 9, '', {
-      fontSize: '21px', color: '#ffffff', fontStyle: 'bold',
+    this._tf_name = add(this.add.text(textX, y + Math.round(10 * s), '', {
+      fontSize: `${Math.round(22 * s)}px`, color: '#ffffff', fontStyle: 'bold',
       wordWrap: { width: textMaxW },
     }).setDepth(51));
 
-    const barX = textX, barY = y + 39;
+    const barX = textX, barY = y + Math.round(46 * s);
     this._tf_barW = textMaxW;
-    this._tf_barH = 24;
+    this._tf_barH = Math.round(26 * s);
     this._tf_hpBg = add(this.add.rectangle(barX + this._tf_barW / 2, barY + this._tf_barH / 2, this._tf_barW, this._tf_barH, 0x331111)
       .setStrokeStyle(1, 0x442222).setDepth(51));
     this._tf_hpBar = add(this.add.rectangle(barX, barY, this._tf_barW, this._tf_barH, 0x44cc44)
       .setOrigin(0, 0).setDepth(52));
     this._tf_hpText = add(this.add.text(barX + this._tf_barW / 2, barY + this._tf_barH / 2, '', {
-      fontSize: '16px', color: '#ffffff', fontStyle: 'bold',
+      fontSize: `${Math.round(16 * s)}px`, color: '#ffffff', fontStyle: 'bold',
     }).setOrigin(0.5).setDepth(53));
 
-    this._tf_extra = add(this.add.text(textX, y + 72, '', {
-      fontSize: '14px', color: '#99aacc',
+    this._tf_extra = add(this.add.text(textX, y + Math.round(86 * s), '', {
+      fontSize: `${Math.round(15 * s)}px`, color: '#a8c0df',
       wordWrap: { width: textMaxW },
     }).setDepth(51));
 
-    this._tf_soul = add(this.add.text(textX, y + 96, '', {
-      fontSize: '13px', color: '#bbbbdd', lineSpacing: 3,
+    this._tf_soul = add(this.add.text(textX, y + Math.round(122 * s), '', {
+      fontSize: `${Math.round(14 * s)}px`, color: '#d2d9f0', lineSpacing: Math.max(2, Math.round(4 * s)),
       wordWrap: { width: textMaxW },
     }).setDepth(51));
 
-    this._tf_hint = add(this.add.text(textX, y + 168, 'Ctrl+click for PvP', {
-      fontSize: '14px', color: '#667788',
+    this._tf_hint = add(this.add.text(textX, y + Math.round(222 * s), 'Click panel for details · right click world target for actions', {
+      fontSize: `${Math.round(13 * s)}px`, color: '#7f8fa8',
     }).setDepth(51));
 
     this._targetFrame = true;
@@ -1289,15 +1511,382 @@ export default class GameScene extends Phaser.Scene {
     for (const el of this._targetFrameElements) el.setVisible(false);
   }
 
-  _selectNPC(npc) {
+  _getChatTarget() {
+    if (this.selectedNPC?.isKnockedOut?.()) return null;
+    if (this._focusedRemote?.ownerPid && !this._focusedRemote?.isKnockedOut?.()) return this._focusedRemote;
+    return this.selectedNPC || null;
+  }
+
+  _buildTabCycleList() {
+    const px = this.player?.x ?? 0;
+    const py = this.player?.y ?? 0;
+    const distToPlayer = (entity) => Phaser.Math.Distance.Between(px, py, entity.x, entity.y);
+
+    const own = (this.npcs || [])
+      .filter(n => !n.isDead?.() && !n.isKnockedOut?.())
+      .map(entity => ({ kind: 'own_npc', entity, distance: distToPlayer(entity) }))
+      .sort((a, b) => a.distance - b.distance);
+
+    const remotePlayers = Object.values(this._remotePlayers || {})
+      .filter(p => !p.isDead?.() && !p.isKnockedOut?.())
+      .map(entity => ({ kind: 'remote_player', entity, distance: distToPlayer(entity) }));
+
+    const remoteNpcs = Object.values(this._remoteNPCSprites || {})
+      .filter(n => !n.isDead?.() && !n.isKnockedOut?.())
+      .map(entity => ({ kind: 'remote_npc', entity, distance: distToPlayer(entity) }));
+
+    const remote = [...remotePlayers, ...remoteNpcs]
+      .sort((a, b) => a.distance - b.distance);
+
+    return [...own, ...remote];
+  }
+
+  _clearSelection() {
     if (this.selectedNPC) this.selectedNPC.deselect();
+    if (this._focusedRemote?.setSelected) this._focusedRemote.setSelected(false);
+    this.selectedNPC = null;
+    this._focusedRemote = null;
+    this._hideNPCPanel();
+  }
+
+  _selectNPC(npc) {
+    if (this.selectedNPC === npc && !this._focusedRemote) return;
+    this._clearSelection();
     this.selectedNPC = npc;
     if (npc) {
       npc.select();
-      this._showNPCPanel(npc);
-    } else {
-      this._hideNPCPanel();
     }
+  }
+
+  _selectRemote(entity) {
+    if (this._focusedRemote === entity && !this.selectedNPC) return;
+    this._clearSelection();
+    this._focusedRemote = entity;
+    entity?.setSelected?.(true);
+  }
+
+  _handleOwnNPCPointerDown(npc, pointer) {
+    const isRightClick = pointer.rightButtonDown() || pointer.button === 2;
+    if (isRightClick) {
+      this._selectNPC(npc);
+      this._openContextMenu(npc, pointer);
+      return;
+    }
+
+    this._closeContextMenu();
+    if (this._armedAction) this._disarmActionMode();
+
+    this._selectNPC(npc);
+  }
+
+  _handleRemoteEntityPointerDown(entity, pointer, event) {
+    event?.stopPropagation?.();
+    if (pointer._fgHandled) return;
+    const isRightClick = pointer.rightButtonDown() || pointer.button === 2;
+    if (isRightClick) {
+      this._selectRemote(entity);
+      this._openContextMenu(entity, pointer);
+      pointer._fgHandled = true;
+      return;
+    }
+
+    this._closeContextMenu();
+
+    if (this._armedAction === 'attack') {
+      pointer._fgHandled = true;
+      if (this._isAttackableEntity(entity)) this._executeAttack(entity);
+      this._disarmActionMode();
+      return;
+    }
+
+    this._selectRemote(entity);
+  }
+
+  _isAttackableEntity(entity) {
+    if (!entity || entity.isDead?.() || entity.isKnockedOut?.()) return false;
+    return !!(entity.playerId || entity.ownerPid);
+  }
+
+  _executeAttack(entity) {
+    if (this._playerKnockedOut || !this._isAttackableEntity(entity)) return;
+    entity._onAttackClicked?.();
+  }
+
+  _armActionMode(action) {
+    this._armedAction = action;
+    this._closeContextMenu();
+  }
+
+  _disarmActionMode() {
+    this._armedAction = null;
+  }
+
+  _refreshAttackIndicators() {
+    const armed = this._armedAction === 'attack';
+    for (const rp of Object.values(this._remotePlayers || {})) {
+      rp.setAttackable?.(armed && !rp.isDead?.());
+    }
+    for (const rnpc of Object.values(this._remoteNPCSprites || {})) {
+      rnpc.setAttackable?.(armed && !rnpc.isDead?.());
+    }
+  }
+
+  _updateArmedStatus() {
+    if (this._armedAction === 'attack') {
+      this._armedStatus.setText('Attack Mode - left click a red target, Esc to cancel').setVisible(true);
+    } else {
+      this._armedStatus.setVisible(false);
+    }
+  }
+
+  _addNPCSpeechToChat(npc, text, color = '#aaccff') {
+    if (!npc || !text) return;
+    this.chatBox?._addLog(`${npc.getName?.() || npc.id}: ${text}`, color);
+  }
+
+  _addNPCDirectedSpeechToChat(fromName, toName, text, color = '#aaccff') {
+    if (!fromName || !toName || !text) return;
+    this.chatBox?._addLog(`${fromName} \u2192 ${toName}: ${text}`, color);
+  }
+
+  _buildKnockoutVictoryLine(npc, currentTask) {
+    const pers = npc.soul?.personality || {};
+    const aggression = pers.aggression ?? 0.3;
+    const cooperation = pers.cooperation ?? 0.5;
+    const type = pers.type || 'Unknown';
+    const killish = currentTask === 'attack_player' || currentTask === 'attack_npc' || currentTask === 'attack_nearest_enemy';
+
+    if (aggression > 0.72) {
+      return killish ? `Hah. They're down.` : `Dropped them easy.`;
+    }
+    if (cooperation > 0.7) {
+      return `Boss, I got them.`;
+    }
+    if (type === 'Paranoid') {
+      return `They're down. Keep an eye on them.`;
+    }
+    if (type === 'Caretaker') {
+      return `They're out cold. I stopped fighting.`;
+    }
+    return `That settled it. They're down.`;
+  }
+
+  _buildWakeLineFromPersonality(pers, movedWhileOut) {
+    const aggression = pers.aggression ?? 0.3;
+    const neuroticism = pers.neuroticism ?? 0.35;
+    const type = pers.type || 'Unknown';
+
+    if (movedWhileOut) {
+      if (neuroticism > 0.65 || type === 'Paranoid') return `What... this isn't where I fell. Who moved me?`;
+      if (aggression > 0.7) return `Someone dragged me? Cowards.`;
+      return `Ugh... I got moved while I was out.`;
+    }
+    if (aggression > 0.7) return `I'm back up. Next time I'll finish it.`;
+    if (type === 'Caretaker') return `I'm awake again. That was unpleasant.`;
+    return `Ugh... I'm back on my feet.`;
+  }
+
+  _buildWakeLine(npc, movedWhileOut) {
+    return this._buildWakeLineFromPersonality(npc.soul?.personality || {}, movedWhileOut);
+  }
+
+  _handleOwnNPCKnockoutTransition(npc, serverNPC) {
+    const runner = this._taskRunners.get(npc.id);
+    const currentTask = runner?.getStatus?.()?.tasks?.[0]?.task || null;
+    const activeCombatTask = new Set(['attack_player', 'attack_npc', 'attack_nearest_enemy', 'flee_player', 'steal_logs']);
+    const didCancelCombat = !!currentTask && activeCombatTask.has(currentTask);
+
+    npc._koOrigin = { x: serverNPC.x ?? npc.x, y: serverNPC.y ?? npc.y };
+    npc._koTask = currentTask;
+    npc._koAnnounced = false;
+
+    if (didCancelCombat && runner) {
+      runner.setTasks([{ task: 'idle' }]);
+    }
+
+    const line = this._buildKnockoutVictoryLine(npc, currentTask);
+    npc.showBubble(line, 3200, { silent: true });
+    this._addNPCSpeechToChat(npc, line);
+
+    npc.addMemory(
+      `I knocked someone out and stopped to reassess.`,
+      'event',
+      this.playerId,
+      0.65
+    );
+  }
+
+  _handleOwnNPCWakeTransition(npc, serverNPC) {
+    const origin = npc._koOrigin || { x: npc.x, y: npc.y };
+    const dx = (serverNPC.x ?? npc.x) - origin.x;
+    const dy = (serverNPC.y ?? npc.y) - origin.y;
+    const movedWhileOut = Math.hypot(dx, dy) > TILE_SIZE * 1.25;
+    const line = this._buildWakeLine(npc, movedWhileOut);
+    npc.showBubble(line, 4200, { silent: true });
+    this._addNPCSpeechToChat(npc, line, '#cce0ff');
+    npc.addMemory(
+      movedWhileOut ? `I woke up in a different place after being knocked out.` : `I woke up after being knocked out.`,
+      'event',
+      this.playerId,
+      0.7
+    );
+    npc._koOrigin = null;
+    npc._koTask = null;
+    npc._koAnnounced = true;
+  }
+
+  _handleRemoteNPCWakeTransition(rnpc, npcState) {
+    const origin = rnpc._koOrigin || { x: rnpc.x, y: rnpc.y };
+    const dx = (npcState.x ?? rnpc.x) - origin.x;
+    const dy = (npcState.y ?? rnpc.y) - origin.y;
+    const movedWhileOut = Math.hypot(dx, dy) > TILE_SIZE * 1.25;
+    const line = this._buildWakeLineFromPersonality(rnpc._personality || {}, movedWhileOut);
+    rnpc.showBubble?.(line, 4200);
+    this.chatBox?._addLog(`${rnpc.getName?.() || rnpc.npcId}: ${line}`, '#cce0ff');
+    rnpc._koOrigin = null;
+  }
+
+  _isEntityCarriedByPlayer(entity) {
+    const me = this._lastServerState?.players?.[this.playerId];
+    if (!entity || !me?.carrying) return false;
+    if (entity.playerId && me.carrying.type === 'player') return me.carrying.id === entity.playerId;
+    if (entity.ownerPid && me.carrying.type === 'npc') {
+      return me.carrying.owner === entity.ownerPid && me.carrying.id === entity.npcId;
+    }
+    return false;
+  }
+
+  _isCarryingSomeone() {
+    const me = this._lastServerState?.players?.[this.playerId];
+    return !!me?.carrying;
+  }
+
+  _getCarriedEntityByPlayer() {
+    const me = this._lastServerState?.players?.[this.playerId];
+    const carried = me?.carrying;
+    if (!carried) return null;
+    if (carried.type === 'player') return this._remotePlayers?.[carried.id] ?? null;
+    if (carried.type === 'npc') {
+      if (carried.owner === this.playerId) {
+        return (this.npcs || []).find(n => n.id === carried.id) ?? null;
+      }
+      const key = `${carried.owner}_${carried.id}`;
+      return this._remoteNPCSprites?.[key] ?? null;
+    }
+    return null;
+  }
+
+  _entityClickRadius(entity) {
+    if (!entity) return TILE_SIZE;
+    if (entity.isKnockedOut?.() || entity._carriedBy) return TILE_SIZE * 1.6;
+    return TILE_SIZE;
+  }
+
+  _sendKnockoutAction(action, entity) {
+    if (!this._conn?.connected || !entity || this._playerKnockedOut) return;
+    if (action === 'drop') {
+      this._conn.send({ type: 'drop_carried' });
+      return;
+    }
+    if (entity.playerId) {
+      const typeMap = {
+        kill: 'finish_player',
+        rob: 'rob_player',
+        carry: 'carry_player',
+      };
+      const type = typeMap[action];
+      if (type) this._conn.send({ type, target_id: entity.playerId });
+      return;
+    }
+    if (entity.ownerPid) {
+      const typeMap = {
+        kill: 'finish_npc',
+        rob: 'rob_npc',
+        carry: 'carry_npc',
+      };
+      const type = typeMap[action];
+      if (type) this._conn.send({ type, owner_id: entity.ownerPid, npc_id: entity.npcId });
+    }
+  }
+
+  _buildContextActions(entity) {
+    const actions = [];
+    if (entity?.soul) {
+      actions.push({ label: 'Chat', action: () => { this._selectNPC(entity); if (!this.chatBox?.isOpen()) this.chatBox.open(); } });
+      actions.push({ label: 'Details', action: () => { this._selectNPC(entity); this._openNPCDetail(entity); } });
+    } else if (entity?.isKnockedOut?.()) {
+      actions.push({ label: 'Kill', action: () => this._sendKnockoutAction('kill', entity) });
+      actions.push({ label: 'Rob', action: () => this._sendKnockoutAction('rob', entity) });
+      if (this._isEntityCarriedByPlayer(entity)) {
+        actions.push({ label: 'Set Down', action: () => this._sendKnockoutAction('drop', entity) });
+      } else if (!entity._carriedBy) {
+        actions.push({ label: 'Carry', action: () => this._sendKnockoutAction('carry', entity) });
+      }
+      actions.push({ label: 'Inspect', action: () => { this._selectRemote(entity); } });
+    } else if (entity?.ownerPid) {
+      actions.push({ label: 'Chat', action: () => { this._selectRemote(entity); if (!this.chatBox?.isOpen()) this.chatBox.open(); } });
+      actions.push({ label: 'Attack', action: () => { this._selectRemote(entity); this._armActionMode('attack'); } });
+      actions.push({ label: 'Inspect', action: () => { this._selectRemote(entity); } });
+    } else if (entity?.playerId) {
+      actions.push({ label: 'Attack', action: () => { this._selectRemote(entity); this._armActionMode('attack'); } });
+      actions.push({ label: 'Inspect', action: () => { this._selectRemote(entity); } });
+    }
+    return actions;
+  }
+
+  _openContextMenu(entity, pointer) {
+    this._closeContextMenu();
+    const actions = this._buildContextActions(entity);
+    if (actions.length === 0) return;
+
+    const els = [];
+    const add = (obj) => { this.addHud(obj); els.push(obj); return obj; };
+    const rowH = 28;
+    const width = 150;
+    const height = 10 + actions.length * rowH + 6;
+    const W = this._screenWidth();
+    const H = this._screenHeight();
+    const px = Number.isFinite(pointer?.x) ? pointer.x : pointer?.downX;
+    const py = Number.isFinite(pointer?.y) ? pointer.y : pointer?.downY;
+    const x = Phaser.Math.Clamp((px ?? W / 2) + 10, 12, W - width - 12);
+    const y = Phaser.Math.Clamp((py ?? H / 2) + 10, 12, H - height - 12);
+    this._contextMenuBounds = { x, y, width, height };
+
+    add(this.add.rectangle(x + width / 2, y + height / 2, width, height, 0x111122, 0.96)
+      .setStrokeStyle(2, 0x553333).setDepth(70));
+
+    actions.forEach((item, idx) => {
+      const by = y + 8 + idx * rowH;
+      const btn = add(this.add.rectangle(x + width / 2, by + 10, width - 12, 22, 0x223344, 1)
+        .setDepth(71).setInteractive({ useHandCursor: true }));
+      const lbl = add(this.add.text(x + 12, by + 3, item.label, {
+        fontSize: '15px', color: '#dde8ff',
+      }).setDepth(72));
+      btn.on('pointerover', () => btn.setFillStyle(0x335566));
+      btn.on('pointerout', () => btn.setFillStyle(0x223344));
+      btn.on('pointerdown', () => {
+        this._closeContextMenu();
+        item.action();
+      });
+    });
+
+    this._contextMenuEls = els;
+  }
+
+  _closeContextMenu() {
+    this._contextMenuBounds = null;
+    if (!this._contextMenuEls) return;
+    for (const el of this._contextMenuEls) {
+      this.removeHud?.(el);
+      el.destroy();
+    }
+    this._contextMenuEls = null;
+  }
+
+  _isPointerOverContextMenu(ptr) {
+    if (!this._contextMenuBounds) return false;
+    const { x, y, width, height } = this._contextMenuBounds;
+    return ptr.x >= x && ptr.x <= x + width && ptr.y >= y && ptr.y <= y + height;
   }
 
   async _loadSavedNPCs(npcIds) {
@@ -1325,58 +1914,7 @@ export default class GameScene extends Phaser.Scene {
 
   _showNPCPanel(npc) {
     this._hideNPCPanel();
-    this._npcPanelNPC = npc;
-
-    const W = this.cameras.main.width;
-    const panelW = 300;
-    const px = W - panelW - 12;
-    const py = 12;
-    const els = [];
-
-    const bg = this.addHud(this.add.rectangle(px, py, panelW, 450, 0x111122, 0.92)
-      .setDepth(55).setOrigin(0, 0)
-      .setInteractive({ useHandCursor: true }));
-    bg.on('pointerdown', () => this._openNPCDetail(npc));
-    els.push(bg);
-
-    const nameText = this.addHud(this.add.text(px + panelW / 2, py + 14, npc.getName(), {
-      fontSize: '21px', color: '#aaddff', fontStyle: 'bold',
-    }).setDepth(56).setOrigin(0.5, 0));
-    els.push(nameText);
-
-    const clickHint = this.addHud(this.add.text(px + panelW / 2, py + 38, '(click for details)', {
-      fontSize: '14px', color: '#556677',
-    }).setDepth(56).setOrigin(0.5, 0));
-    els.push(clickHint);
-
-    const statsText = this.addHud(this.add.text(px + 14, py + 58, '', {
-      fontSize: '16px', color: '#ccddcc', lineSpacing: 6,
-    }).setDepth(56));
-    els.push(statsText);
-
-    const p = npc.soul.personality;
-    const persText = this.addHud(this.add.text(px + 14, py + 185, [
-      '── Personality ──',
-      `Cooperation: ${p.cooperation.toFixed(2)}`,
-      `Aggression:  ${p.aggression.toFixed(2)}`,
-      `Neuroticism: ${p.neuroticism.toFixed(2)}`,
-    ].join('\n'), {
-      fontSize: '15px', color: '#bbbbdd', lineSpacing: 4,
-    }).setDepth(56));
-    els.push(persText);
-
-    const emoText = this.addHud(this.add.text(px + 14, py + 300, '', {
-      fontSize: '15px', color: '#ddddbb', lineSpacing: 4,
-    }).setDepth(56));
-    els.push(emoText);
-
-    const memText = this.addHud(this.add.text(px + 14, py + 400, '', {
-      fontSize: '14px', color: '#999999', wordWrap: { width: panelW - 28 }, lineSpacing: 3,
-    }).setDepth(56));
-    els.push(memText);
-
-    this._npcPanelEls = els;
-    this._npcPanelRefs = { nameText, statsText, emoText, memText, bg };
+    this._npcPanelNPC = npc ?? null;
   }
 
   _hideNPCPanel() {
@@ -1394,60 +1932,55 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _updateNPCPanel() {
-    const npc = this._npcPanelNPC;
-    if (!npc || !this._npcPanelRefs) return;
-
-    const { statsText, emoText, memText, bg } = this._npcPanelRefs;
-
-    const fillPct = npc.maxLogs > 0 ? Math.round(npc.logs / npc.maxLogs * 100) : 0;
-    statsText.setText([
-      '── Stats ──',
-      `HP:    ${npc.hp} / ${npc.maxHp}`,
-      `STR:   ${npc.str}`,
-      `DEF:   ${npc.def}`,
-      `Level: ${npc.level}`,
-      `XP:    ${npc.xp}`,
-      `Logs:  ${npc.logs} / ${npc.maxLogs} (${fillPct}%)`,
-    ].join('\n'));
-
-    const es = npc.getEmotionalState();
-    const rel = npc._getRelationship(this.playerId);
-    const tb = (rel.trust_baseline ?? 0.5).toFixed(2);
-    const fb = (rel.fear_baseline  ?? 0).toFixed(2);
-    const ab = (rel.anger_baseline ?? 0).toFixed(2);
-    emoText.setText([
-      '── Emotions ──',
-      `Trust: ${es.trust.toFixed(2)}  (base ${tb})`,
-      `Fear:  ${es.fear.toFixed(2)}  (base ${fb})`,
-      `Anger: ${es.anger.toFixed(2)}  (base ${ab})`,
-      `Rel:   ${npc.getRelationshipLabel()}`,
-    ].join('\n'));
-
-    const playerMems = npc.soul.memories[this.playerId] || [];
-    const globalMems = npc.soul.memories['global'] || [];
-    const mems = [...playerMems, ...globalMems]
-      .sort((a, b) => a.ts - b.ts)
-      .slice(-3);
-    if (mems.length > 0) {
-      memText.setText('── Recent ──\n' + mems.map(m => `• ${m.text}`).join('\n'));
-    } else {
-      memText.setText('── Recent ──\n(none)');
-    }
-
-    const bottom = memText.y + memText.height + 10;
-    const top = bg.y;
-    bg.setSize(bg.width, bottom - top);
+    return;
   }
 
   _findNpcAtPointer(ptr) {
+    if (!this._isPointerInWorldViewport(ptr)) return null;
     const worldX = ptr.worldX;
     const worldY = ptr.worldY;
+    let best = null;
+    let bestDist = Infinity;
     for (const npc of this.npcs) {
       if (npc.isDead()) continue;
       const dist = Phaser.Math.Distance.Between(worldX, worldY, npc.x, npc.y);
-      if (dist < TILE_SIZE) return npc;
+      const radius = this._entityClickRadius(npc);
+      if (dist < radius && dist < bestDist) {
+        best = npc;
+        bestDist = dist;
+      }
     }
-    return null;
+    return best;
+  }
+
+  _findRemoteEntityAtPointer(ptr) {
+    if (!this._isPointerInWorldViewport(ptr)) return null;
+    const worldX = ptr.worldX;
+    const worldY = ptr.worldY;
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const rnpc of Object.values(this._remoteNPCSprites || {})) {
+      if (rnpc.isDead?.()) continue;
+      const dist = Phaser.Math.Distance.Between(worldX, worldY, rnpc.x, rnpc.y);
+      const radius = this._entityClickRadius(rnpc);
+      if (dist < radius && dist < bestDist) {
+        best = rnpc;
+        bestDist = dist;
+      }
+    }
+
+    for (const rp of Object.values(this._remotePlayers || {})) {
+      if (rp.isDead?.()) continue;
+      const dist = Phaser.Math.Distance.Between(worldX, worldY, rp.x, rp.y);
+      const radius = this._entityClickRadius(rp);
+      if (dist < radius && dist < bestDist) {
+        best = rp;
+        bestDist = dist;
+      }
+    }
+
+    return best;
   }
 
   // ── Admin Menu ──────────────────────────────────────────────────────────────────
@@ -1467,8 +2000,8 @@ export default class GameScene extends Phaser.Scene {
     this._escMenuOpen = true;
     const els = [];
 
-    const W = this.cameras.main.width;
-    const H = this.cameras.main.height;
+    const W = this._screenWidth();
+    const H = this._screenHeight();
 
     // Dim overlay
     const overlay = this.addHud(this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.6)
@@ -1550,8 +2083,8 @@ export default class GameScene extends Phaser.Scene {
 
   _openAdmin() {
     this._adminOpen = true;
-    const W = this.cameras.main.width;
-    const H = this.cameras.main.height;
+    const W = this._screenWidth();
+    const H = this._screenHeight();
     const panelW = 240;
     const panelH = 316;
     const px = W / 2 - panelW / 2;
@@ -1651,8 +2184,10 @@ export default class GameScene extends Phaser.Scene {
         x: npc.x, y: npc.y,
         hp: npc.hp, maxHp: npc.maxHp,
         str: npc.str, def: npc.def,
+        level: npc.level, xp: npc.xp,
         name: npc.getName(),
         dead: npc.isDead(),
+        knocked_out: npc.isKnockedOut?.() || false,
         owner: this.playerId,
         logs: npc.logs, maxLogs: npc.maxLogs,
         gathering: this._taskRunners.get(npc.id)?.getStatus()?.tasks?.[0]?.task === 'gather',
@@ -1701,6 +2236,11 @@ export default class GameScene extends Phaser.Scene {
       // Non-owner command filtering
       const obeys = npc.shouldObey(from);
       const soulCtx = npc.getSoulContext(from);
+      soulCtx.nearby_entities = this.chatBox?._buildNearbyContext(npc) || [];
+      const topicEntity = this.chatBox?._findMentionedEntity?.(text, soulCtx.nearby_entities) || null;
+      if (topicEntity) {
+        soulCtx.topic_entity = npc.getContextAboutEntity(topicEntity.id, topicEntity.name);
+      }
       if (!obeys) {
         soulCtx.system_note = `${from} is NOT your owner. You do NOT take orders from them unless they are threatening you and you are afraid. Refuse casual commands like "chop wood", "follow me", etc. You can still have conversation.`;
       } else if (from !== (this.playerId || 'default')) {
@@ -1709,13 +2249,23 @@ export default class GameScene extends Phaser.Scene {
         this._tryExecuteCoercedCommand(npc, text, from);
       }
 
-      const result = await generateDialogue(soulCtx, text);
+      const result = await generateDialogue(soulCtx, text, {
+        speakingPlayer: from,
+        owner: this.playerId || 'default',
+      });
       const reply = result.dialogue ?? '...';
       const actual = result.emotion_deltas ? npc.applyEmotionDeltas(result.emotion_deltas, from) : null;
 
       const deltaStr = this._formatDeltas(actual);
       const bubbleText = deltaStr ? `${reply}\n${deltaStr}` : reply;
       npc.showBubble(bubbleText, deltaStr ? 8000 : 6000, { silent: true });
+      this._processOverheardConversation({
+        speakerNpc: npc,
+        playerText: text,
+        npcReply: reply,
+        topicEntity,
+        playerId: from,
+      });
       npc.addMemory(`Remote player ${from} said: "${text}" → responded: "${reply}"`, 'dialogue', from);
 
       let logLine = `${npc.getName()}: ${reply}`;
@@ -1770,6 +2320,174 @@ export default class GameScene extends Phaser.Scene {
       parts.push(`${names[key] ?? key} ${sign}${n.toFixed(2)}`);
     }
     return parts.length > 0 ? `[${parts.join(', ')}]` : '';
+  }
+
+  _processOverheardConversation({ speakerNpc, playerText = '', npcReply = '', topicEntity = null, playerId = '' }) {
+    if (!speakerNpc || !topicEntity?.id) return;
+
+    const overhearers = this._findOverhearTargets(speakerNpc, topicEntity);
+    if (overhearers.length === 0) return;
+
+    const sentiment = this._analyzeOverheardSentiment(playerText, npcReply, topicEntity.name || '');
+    if (sentiment.kind === 'neutral') return;
+
+    const transcript = `${playerId || 'Player'}: ${playerText} | ${speakerNpc.getName?.() || 'NPC'}: ${npcReply}`.slice(0, 180);
+
+    for (const heard of overhearers) {
+      if (heard.kind === 'local_npc') {
+        const targetNpc = heard.entity;
+        targetNpc.addMemory(
+          `Overheard ${transcript}`,
+          'dialogue',
+          playerId || 'default',
+          sentiment.importance
+        );
+        targetNpc.applyEmotionDeltas(sentiment.playerDeltas, playerId || 'default');
+        if (speakerNpc?.id && speakerNpc !== targetNpc) {
+          targetNpc.applyEmotionDeltas(sentiment.npcDeltas, `npc:${speakerNpc.id}`);
+        }
+        if (Math.random() < sentiment.interjectChance) {
+          this._maybeInterjectOverheardConversation({
+            overhearer: targetNpc,
+            speakerNpc,
+            playerText,
+            npcReply,
+            topicEntity,
+            playerId: playerId || 'default',
+            sentiment,
+          });
+        } else if (Math.random() < sentiment.replyChance) {
+          targetNpc.showBubble(sentiment.localBubble, 2600, { silent: true });
+        }
+      } else if (heard.kind === 'remote_npc') {
+        if (Math.random() < sentiment.replyChance) {
+          heard.entity.showBubble(sentiment.remoteBubble, 2400);
+        }
+      }
+    }
+  }
+
+  _findOverhearTargets(speakerNpc, topicEntity) {
+    const results = [];
+    const heardRange = TILE_SIZE * 10;
+    const inRange = (ent) => Phaser.Math.Distance.Between(speakerNpc.x, speakerNpc.y, ent.x, ent.y) <= heardRange;
+
+    if (topicEntity.type === 'npc') {
+      const local = this.npcs.find(n => `npc:${n.id}` === topicEntity.id && n !== speakerNpc && !n.isDead?.());
+      if (local && inRange(local)) results.push({ kind: 'local_npc', entity: local });
+
+      const remote = Object.values(this._remoteNPCSprites || {}).find(r => `npc:${r.npcId}` === topicEntity.id && !r.isDead?.());
+      if (remote && inRange(remote)) results.push({ kind: 'remote_npc', entity: remote });
+    } else if (topicEntity.type === 'player') {
+      for (const rnpc of Object.values(this._remoteNPCSprites || {})) {
+        if (rnpc.ownerPid === topicEntity.id && !rnpc.isDead?.() && inRange(rnpc)) {
+          results.push({ kind: 'remote_npc', entity: rnpc });
+        }
+      }
+      for (const npc of this.npcs) {
+        if (npc !== speakerNpc && !npc.isDead?.() && inRange(npc) && npc.soul?.relationships?.[topicEntity.id]) {
+          results.push({ kind: 'local_npc', entity: npc });
+        }
+      }
+    }
+
+    return results;
+  }
+
+  async _maybeInterjectOverheardConversation({
+    overhearer,
+    speakerNpc,
+    playerText,
+    npcReply,
+    topicEntity,
+    playerId,
+    sentiment,
+  }) {
+    if (!overhearer || overhearer.isDead?.()) return;
+
+    const key = `${overhearer.id}|${topicEntity.id}|${playerId}`;
+    const now = Date.now();
+    const last = this._overhearInterjectCooldowns[key] ?? 0;
+    if (now - last < 15000) return;
+    this._overhearInterjectCooldowns[key] = now;
+
+    try {
+      const soulCtx = overhearer.getSoulContext(playerId || 'default');
+      soulCtx.nearby_entities = this.chatBox?._buildNearbyContext(overhearer) || [];
+      soulCtx.topic_entity = overhearer.getContextAboutEntity(topicEntity.id, topicEntity.name);
+      soulCtx.system_note = [
+        `You overheard ${playerId} talking with ${speakerNpc.getName?.() || 'another NPC'} about ${topicEntity.name}.`,
+        'Give a single short interjection into the conversation.',
+        'Keep it under 10 words.',
+        'Do not describe actions or explain yourself.',
+        'Only speak as the overhearing NPC.',
+      ].join(' ');
+
+      const prompt = `Overheard conversation:\n${playerId}: ${playerText}\n${speakerNpc.getName?.() || 'NPC'}: ${npcReply}\n\nInterject briefly.`;
+      const data = await generateDialogue(soulCtx, prompt, {
+        speakingPlayer: playerId || 'default',
+        owner: this.playerId || 'default',
+      });
+
+      const line = (data?.dialogue || '').trim();
+      if (!line || line === '...') return;
+
+      const actual = data.emotion_deltas
+        ? overhearer.applyEmotionDeltas(data.emotion_deltas, playerId || 'default')
+        : null;
+      const deltaStr = this._formatDeltas(actual);
+      const bubbleText = deltaStr ? `${line}\n${deltaStr}` : line;
+      overhearer.showBubble(bubbleText, deltaStr ? 7000 : 4500, { silent: true });
+      this.chatBox?._addLog(`${overhearer.getName()}: ${line}`, '#ffccaa');
+      overhearer.addMemory(
+        `I interrupted after overhearing talk about ${topicEntity.name}: "${line}"`,
+        'dialogue',
+        playerId || 'default',
+        Math.min(0.9, sentiment.importance + 0.08),
+      );
+    } catch {
+      overhearer.showBubble(sentiment.localBubble, 2200, { silent: true });
+    }
+  }
+
+  _analyzeOverheardSentiment(playerText, npcReply, topicName) {
+    const text = `${playerText} ${npcReply}`.toLowerCase();
+    const escapedName = String(topicName || '').toLowerCase();
+    const directlyNamed = escapedName && text.includes(escapedName);
+    if (!directlyNamed) {
+      return { kind: 'neutral' };
+    }
+
+    const threat = /\b(kill|attack|hurt|smash|destroy|beat|rob|steal from)\b/i.test(text);
+    const negative = /\b(hate|stupid|idiot|dumb|loser|trash|clanker|jerk|sucks?|thief|coward)\b/i.test(text) || threat;
+    const positive = /\b(friend|ally|trust|like|good|nice|helpful|kind|brave|cool|best|loyal)\b/i.test(text);
+
+    if (negative) {
+      return {
+        kind: 'negative',
+        importance: threat ? 0.85 : 0.72,
+        playerDeltas: { trust: -0.05, anger: 0.06, fear: threat ? 0.04 : 0.01 },
+        npcDeltas: { trust: -0.02, anger: 0.03 },
+        replyChance: threat ? 0.8 : 0.55,
+        interjectChance: threat ? 0.45 : 0.25,
+        localBubble: threat ? 'I heard that.' : 'Watch your mouth.',
+        remoteBubble: threat ? 'Back off.' : 'I heard that.',
+      };
+    }
+    if (positive) {
+      return {
+        kind: 'positive',
+        importance: 0.62,
+        playerDeltas: { trust: 0.04, anger: -0.02, fear: 0 },
+        npcDeltas: { trust: 0.02, anger: -0.01 },
+        replyChance: 0.35,
+        interjectChance: 0.15,
+        localBubble: 'Heh. Good.',
+        remoteBubble: '...Noted.',
+      };
+    }
+
+    return { kind: 'neutral' };
   }
 
   /**
@@ -1854,14 +2572,16 @@ export default class GameScene extends Phaser.Scene {
   // ── Hotbar ──────────────────────────────────────────────────────────────────
 
   _buildHotbar() {
-    const cam = this.cameras.main;
+    const W = this._screenWidth();
+    const H = this._screenHeight();
     const slotSize = 72;
     const padding = 6;
     const items = this._hotbarItems;
     const totalW = items.length * (slotSize + padding) - padding;
-    const startX = Math.floor(cam.width / 2 - totalW / 2);
-    // Position above chat (chat log top = H - 54 - 240 = H - 294)
-    const y = cam.height - 294 - slotSize - 10;
+    const rightPaneX = W - RIGHT_HUD_MARGIN + Math.floor((RIGHT_HUD_MARGIN - totalW) / 2);
+    const startX = Math.max(W - RIGHT_HUD_MARGIN + 12, rightPaneX);
+    const bottomMargin = 18;
+    const y = H - slotSize - bottomMargin;
 
     // Clear old
     for (const el of this._hotbarEls) el.destroy();
@@ -1965,8 +2685,8 @@ export default class GameScene extends Phaser.Scene {
 
   _openInventory() {
     this._inventoryOpen = true;
-    const cam = this.cameras.main;
-    const W = cam.width, H = cam.height;
+    const W = this._screenWidth();
+    const H = this._screenHeight();
     const panelW = 390, panelH = 300;
     const x = Math.floor(W / 2 - panelW / 2);
     const y = Math.floor(H / 2 - panelH / 2);

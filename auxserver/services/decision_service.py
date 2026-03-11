@@ -139,6 +139,7 @@ async def generate_decision(state: dict) -> dict:
                         {"role": "user", "content": user_content},
                     ],
                     "stream": False,
+                    "think": False,
                     "options": {"temperature": 0.4, "num_predict": 400},
                 },
             )

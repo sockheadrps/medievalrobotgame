@@ -65,11 +65,17 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this.level = 1;
     this.xp    = 0;
     this._dead = false;
+    this._knockedOut = false;
+    this._knockedUntil = 0;
+    this._carriedBy = null;
     this._regenAccum = 0;
     this._emotionDecayAccum = 0;
     this._memoryDecayAccum = 0;
     this._emotionReactAccum = 0; // periodic check for emotion-driven behavior
-    this._emotionReactTarget = null; // current emotion-driven target { action, playerId }
+    this._emotionReactTarget = null; // current emotion-driven target { action, playerId/entityId, entityType }
+
+    // Intel — whether this NPC can see attacker stats (future item unlocks this)
+    this._canSeeStats = false;
 
     // Inventory — capacity scales with level
     this.logs    = 0;
@@ -101,7 +107,11 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._bubbleTimer = null;
 
     // Selection ring
-    this._ring = scene.add.circle(x, y - 6, 18, 0x44aaff, 0.25)
+    this._ring = scene.add.circle(x, y - 6, 20, 0x22d8ff, 0.34)
+      .setStrokeStyle(3, 0x88f3ff, 0.9)
+      .setDepth(1).setVisible(false);
+    this._ringPulse = scene.add.circle(x, y - 6, 28, 0x22d8ff, 0.1)
+      .setStrokeStyle(2, 0x22d8ff, 0.6)
       .setDepth(1).setVisible(false);
 
     // HP bar
@@ -118,6 +128,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
   getName()       { return this._name; }
   setName(name)   { this._name = name; this._nameLabel?.setText(name); }
   isDead()        { return this._dead; }
+  isKnockedOut()  { return this._knockedOut; }
   getFacing()     { return this._facing; }
 
   /** Play punch frame toward a target. */
@@ -149,8 +160,58 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this.hp = Math.min(this.maxHp, this.hp + amount);
   }
 
+  grantXP(amount, reason = '') {
+    const xp = Math.max(0, Math.floor(amount || 0));
+    if (xp <= 0) return false;
+
+    this.xp = (this.xp ?? 0) + xp;
+    let leveled = false;
+    while (this.xp >= this.level * 20) {
+      this.xp -= this.level * 20;
+      this.level += 1;
+      this.maxHp += 2;
+      this.hp = this.maxHp;
+      this.str += 1;
+      this.def += 1;
+      this.maxLogs = this._calcMaxLogs();
+      leveled = true;
+    }
+
+    const scene = this.scene;
+    if (scene?.add && scene?.tweens) {
+      const xpText = scene.add.text(this.x + 15, this.y - TILE_SIZE + 10, `+${xp} XP`, {
+        fontSize: '10px', color: '#44ff44',
+      }).setOrigin(0.5, 1).setDepth(20);
+      scene.tweens.add({
+        targets: xpText,
+        y: xpText.y - 15,
+        alpha: 0,
+        duration: 1000,
+        onComplete: () => xpText.destroy(),
+      });
+
+      if (leveled) {
+        const levelText = scene.add.text(this.x, this.y - TILE_SIZE, `${this.getName()} Level ${this.level}!`, {
+          fontSize: '14px', color: '#ffff44', fontStyle: 'bold',
+          backgroundColor: '#00000099', padding: { x: 4, y: 2 },
+        }).setOrigin(0.5, 1).setDepth(20);
+        scene.tweens.add({
+          targets: levelText,
+          y: levelText.y - 30,
+          alpha: 0,
+          duration: 2000,
+          onComplete: () => levelText.destroy(),
+        });
+      }
+    }
+
+    if (reason) this._lastXpReason = reason;
+    return leveled;
+  }
+
   _triggerDeath() {
     this._dead = true;
+    this._knockedOut = false;
     this.setVisible(false);
     this._nameLabel?.setVisible(false);
     this._hpBar?.setVisible(false);
@@ -164,11 +225,31 @@ export class NPC extends Phaser.GameObjects.Sprite {
 
   _respawn() {
     this._dead = false;
+    this._knockedOut = false;
+    this._carriedBy = null;
     this.hp = this.maxHp;
+    this.clearTint();
+    this.setAlpha(1);
     this.setVisible(true);
     this._nameLabel?.setVisible(true);
     this._hpBar?.setVisible(true);
     this._hpBarBg?.setVisible(true);
+  }
+
+  setKnockedOut(on, opts = {}) {
+    this._knockedOut = !!on;
+    this._knockedUntil = opts.knockedUntil ?? this._knockedUntil ?? 0;
+    this._carriedBy = opts.carriedBy ?? null;
+    if (this._knockedOut) {
+      this.hp = 0;
+      this.stopMoving();
+      this.hideBubble();
+      this.setTint(0x777777);
+      this.setAlpha(0.65);
+    } else if (!this._dead) {
+      this.clearTint();
+      this.setAlpha(1);
+    }
   }
 
   // ── Movement ──────────────────────────────────────────────────────────────
@@ -318,8 +399,8 @@ export class NPC extends Phaser.GameObjects.Sprite {
 
   // ── Visual ────────────────────────────────────────────────────────────────
 
-  select()   { this._ring?.setVisible(true); }
-  deselect() { this._ring?.setVisible(false); }
+  select()   { this._ring?.setVisible(true); this._ringPulse?.setVisible(true); }
+  deselect() { this._ring?.setVisible(false); this._ringPulse?.setVisible(false); }
 
   showBubble(text, durationMs = 5000, { silent = false } = {}) {
     if (!this._bubble) return;
@@ -377,12 +458,43 @@ export class NPC extends Phaser.GameObjects.Sprite {
     while (arr.length > MAX_MEMORIES) arr.pop();
   }
 
+  /**
+   * Learn a phrase from the owner's speech. NPCs pick up nicknames, insults,
+   * catchphrases, and distinctive expressions their owner uses frequently.
+   */
+  learnPhrase(phraseData) {
+    if (!this.soul.learned_phrases) this.soul.learned_phrases = [];
+    const phrases = this.soul.learned_phrases;
+    // Support both old string format and new { phrase, usage, tone } format
+    const phrase = typeof phraseData === 'string' ? phraseData : phraseData.phrase;
+    const usage = (typeof phraseData === 'object' && phraseData.usage) || 'catchphrase';
+    const tone = (typeof phraseData === 'object' && phraseData.tone) || 'neutral';
+    // Check if already learned (case-insensitive)
+    const lower = phrase.toLowerCase();
+    const existing = phrases.find(p => p.phrase.toLowerCase() === lower);
+    if (existing) {
+      existing.uses++;
+      existing.last_heard = Date.now();
+      // Update tone/usage if we get a more specific classification
+      if (tone !== 'neutral') existing.tone = tone;
+      if (usage !== 'catchphrase') existing.usage = usage;
+      return;
+    }
+    phrases.push({ phrase, uses: 1, last_heard: Date.now(), usage, tone });
+    // Keep max 8 phrases, drop least-used
+    if (phrases.length > 8) {
+      phrases.sort((a, b) => b.uses - a.uses);
+      phrases.length = 8;
+    }
+  }
+
   getSoulContext(playerId = 'default') {
     const rel = this._getRelationship(playerId);
     const p = this.soul.personality;
 
     // Effective personality = base + per-player mods
     const effectivePersonality = {
+      type: p.type || '',
       cooperation: Phaser.Math.Clamp(p.cooperation + (rel.cooperation_mod || 0), 0, 1),
       aggression:  Phaser.Math.Clamp(p.aggression  + (rel.aggression_mod  || 0), 0, 1),
       neuroticism: p.neuroticism,
@@ -403,12 +515,51 @@ export class NPC extends Phaser.GameObjects.Sprite {
       .slice(0, 12)
       .map(m => m.text);
 
+    // Collect learned phrases (sorted by most-used first) with tone/usage context
+    const phrases = (this.soul.learned_phrases || [])
+      .slice().sort((a, b) => b.uses - a.uses)
+      .slice(0, 6)
+      .map(p => {
+        const tags = [];
+        if (p.usage && p.usage !== 'catchphrase') tags.push(p.usage);
+        if (p.tone && p.tone !== 'neutral') tags.push(p.tone);
+        return tags.length > 0 ? `${p.phrase} (${tags.join(', ')})` : p.phrase;
+      });
+
     return {
       name: this.getName(),
       personality: effectivePersonality,
       emotional_state: { trust: rel.trust, fear: rel.fear, anger: rel.anger },
       relationship: rel.label,
       memories: allMems,
+      learned_phrases: phrases,
+    };
+  }
+
+  /** Build target-specific relationship context for dialogue about another entity. */
+  getContextAboutEntity(entityId, displayName = '') {
+    if (!entityId) return null;
+    const rel = this.soul.relationships?.[entityId] || null;
+    const mems = this.soul.memories?.[entityId] || [];
+    const now = Date.now();
+    const topMemories = mems
+      .map(m => {
+        const ageSec = (now - m.ts) / 1000;
+        const recency = Math.max(0.1, 1 - ageSec / 600);
+        const imp = m.importance ?? 0.5;
+        return { ...m, weight: imp * recency };
+      })
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 5)
+      .map(m => m.text);
+
+    return {
+      id: entityId,
+      name: displayName || entityId.replace(/^npc:/, ''),
+      type: entityId.startsWith('npc:') ? 'npc' : 'player',
+      relationship: rel?.label || 'unknown',
+      emotional_state: rel ? { trust: rel.trust, fear: rel.fear, anger: rel.anger } : null,
+      memories: topMemories,
     };
   }
 
@@ -432,16 +583,17 @@ export class NPC extends Phaser.GameObjects.Sprite {
   }
 
   /**
-   * Check if this NPC should react to a specific player based on emotions.
-   * Returns: null (no reaction), or { action: 'attack'|'flee', playerId }
+   * Check if this NPC should react to a specific entity based on emotions.
+   * Returns: null (no reaction), or { action: 'attack'|'flee', playerId, entityType }
    */
-  getEmotionReaction(playerId) {
-    const rel = this.soul.relationships[playerId];
+  getEmotionReaction(entityId) {
+    const rel = this.soul.relationships[entityId];
     if (!rel) return null;
+    const entityType = entityId.startsWith('npc:') ? 'npc' : 'player';
     // High anger → attack on sight
-    if (rel.anger > 0.7) return { action: 'attack', playerId };
+    if (rel.anger > 0.7) return { action: 'attack', playerId: entityId, entityType };
     // High fear → flee
-    if (rel.fear > 0.5) return { action: 'flee', playerId };
+    if (rel.fear > 0.5) return { action: 'flee', playerId: entityId, entityType };
     return null;
   }
 
@@ -459,23 +611,104 @@ export class NPC extends Phaser.GameObjects.Sprite {
   }
 
   /**
-   * Scan nearby remote players and check if any trigger an emotion reaction.
-   * Returns { action: 'attack'|'flee', playerId } or null.
+   * Assess a threat and decide whether to fight or flee.
+   * @param {object} attacker - { type: 'player'|'npc', id, hp, maxHp, str, def, level? }
+   * @returns {{ action: 'fight'|'flee', confidence: number, reason: string }}
+   */
+  assessThreat(attacker) {
+    const pers = this.soul.personality;
+    const aggression = pers.aggression ?? 0.3;
+    const cooperation = pers.cooperation ?? 0.5;
+    const neuroticism = pers.neuroticism ?? 0.35;
+    const myHpPct = this.hp / this.maxHp;
+
+    // Base fight score from personality — aggressive NPCs want to fight
+    let fightScore = aggression * 0.4 + (1 - neuroticism) * 0.15;
+
+    // Relationship-based: high anger toward attacker → fight, high fear → flee
+    const relKey = attacker.type === 'npc' ? `npc:${attacker.id}` : attacker.id;
+    const rel = this.soul.relationships[relKey];
+    if (rel) {
+      fightScore += rel.anger * 0.25;   // rage makes you want to fight
+      fightScore -= rel.fear * 0.3;     // fear makes you want to flee
+    }
+
+    // HP-based: low HP → flee unless very aggressive
+    if (myHpPct < 0.2)      fightScore -= 0.4;
+    else if (myHpPct < 0.4) fightScore -= 0.2;
+    else if (myHpPct > 0.7) fightScore += 0.1;
+
+    // If NPC can see attacker stats, use them to make an informed decision
+    let reason = '';
+    if (this._canSeeStats && attacker.level != null) {
+      const levelDiff = (attacker.level ?? 1) - this.level;
+      const strDiff = (attacker.str ?? 1) - this.str;
+      const defAdv = this.def - (attacker.str ?? 1);
+
+      if (levelDiff >= 3) {
+        fightScore -= 0.35;
+        reason = `outleveled by ${levelDiff}`;
+      } else if (levelDiff >= 1) {
+        fightScore -= 0.1 * levelDiff;
+        reason = `slightly outleveled`;
+      } else if (levelDiff <= -2) {
+        fightScore += 0.2;
+        reason = `I'm stronger`;
+      }
+
+      if (strDiff > 2) fightScore -= 0.15;
+      if (defAdv > 2) fightScore += 0.15;
+
+      // Can see attacker HP — wounded attacker is easier prey
+      const attackerHpPct = (attacker.hp ?? attacker.maxHp ?? 15) / (attacker.maxHp ?? 15);
+      if (attackerHpPct < 0.3) { fightScore += 0.2; reason = `attacker is wounded`; }
+    } else {
+      // Can't see stats — rely purely on personality + emotions + own HP
+      reason = 'unknown threat';
+      // Slightly bias toward caution when blind
+      fightScore -= 0.05;
+    }
+
+    // Clamp
+    fightScore = Math.max(0, Math.min(1, fightScore));
+
+    const action = fightScore >= 0.45 ? 'fight' : 'flee';
+    return { action, confidence: Math.abs(fightScore - 0.45) + 0.5, reason };
+  }
+
+  /**
+   * Scan nearby remote players AND NPCs for emotion-driven reactions.
+   * Returns { action: 'attack'|'flee', playerId, entityType } or null.
    */
   _scanForEmotionReaction() {
     const scene = this.scene;
-    if (!scene?._remotePlayers) return null;
+    if (!scene) return null;
 
     const REACT_RANGE = 6 * TILE_SIZE; // 6 tiles
     let best = null;
     let bestDist = REACT_RANGE;
 
-    for (const [pid, rp] of Object.entries(scene._remotePlayers)) {
+    // Scan remote players
+    for (const [pid, rp] of Object.entries(scene._remotePlayers || {})) {
       if (rp.isDead?.()) continue;
       const dist = Phaser.Math.Distance.Between(this.x, this.y, rp.x, rp.y);
       if (dist > REACT_RANGE) continue;
 
       const reaction = this.getEmotionReaction(pid);
+      if (reaction && dist < bestDist) {
+        best = reaction;
+        bestDist = dist;
+      }
+    }
+
+    // Scan remote NPCs (other players' NPCs)
+    for (const [key, rnpc] of Object.entries(scene._remoteNPCSprites || {})) {
+      if (rnpc.isDead?.()) continue;
+      const dist = Phaser.Math.Distance.Between(this.x, this.y, rnpc.x, rnpc.y);
+      if (dist > REACT_RANGE) continue;
+
+      const relKey = `npc:${rnpc.npcId}`;
+      const reaction = this.getEmotionReaction(relKey);
       if (reaction && dist < bestDist) {
         best = reaction;
         bestDist = dist;
@@ -518,6 +751,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
         memories: (data.soul.memories && typeof data.soul.memories === 'object' && !Array.isArray(data.soul.memories))
           ? data.soul.memories
           : this.soul.memories,
+        learned_phrases: data.soul.learned_phrases ?? this.soul.learned_phrases ?? [],
       };
       // Migrate old flat memories array to { global: [...] }
       if (Array.isArray(data.soul.memories)) {
@@ -542,6 +776,17 @@ export class NPC extends Phaser.GameObjects.Sprite {
 
   update(delta) {
     if (this._dead) return;
+    if (this._knockedOut) {
+      this._nameLabel?.setPosition(this.x, this.y - TILE_SIZE - 8);
+      this._hpBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
+      this._hpBar?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
+      this._ring?.setPosition(this.x, this.y - 4);
+      this._ringPulse?.setPosition(this.x, this.y - 4);
+      this._hpBar?.setVisible(true);
+      this._hpBarBg?.setVisible(true);
+      this._hpBar?.setDisplaySize(0, 4);
+      return;
+    }
 
     // Keep maxLogs in sync with level
     this.maxLogs = this._calcMaxLogs();
@@ -692,6 +937,11 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._nameLabel?.setPosition(this.x, this.y - TILE_SIZE - 10);
     this._bubble?.setPosition(this.x, this.y - TILE_SIZE - 22);
     this._ring?.setPosition(this.x, this.y - 6);
+    this._ringPulse?.setPosition(this.x, this.y - 6);
+    if (this._ringPulse?.visible) {
+      const pulse = 28 + Math.sin(this.scene.time.now / 140) * 3;
+      this._ringPulse.setRadius(pulse);
+    }
     this._hpBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
     this._hpBar?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
 
@@ -743,6 +993,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._nameLabel?.destroy();
     this._bubble?.destroy();
     this._ring?.destroy();
+    this._ringPulse?.destroy();
     this._hpBar?.destroy();
     this._hpBarBg?.destroy();
     super.destroy(fromScene);
@@ -818,5 +1069,118 @@ function _makeSoul(personalityType) {
       default: _makeRelationship(),
     },
     memories: {},  // keyed by playerId or 'global'
+    learned_phrases: [], // phrases picked up from owner's speech
   };
+}
+
+/**
+ * Extract notable phrases from player speech that NPCs should learn.
+ * Catches nicknames for NPCs/players, insults, exclamations, pet names,
+ * and distinctive multi-word expressions.
+ * Returns an array of phrase strings (may be empty).
+ */
+// Words/patterns that suggest an insult
+const INSULT_WORDS = /\b(dumb|stupid|ugly|idiot|fool|loser|trash|junk|garbage|worthless|pathetic|lame|weak|scrap|rust|clank|stink|suck|useless|moron|crap|busted|broke|wack|whack|sorry|sad|slow|fat|skinny|smelly|dirty|nasty|gross|freak|creep|nerd|noob|scrub)\b/i;
+// Words/patterns that suggest friendliness
+const FRIENDLY_WORDS = /\b(buddy|pal|friend|homie|bro|fam|champ|chief|boss|king|queen|legend|hero|star|ace|gem|sweetheart|darling|love|dear|cutie|sunshine|beautiful|awesome|cool|amazing|great|good|best|fave|favorite)\b/i;
+
+/**
+ * Classify tone of a phrase: 'insult', 'friendly', or 'neutral'.
+ */
+function classifyTone(phrase) {
+  if (INSULT_WORDS.test(phrase)) return 'insult';
+  if (FRIENDLY_WORDS.test(phrase)) return 'friendly';
+  return 'neutral';
+}
+
+export function extractLearnablePhrases(text, knownNames = new Set()) {
+  if (!text || text.length < 3) return [];
+  const phrases = []; // { phrase, usage, tone }
+
+  // Helper: strip known entity names from a phrase, e.g. "pap you ladyboy" → "ladyboy"
+  const stripNames = (str) => {
+    const words = str.split(/\s+/).filter(w => !knownNames.has(w.toLowerCase()));
+    return words.join(' ').trim();
+  };
+
+  // Pattern 1: Quoted phrases — "dumb clanker", 'tin can', etc.
+  const quoted = text.match(/["']([^"']{3,30})["']/g);
+  if (quoted) {
+    for (const q of quoted) {
+      const p = q.replace(/["']/g, '').trim();
+      phrases.push({ phrase: p, usage: 'catchphrase', tone: classifyTone(p) });
+    }
+  }
+
+  // Pattern 2: Nicknames/insults — "you <word>" or "you <adj> <noun>" patterns
+  const nickRe = /\byou\s+([\w-]+(?:\s+[\w-]+){0,2})\b/gi;
+  let m;
+  const boringAfterYou = /^(can|will|should|go|are|were|have|need|want|do|did|know|think|see|look|get|got|come|said|say|just|too|also|really|don|t|re|ll|ve|the|a|an|my|his|her|ok|okay)\b/i;
+  while ((m = nickRe.exec(text)) !== null) {
+    const candidate = m[1].trim();
+    if (!boringAfterYou.test(candidate) && candidate.length >= 3) {
+      phrases.push({ phrase: candidate, usage: 'calling_others', tone: classifyTone(candidate) });
+    }
+  }
+
+  // Pattern 3: Exclamatory expressions — "what a <phrase>!", "<word> <word>!"
+  const exclRe = /\b([\w-]+(?:\s+[\w-]+){1,3})!/g;
+  while ((m = exclRe.exec(text)) !== null) {
+    const candidate = m[1].trim();
+    if (candidate.length >= 4 && !/^(oh no|oh my|come on|let me|hold on|watch out)$/i.test(candidate)) {
+      phrases.push({ phrase: candidate, usage: 'exclamation', tone: classifyTone(candidate) });
+    }
+  }
+
+  // Pattern 4: "call them/him/her/it <phrase>"
+  const callRe = /\bcall\s+(?:them|him|her|it|that)\s+([\w-]+(?:\s+[\w-]+){0,2})/gi;
+  while ((m = callRe.exec(text)) !== null) {
+    const p = m[1].trim();
+    phrases.push({ phrase: p, usage: 'calling_others', tone: classifyTone(p) });
+  }
+
+  // Pattern 5: Terms of address — "hey/hi/yo/sup/thanks/listen/look <word>"
+  const addressRe = /\b(?:hey|hi|yo|sup|thanks|thankyou|listen|look|bye|later|welcome|whats\s?up|oi)\s+([\w-]+)\b/gi;
+  while ((m = addressRe.exec(text)) !== null) {
+    const candidate = m[1].trim();
+    // Skip common follow-ups like "hey there", "look out", "hi guys"
+    if (!/^(there|here|man|guys|dude|bro|up|out|at|over|buddy|mate|now|everyone|all)$/i.test(candidate) && candidate.length >= 3) {
+      phrases.push({ phrase: candidate, usage: 'calling_others', tone: classifyTone(candidate) });
+    }
+  }
+
+  // Pattern 6: Word used as name at end of sentence — "..., <word>" or "... <word>." (comma-preceded or sentence-final address)
+  const endAddrRe = /,\s+([\w-]+)\s*[.!?]?\s*$/gim;
+  while ((m = endAddrRe.exec(text)) !== null) {
+    const candidate = m[1].trim();
+    if (!/^(right|ok|okay|please|now|then|too|yeah|sure|thanks|anyway|so|though)$/i.test(candidate) && candidate.length >= 3) {
+      phrases.push({ phrase: candidate, usage: 'calling_others', tone: classifyTone(candidate) });
+    }
+  }
+
+  // Common words that should never be learned as phrases
+  const STOPWORDS = new Set([
+    'the', 'a', 'an', 'is', 'it', 'in', 'on', 'at', 'to', 'for', 'of', 'and',
+    'or', 'but', 'not', 'no', 'yes', 'you', 'your', 'me', 'my', 'we', 'our',
+    'he', 'she', 'his', 'her', 'they', 'them', 'their', 'its', 'was', 'were',
+    'has', 'had', 'have', 'been', 'are', 'did', 'does', 'do', 'will', 'can',
+    'could', 'would', 'should', 'may', 'might', 'shall', 'this', 'that',
+    'what', 'when', 'where', 'who', 'how', 'why', 'which', 'with', 'from',
+    'just', 'like', 'some', 'all', 'any', 'more', 'much', 'many', 'very',
+    'too', 'also', 'than', 'then', 'now', 'here', 'there', 'out', 'about',
+    'up', 'down', 'off', 'over', 'into', 'only', 'own', 'same', 'so',
+    'got', 'get', 'go', 'going', 'gone', 'come', 'back', 'one', 'two',
+    'thing', 'things', 'way', 'well', 'even', 'still', 'new', 'old',
+  ]);
+
+  // Strip known entity names from phrases, dedupe, filter stopwords
+  const seen = new Set();
+  return phrases
+    .map(p => ({ ...p, phrase: stripNames(p.phrase) }))
+    .filter(p => {
+      const key = p.phrase.toLowerCase();
+      if (!p.phrase || seen.has(key) || key.length < 3 || STOPWORDS.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
