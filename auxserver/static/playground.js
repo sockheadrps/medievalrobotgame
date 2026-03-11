@@ -913,7 +913,7 @@ You have ${logsB} logs. ${nameA} has 3 logs.`;
     addTraceResult(lineA, mA);
     const cleanA = lineA.replace(/^["']|["']$/g, '');
     lines.push({ speaker: nameA, line: cleanA });
-    addChat('npc', `${nameA}: ${cleanA}`);
+    addChat('npc', `${nameA}: ${cleanA}`, { label: nameA });
 
     // Line 2: B responds
     const sysB = prompts.npc_chat + '\n\n' + contextB;
@@ -923,7 +923,7 @@ You have ${logsB} logs. ${nameA} has 3 logs.`;
     addTraceResult(lineB, mB);
     const cleanB = lineB.replace(/^["']|["']$/g, '');
     lines.push({ speaker: nameB, line: cleanB });
-    addChat('npc', `${nameB}: ${cleanB}`);
+    addChat('npc', `${nameB}: ${cleanB}`, { label: nameB });
 
     // Line 3: 50% chance A replies
     if (Math.random() > 0.5) {
@@ -933,7 +933,7 @@ You have ${logsB} logs. ${nameA} has 3 logs.`;
       addTraceResult(lineA2, mA2);
       const cleanA2 = lineA2.replace(/^["']|["']$/g, '');
       lines.push({ speaker: nameA, line: cleanA2 });
-      addChat('npc', `${nameA}: ${cleanA2}`);
+      addChat('npc', `${nameA}: ${cleanA2}`, { label: nameA });
     }
 
     // Evaluate impact
@@ -1006,15 +1006,15 @@ function fmtDelta(v) {
 }
 
 // ── UI: Chat log ──────────────────────────────────────────────────────────────
-function addChat(type, text) {
+function addChat(type, text, opts) {
   const log = $('chatLog');
   const div = document.createElement('div');
   div.className = `chat-msg ${type}`;
 
   if (type === 'player') {
-    div.innerHTML = `<div class="label player-label">Player</div>${esc(text)}`;
+    div.innerHTML = `<div class="label player-label">${esc(opts?.label || 'Player')}</div>${esc(text)}`;
   } else if (type === 'npc') {
-    div.innerHTML = `<div class="label npc-label">${esc(state.npcName)}</div>${esc(text)}`;
+    div.innerHTML = `<div class="label npc-label">${esc(opts?.label || state.npcName)}</div>${esc(text)}`;
   } else if (type === 'error') {
     div.innerHTML = esc(text);
   } else {

@@ -69,14 +69,22 @@ function npcNames() { return Object.keys(world.npcs); }
 function playerIds() { return Object.keys(world.players); }
 
 // ── Dynamic select options helper ────────────────────────────────────────────
-// For params that reference NPCs/players, we populate options dynamically
+// Merge live world registry with declared spawn nodes so dropdowns work before execution
 function getNpcOptions() {
-  const names = npcNames();
+  const set = new Set(npcNames());
+  for (const n of nodes) {
+    if (n.type === 'spawn_npc' && n.params.name) set.add(n.params.name);
+  }
+  const names = [...set];
   return names.length > 0 ? names : ['(none)'];
 }
 
 function getPlayerOptions() {
-  const ids = playerIds();
+  const set = new Set(playerIds());
+  for (const n of nodes) {
+    if (n.type === 'spawn_player' && n.params.playerId) set.add(n.params.playerId);
+  }
+  const ids = [...set];
   return ids.length > 0 ? ids : ['(none)'];
 }
 
@@ -448,17 +456,26 @@ function renderDetail(node) {
 
     if (p.type === 'npc_select' || p.type === 'npc_select_optional') {
       const opts = getNpcOptions();
+      // Auto-assign first real option if param is empty
+      if (!val && p.type === 'npc_select' && opts.length > 0 && opts[0] !== '(none)') {
+        node.params[p.key] = opts[0];
+      }
+      const curVal = node.params[p.key] || '';
       html += `<select data-key="${p.key}">`;
       if (p.type === 'npc_select_optional') html += `<option value="">(all)</option>`;
       for (const opt of opts) {
-        html += `<option value="${opt}" ${val === opt ? 'selected' : ''}>${opt}</option>`;
+        html += `<option value="${opt}" ${curVal === opt ? 'selected' : ''}>${opt}</option>`;
       }
       html += '</select>';
     } else if (p.type === 'player_select') {
       const opts = getPlayerOptions();
+      if (!val && opts.length > 0 && opts[0] !== '(none)') {
+        node.params[p.key] = opts[0];
+      }
+      const curVal = node.params[p.key] || '';
       html += `<select data-key="${p.key}">`;
       for (const opt of opts) {
-        html += `<option value="${opt}" ${val === opt ? 'selected' : ''}>${opt}</option>`;
+        html += `<option value="${opt}" ${curVal === opt ? 'selected' : ''}>${opt}</option>`;
       }
       html += '</select>';
     } else if (p.type === 'select') {
