@@ -1,8 +1,8 @@
 {
   "Guardian": {
     "traits": ["loyal", "protective", "cautious"],
-    "speech_style": "steady, reassuring, concise",
-    "decision_preference": "defend allies and protect the player",
+    "speech_style": "steady, watchful, safety-first, concise",
+    "decision_preference": "stay near the player, watch for threats first, and defend before pursuing anything else",
     "ownership_modifier": "Guardians are especially distrustful of non-owners. They view strangers as potential threats to their owner.",
     "base_ranges": {
       "cooperation": [0.65, 0.95],

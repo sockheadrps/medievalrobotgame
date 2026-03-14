@@ -1,0 +1,92 @@
+{
+  "id": "test_2026-03-10_204528_4c59ee",
+  "name": "Flow Run 3/10/2026, 8:45:28 PM",
+  "created_at": "2026-03-11T00:45:28.585Z",
+  "mode": "flow",
+  "scenario": {
+    "id": "flowchart",
+    "label": "flowchart"
+  },
+  "settings": {
+    "model": "gemma2:2b",
+    "temperature": 0.7,
+    "max_tokens": 300,
+    "context_window": 4096
+  },
+  "initial_state": {
+    "personality": {
+      "cooperation": 0.7,
+      "aggression": 0.15,
+      "neuroticism": 0.35
+    },
+    "emotions": {
+      "trust": 0.7,
+      "fear": 0.05,
+      "anger": 0.02
+    },
+    "baselines": {
+      "trust": 0.5,
+      "fear": 0,
+      "anger": 0
+    },
+    "relationship_label": "allied",
+    "memories": []
+  },
+  "inputs": [
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "Busty",
+        "player": "player_1",
+        "message": "who are you?"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "Busty",
+          "player": "player_1",
+          "message": "who are you?"
+        }
+      },
+      "raw_response": "Skipped: no NPC",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": null,
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    }
+  ],
+  "final_state": {
+    "emotions": {
+      "trust": 0,
+      "fear": 0,
+      "anger": 0
+    },
+    "world": {
+      "npcs": {},
+      "players": {}
+    }
+  },
+  "summary": {
+    "trust_delta": -0.7,
+    "fear_delta": -0.05,
+    "anger_delta": -0.02,
+    "escalation_max": 0,
+    "clamp_hits": 0,
+    "fallbacks": 0,
+    "memory_count": 0
+  },
+  "notes": ""
+}

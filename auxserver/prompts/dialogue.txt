@@ -31,6 +31,12 @@ Nearby entities you can see:
 {{/each}}
 Use this awareness when relevant — if asked who's nearby, what you see, etc. Don't volunteer this info unprompted.
 {{/if}}
+{{#if nearby_threats}}
+Nearby threats you are actively concerned about:
+{{#each nearby_threats}}- {{this.name}} ({{this.type}}, ~{{this.distance}} tiles away)
+{{/each}}
+Acknowledge nearby danger briefly before anything else. Avoid unrelated small talk while a threat is nearby.
+{{/if}}
 {{#if topic_entity}}
 
 If the player is asking about {{topic_entity.name}}:
@@ -43,6 +49,7 @@ If the player is asking about {{topic_entity.name}}:
 Use this information directly if the player asks what you think of them, whether you trust them, or what happened between you.
 {{/if}}
 Keep dialogue concise - 1-3 sentences max. Speak as the NPC directly. Do NOT describe actions in third person.
+{{#if nearby_threats}}If you speak, prioritize a warning, caution, or threat acknowledgment over casual conversation.{{/if}}
 
 Output small emotion deltas based on what the player said:
 - Friendly interaction: trust +0.02, anger -0.01

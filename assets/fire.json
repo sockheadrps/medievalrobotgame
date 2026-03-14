@@ -1,0 +1,31 @@
+{
+  "spriteSheet": "fire.png",
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 384,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 12,
+    "rows": 1
+  },
+  "totalFrames": 12,
+  "namedFrames": {
+    "0": "fire_01",
+    "1": "fire_02",
+    "2": "fire_03",
+    "3": "fire_04",
+    "4": "fire_05",
+    "5": "fire_06",
+    "6": "fire_07",
+    "7": "fire_08",
+    "8": "fire_09",
+    "9": "fire_10",
+    "10": "fire_11",
+    "11": "fire_12"
+  }
+}

@@ -42,7 +42,8 @@ def init_db():
             level INTEGER DEFAULT 1,
             xp INTEGER DEFAULT 0,
             logs INTEGER DEFAULT 0,
-            npc_ids TEXT DEFAULT '[]'
+            npc_ids TEXT DEFAULT '[]',
+            state_json TEXT DEFAULT '{}'
         );
 
         CREATE TABLE IF NOT EXISTS npcs (
@@ -88,6 +89,24 @@ def init_db():
             max_hp INTEGER,
             dead INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS ki_targets (
+            id TEXT PRIMARY KEY,
+            x REAL,
+            y REAL,
+            hp INTEGER,
+            max_hp INTEGER,
+            owner TEXT,
+            dead INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS anvils (
+            id TEXT PRIMARY KEY,
+            x REAL,
+            y REAL,
+            owner TEXT,
+            dead INTEGER DEFAULT 0
+        );
     """)
     conn.commit()
 
@@ -104,6 +123,11 @@ def init_db():
         pass  # column already exists
     try:
         conn.execute("ALTER TABLE players ADD COLUMN llm_model TEXT DEFAULT ''")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    try:
+        conn.execute("ALTER TABLE players ADD COLUMN state_json TEXT DEFAULT '{}'")
         conn.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
@@ -157,20 +181,46 @@ def player_exists(username: str) -> bool:
 def save_player(username: str, data: dict):
     conn = _get_conn()
     npc_ids = json.dumps(data.get("npc_ids", []))
+    state_json = json.dumps({
+        "ki": data.get("ki", 20),
+        "maxKi": data.get("maxKi", 20),
+        "inf_ki": data.get("inf_ki", False),
+        "blastLevel": data.get("blastLevel", 0),
+        "kiSkillLevel": data.get("kiSkillLevel", 1),
+        "kiSkillXp": data.get("kiSkillXp", 0),
+        "realm_tier": data.get("realm_tier", 0),
+        "realm_insight": data.get("realm_insight", 0),
+        "realm_crystal_t1": data.get("realm_crystal_t1", 0),
+        "ki_upgrades": data.get("ki_upgrades", {}),
+        "stones": data.get("stones", 0),
+        "bastalite": data.get("bastalite", 0),
+        "crystal_pristine": data.get("crystal_pristine", 0),
+        "crystal_normal": data.get("crystal_normal", 0),
+        "crystal_poor": data.get("crystal_poor", 0),
+        "armor_elite": data.get("armor_elite", False),
+        "armor_elite_inv": data.get("armor_elite_inv", False),
+        "ki_moves": data.get("ki_moves", []),
+        "ki_denominations": data.get("ki_denominations", []),
+        "ki_known_augments": data.get("ki_known_augments", {}),
+        "ki_equipped_augments": data.get("ki_equipped_augments", {}),
+        "aura_tint": data.get("aura_tint", 0x4fd6ff),
+        "aura_alpha": data.get("aura_alpha", 0.42),
+    })
     conn.execute("""
-        INSERT INTO players (username, x, y, hp, max_hp, str, def, level, xp, logs, npc_ids)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO players (username, x, y, hp, max_hp, str, def, level, xp, logs, npc_ids, state_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(username) DO UPDATE SET
             x=excluded.x, y=excluded.y, hp=excluded.hp, max_hp=excluded.max_hp,
             str=excluded.str, def=excluded.def, level=excluded.level,
-            xp=excluded.xp, logs=excluded.logs, npc_ids=excluded.npc_ids
+            xp=excluded.xp, logs=excluded.logs, npc_ids=excluded.npc_ids,
+            state_json=excluded.state_json
     """, (
         username,
         data.get("x", 480), data.get("y", 480),
         data.get("hp", 20), data.get("maxHp", 20),
         data.get("str", 1), data.get("def", 1),
         data.get("level", 1), data.get("xp", 0),
-        data.get("logs", 0), npc_ids,
+        data.get("logs", 0), npc_ids, state_json,
     ))
     conn.commit()
 
@@ -180,6 +230,11 @@ def load_player(username: str) -> dict | None:
     row = conn.execute("SELECT * FROM players WHERE username = ?", (username,)).fetchone()
     if not row:
         return None
+    extra = {}
+    try:
+        extra = json.loads(row["state_json"]) if "state_json" in row.keys() and row["state_json"] else {}
+    except Exception:
+        extra = {}
     return {
         "username": row["username"],
         "chat_color": row["chat_color"] if "chat_color" in row.keys() else "#cccccc",
@@ -190,6 +245,29 @@ def load_player(username: str) -> dict | None:
         "level": row["level"], "xp": row["xp"],
         "logs": row["logs"],
         "npc_ids": json.loads(row["npc_ids"]),
+        "ki": extra.get("ki", 20),
+        "maxKi": extra.get("maxKi", 20),
+        "inf_ki": extra.get("inf_ki", False),
+        "blastLevel": extra.get("blastLevel", 0),
+        "kiSkillLevel": extra.get("kiSkillLevel", 1),
+        "kiSkillXp": extra.get("kiSkillXp", 0),
+        "realm_tier": extra.get("realm_tier", 0),
+        "realm_insight": extra.get("realm_insight", 0),
+        "realm_crystal_t1": extra.get("realm_crystal_t1", 0),
+        "ki_upgrades": extra.get("ki_upgrades", {}),
+        "stones": extra.get("stones", 0),
+        "bastalite": extra.get("bastalite", 0),
+        "crystal_pristine": extra.get("crystal_pristine", 0),
+        "crystal_normal": extra.get("crystal_normal", 0),
+        "crystal_poor": extra.get("crystal_poor", 0),
+        "armor_elite": extra.get("armor_elite", False),
+        "armor_elite_inv": extra.get("armor_elite_inv", False),
+        "ki_moves": extra.get("ki_moves", []),
+        "ki_denominations": extra.get("ki_denominations", []),
+        "ki_known_augments": extra.get("ki_known_augments", {}),
+        "ki_equipped_augments": extra.get("ki_equipped_augments", {}),
+        "aura_tint": extra.get("aura_tint", 0x4fd6ff),
+        "aura_alpha": extra.get("aura_alpha", 0.42),
     }
 
 
@@ -349,6 +427,58 @@ def load_dummies() -> dict:
             "id": r["id"], "x": r["x"], "y": r["y"],
             "hp": r["hp"], "maxHp": r["max_hp"],
             "dead": False, "last_hit_by": {},
+        }
+    return result
+
+
+def save_ki_targets(ki_targets: dict):
+    conn = _get_conn()
+    conn.execute("DELETE FROM ki_targets")
+    for t in ki_targets.values():
+        if t.get("dead"):
+            continue
+        conn.execute("""
+            INSERT INTO ki_targets (id, x, y, hp, max_hp, owner, dead)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (t["id"], t["x"], t["y"], t["hp"], t["maxHp"],
+              t.get("owner", ""), 0))
+    conn.commit()
+
+
+def load_ki_targets() -> dict:
+    conn = _get_conn()
+    rows = conn.execute("SELECT * FROM ki_targets WHERE dead = 0").fetchall()
+    result = {}
+    for r in rows:
+        result[r["id"]] = {
+            "id": r["id"], "x": r["x"], "y": r["y"],
+            "hp": r["hp"], "maxHp": r["max_hp"],
+            "owner": r["owner"], "dead": False,
+        }
+    return result
+
+
+def save_anvils(anvils: dict):
+    conn = _get_conn()
+    conn.execute("DELETE FROM anvils")
+    for a in anvils.values():
+        if a.get("dead"):
+            continue
+        conn.execute("""
+            INSERT INTO anvils (id, x, y, owner, dead)
+            VALUES (?, ?, ?, ?, ?)
+        """, (a["id"], a["x"], a["y"], a.get("owner", ""), 0))
+    conn.commit()
+
+
+def load_anvils() -> dict:
+    conn = _get_conn()
+    rows = conn.execute("SELECT * FROM anvils WHERE dead = 0").fetchall()
+    result = {}
+    for r in rows:
+        result[r["id"]] = {
+            "id": r["id"], "x": r["x"], "y": r["y"],
+            "owner": r["owner"], "dead": False,
         }
     return result
 

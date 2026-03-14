@@ -33,8 +33,8 @@ export async function fetchModels() {
 const PERSONALITY_TYPES = {
   Guardian: {
     traits: ['loyal', 'protective', 'cautious'],
-    speech_style: 'steady, reassuring, concise',
-    decision_preference: 'defend allies and protect the player',
+    speech_style: 'steady, watchful, safety-first, concise',
+    decision_preference: 'stay near the player, watch for threats first, and defend before pursuing anything else',
     ownership_modifier: 'Guardians are especially distrustful of non-owners. They view strangers as potential threats to their owner.',
   },
   Scout: {
@@ -110,10 +110,10 @@ Available: [{"task": "follow"}], [{"task": "idle"}]`,
   idle: `Output ONLY: [{"task": "idle"}]`,
 
   build: `Convert the player's build instruction into a JSON task list. Output ONLY a JSON array.
-Available: [{"task": "build_fence"}]`,
+  Available: [{"task": "build_fence"}]`,
 
   fallback: `Convert player instructions into a JSON task list. Output ONLY a JSON array.
-Available tasks: gather, follow, attack_nearest_enemy, defend_player, train, give_logs, build_fence, idle`,
+Available tasks: gather, follow, attack_nearest_enemy, defend_player, train, give_logs, build_fence, light_campfire, guard_fire, idle`,
 };
 
 // ── Prompt builders ─────────────────────────────────────────────────────────
@@ -124,6 +124,7 @@ function _buildDialoguePrompt(soul, speakingPlayer, owner) {
   const e = soul.emotional_state || {};
   const typeInfo = _getTypeInfo(p.type);
   const isOwner = speakingPlayer && owner && speakingPlayer === owner;
+  const nearbyThreats = Array.isArray(soul.nearby_threats) ? soul.nearby_threats : [];
 
   let prompt = `You are ${name}, a robot in a medieval-themed game. You were built from logs by your owner.\n`;
 
@@ -171,6 +172,13 @@ function _buildDialoguePrompt(soul, speakingPlayer, owner) {
     }
     prompt += "Use this awareness when relevant — if asked who's nearby, what you see, etc. Don't volunteer this info unprompted.\n";
   }
+  if (nearbyThreats.length > 0) {
+    prompt += '\nNearby threats you are actively concerned about:\n';
+    for (const ent of nearbyThreats) {
+      prompt += `- ${ent.name} (${ent.type}, ~${ent.distance} tiles away)\n`;
+    }
+    prompt += 'Acknowledge nearby danger briefly before anything else. Avoid unrelated small talk while a threat is nearby.\n';
+  }
 
   // Topic entity — the player is talking ABOUT someone, not TO you
   const topic = soul.topic_entity;
@@ -187,6 +195,9 @@ function _buildDialoguePrompt(soul, speakingPlayer, owner) {
   }
 
   prompt += 'Keep dialogue concise - 1-3 sentences max. Speak as the NPC directly. Do NOT describe actions in third person.\n';
+  if (nearbyThreats.length > 0) {
+    prompt += 'If you speak, prioritize a warning, caution, or threat acknowledgment over casual conversation.\n';
+  }
 
   // Emotion delta guidance
   prompt += `\nOutput small emotion deltas based on what the player said:\n- Friendly interaction: trust +0.02, anger -0.01\n- Rude/dismissive: trust -0.03, anger +0.03\n- Threats: trust -0.08, fear +0.06, anger +0.04\n- Neutral: keep deltas near 0\n`;
@@ -216,6 +227,9 @@ function _buildDecisionPrompt(statePacket) {
   const p = npc.personality || {};
   const typeInfo = _getTypeInfo(p.type);
   const phrases = statePacket.learned_phrases || [];
+  const allowedActions = Array.isArray(statePacket.allowed_actions) ? statePacket.allowed_actions : [];
+  const nearbyThreats = Array.isArray(statePacket.nearby_threats) ? statePacket.nearby_threats : [];
+  const hasThreats = nearbyThreats.length > 0;
 
   let prompt = `You are the decision layer for an NPC teammate in an online multiplayer game.
 
@@ -231,8 +245,19 @@ Your job is to decide the NPC's immediate social and tactical intent based on:
     prompt += `\nNPC Type: ${p.type}\nBehavioral tendency: ${typeInfo.decision_preference}\nIf multiple actions are equally reasonable, prefer actions consistent with this type.\n`;
   }
 
+  if (allowedActions.length > 0) {
+    prompt += `\nAllowed actions for this decision: ${allowedActions.join(', ')}\n`;
+  }
+  if (hasThreats) {
+    prompt += '\nNearby threats in state:\n';
+    for (const threat of nearbyThreats) {
+      prompt += `- ${threat.name} (${threat.type}, ${threat.distance} tiles away)\n`;
+    }
+  }
+
   prompt += `\nYou are NOT the game engine.
 Do not invent actions outside the allowed_actions list.
+Do not invent commands, goals, memories, or world facts that are not present in the provided state.
 Do not narrate impossible world changes.
 Do not decide exact movement paths, damage, cooldown use, or any final authoritative game outcome.
 
@@ -248,6 +273,10 @@ Behavior rules:
   prompt += `
 - Only speak when it adds value: new command, combat starts, danger warning, or important emotional beat.
 - Prefer cooperation over aggression unless immediate danger requires force.
+- Treat secondary_intent as optional support for the primary action, never as a second independent goal.
+- If a nearby threat exists and primary_intent is not retreat or defend_player, secondary_intent must be null.
+- If a nearby threat exists, secondary_intent must never be gather_wood.
+- When danger is present, prioritize retreat, defend_player, observe, hold_position, reposition, or another directly threat-aware primary action over routine work.
 - Do NOT attack other NPCs unless: (a) the player explicitly commanded you to attack, or (b) another NPC attacked you first (self-defense). High aggression personality does NOT mean auto-attack on sight.
 - If your current command is "follow" or "gather", do NOT switch to attack_npc just because a rival is nearby. Stay on task.
 - Return valid JSON only. No markdown. No explanation outside the JSON object.
@@ -266,10 +295,11 @@ NPC-to-NPC social interactions:
 
 When choosing an action:
 - Pick one primary_intent from the allowed_actions list.
-- Optionally pick one secondary_intent.
+- Optionally pick one secondary_intent only if it directly supports the primary intent.
 - Choose a target_id only if relevant (must match an entity from nearby_entities).
 - Provide a very short reason_summary.
 - Suggest at most one short spoken line (or null).
+- If nearby threats exist and you include speech, briefly acknowledge the danger instead of making unrelated small talk.
 - Suggest memory updates only if they are genuinely meaningful.
 - Rate your decision_confidence from 0.0 to 1.0.
 `;
@@ -366,7 +396,7 @@ Respond ONLY with JSON (no markdown):
 // ── Valid tasks for validation ──────────────────────────────────────────────
 
 const VALID_CATEGORIES = new Set(['gather', 'combat', 'follow', 'idle', 'build', 'chat']);
-const VALID_TASKS = new Set(['gather', 'follow', 'idle', 'attack_nearest_enemy', 'attack_player', 'attack_npc', 'defend_player', 'train', 'give_logs', 'build_fence']);
+const VALID_TASKS = new Set(['gather', 'follow', 'idle', 'attack_nearest_enemy', 'attack_player', 'attack_npc', 'defend_player', 'train', 'give_logs', 'build_fence', 'light_campfire', 'guard_fire']);
 
 // ── JSON extraction helpers ─────────────────────────────────────────────────
 
@@ -570,7 +600,28 @@ export async function generateDecision(statePacket) {
   const userMessage = 'Decide the NPC\'s next high-level action for the next 2 to 5 seconds.\nReturn JSON only.\n\nState:\n' + JSON.stringify(statePacket);
 
   const raw = await _call(systemPrompt, userMessage, { temperature: 0.4, maxTokens: 1024 });
-  return extractJSON(raw) || null;
+  return _sanitizeDecision(extractJSON(raw), statePacket);
+}
+
+function _sanitizeDecision(raw, statePacket) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = { ...raw };
+  const allowed = new Set(Array.isArray(statePacket?.allowed_actions) ? statePacket.allowed_actions : []);
+  const hasThreats = Array.isArray(statePacket?.nearby_threats) && statePacket.nearby_threats.length > 0;
+
+  if (typeof out.primary_intent !== 'string' || (allowed.size > 0 && !allowed.has(out.primary_intent))) {
+    out.primary_intent = allowed.has('follow') ? 'follow' : (statePacket?.allowed_actions?.[0] ?? 'follow');
+  }
+  if (typeof out.secondary_intent !== 'string' || (allowed.size > 0 && !allowed.has(out.secondary_intent))) {
+    out.secondary_intent = null;
+  }
+  if (hasThreats) {
+    if (out.secondary_intent === 'gather_wood') out.secondary_intent = null;
+    if (!['retreat', 'defend_player'].includes(out.primary_intent)) {
+      out.secondary_intent = null;
+    }
+  }
+  return out;
 }
 
 /**

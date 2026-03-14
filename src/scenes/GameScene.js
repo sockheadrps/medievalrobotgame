@@ -3,18 +3,27 @@ import { buildTilemap, buildTilemapFromData } from '../systems/TilemapBuilder.js
 import { Player }       from '../entities/Player.js';
 import { RemotePlayer } from '../entities/RemotePlayer.js';
 import { Tree }         from '../entities/Tree.js';
+import { Rock }         from '../entities/Rock.js';
 import { GridSystem }   from '../systems/GridSystem.js';
 import { GroundItem }   from '../entities/GroundItem.js';
 import { NPC }          from '../entities/NPC.js';
 import { ChatBox }      from '../ui/ChatBox.js';
 import { NPCTaskRunner } from '../systems/NPCTaskRunner.js';
 import { NPCBrain }      from '../systems/NPCBrain.js';
+import { CombatFxController } from '../systems/CombatFxController.js';
+import { StateSyncController } from '../systems/StateSyncController.js';
+import { SelectionController } from '../systems/SelectionController.js';
+import { WorldSyncController } from '../systems/WorldSyncController.js';
+import { DialogueController } from '../systems/DialogueController.js';
 import { TrainingDummy } from '../entities/TrainingDummy.js';
 import { RemoteNPC }    from '../entities/RemoteNPC.js';
 import { Fence }        from '../entities/Fence.js';
 import { Connection }   from '../net/Connection.js';
-import { generateDialogue } from '../net/LLMClient.js';
 import { NPCDetailPanel } from '../ui/NPCDetailPanel.js';
+import { PlayerDetailPanel } from '../ui/PlayerDetailPanel.js';
+import { HudController } from '../ui/HudController.js';
+import { AdminPanelController } from '../ui/AdminPanelController.js';
+import { InventoryController } from '../ui/InventoryController.js';
 import {
   TILE_SIZE, MAP_COLS, MAP_ROWS,
   SHEET_KEY, SHEET_PATH, SHEET_TILE, SHEET_SPACING,
@@ -22,7 +31,17 @@ import {
   NPC_KEY, NPC_PATH, NPC_FRAME_W, NPC_FRAME_H,
   INTERACT_DIST, tilePos,
   LOG1_KEY, LOG1_PATH, LOG2_KEY, LOG2_PATH, LOG3_KEY, LOG3_PATH,
+  FIRE_KEY, FIRE_PATH, FIRE_JSON_PATH, FIRE_FRAME_W, FIRE_FRAME_H, CRATER_KEY, CRATER_PATH,
+  ARMOR_ELITE_KEY, ARMOR_ELITE_PATH, ARMOR_ELITE_META_KEY, ARMOR_ELITE_META_PATH,
+  ARMOR_ELITE_FRAME_W, ARMOR_ELITE_FRAME_H,
+  AURA_KEY, AURA_PATH, AURA_FRAME_W, AURA_FRAME_H, BARRIER_KEY, BARRIER_PATH, BARRIER_FRAME_W, BARRIER_FRAME_H,
   FRAME_FENCE_T1, FRAME_FENCE_T2, FRAME_FENCE_T3, FRAME_GATE,
+  FRAME_ROCK, FRAME_ANVIL, FRAME_CRYSTAL,
+  NRG_KEY, NRG_PATH, NRG_FRAME_W, NRG_FRAME_H,
+  KI_MAX_BASE, KI_REGEN_MS, KI_BLAST_BASE_COST, KI_BLAST_BASE_DMG, KI_BLAST_SCALE,
+  CHARGE_STR_BONUS, CHARGE_DEF_BONUS,
+  KI_SKILL_MEDITATE_UNLOCK_LEVEL, MEDITATION_POOR_MS, MEDITATION_NORMAL_MS, MEDITATION_PRISTINE_MS,
+  worldToTile,
 } from '../constants.js';
 
 const DUMMY_KEY  = 'trainingdummy';
@@ -34,6 +53,11 @@ const PLAYER_FRAME_SCALE = 0.7;
 const TARGET_FRAME_RELATIVE_TO_PLAYER = 1.2;
 const TOP_HUD_MARGIN = Math.round(190 * HUD_SCALE);
 const RIGHT_HUD_MARGIN = 360;
+const HOTBAR_SLOT_COUNT = 6;
+const KI_TIER_MOVES = [
+  { tier: 1, moves: [{ id: 'ki_shot', label: 'Ki Shot' }, { id: 'charge', label: 'Charge' }, { id: 'sense_ki', label: 'Sense Ki' }] },
+  { tier: 2, moves: [{ id: 'barrier', label: 'Barrier' }] },
+];
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -62,6 +86,29 @@ export default class GameScene extends Phaser.Scene {
     this.load.image(LOG1_KEY, LOG1_PATH);
     this.load.image(LOG2_KEY, LOG2_PATH);
     this.load.image(LOG3_KEY, LOG3_PATH);
+    this.load.image(CRATER_KEY, CRATER_PATH);
+    this.load.json(`${FIRE_KEY}_meta`, FIRE_JSON_PATH);
+    this.load.spritesheet(FIRE_KEY, FIRE_PATH, {
+      frameWidth: FIRE_FRAME_W,
+      frameHeight: FIRE_FRAME_H,
+    });
+    this.load.json(ARMOR_ELITE_META_KEY, ARMOR_ELITE_META_PATH);
+    this.load.spritesheet(ARMOR_ELITE_KEY, ARMOR_ELITE_PATH, {
+      frameWidth: ARMOR_ELITE_FRAME_W,
+      frameHeight: ARMOR_ELITE_FRAME_H,
+    });
+    this.load.spritesheet(NRG_KEY, NRG_PATH, {
+      frameWidth: NRG_FRAME_W,
+      frameHeight: NRG_FRAME_H,
+    });
+    this.load.spritesheet(AURA_KEY, AURA_PATH, {
+      frameWidth: AURA_FRAME_W,
+      frameHeight: AURA_FRAME_H,
+    });
+    this.load.spritesheet(BARRIER_KEY, BARRIER_PATH, {
+      frameWidth: BARRIER_FRAME_W,
+      frameHeight: BARRIER_FRAME_H,
+    });
   }
 
   init(data) {
@@ -75,6 +122,8 @@ export default class GameScene extends Phaser.Scene {
     this.groundItems = [];
     this.npcs        = [];
     this.dummies     = [];
+    this._rockSprites = {}; // rock_id -> Rock entity
+    this._kiBlastCraters = new Map(); // "col,row" -> crater sprite
     this.selectedNPC = null;
     this._focusedRemote = null;  // selected remote entity for chat/inspect
     this._armedAction = null;    // explicit click-to-act mode, e.g. attack
@@ -83,6 +132,22 @@ export default class GameScene extends Phaser.Scene {
     this._contextMenuBounds = null;
     this._overhearInterjectCooldowns = {};
     this._remotePlayers = {};
+    this._activeMeditationRealmActorKey = null;
+    this._suppressMeditationRealmActorKey = null;
+    this._sensePanelTab = 'others';
+    this._sensePanelElements = [];
+    this._sensePanelRows = [];
+    this._sensePanelActionEls = [];
+    this._sensePanelActionPinnedUntil = 0;
+    this._sensePanelNextRefreshAt = 0;
+    this._combatFx = new CombatFxController(this);
+    this._stateSync = new StateSyncController(this);
+    this._selection = new SelectionController(this);
+    this._hud = new HudController(this);
+    this._worldSync = new WorldSyncController(this);
+    this._adminUi = new AdminPanelController(this);
+    this._inventoryUi = new InventoryController(this);
+    this._dialogue = new DialogueController(this);
 
     // Map dimensions — updated after map loads
     this._mapCols = MAP_COLS;
@@ -108,6 +173,16 @@ export default class GameScene extends Phaser.Scene {
 
     // Track fence/gate visuals by server ID
     this._fenceSprites = {};
+
+    // Recent threats — entities that attacked our player or NPCs (key → timestamp)
+    // key format: 'player:id' or 'npc:ownerPid_npcId'
+    this._recentThreats = {};
+
+    // Track ki target visuals by server ID
+    this._kiTargetSprites = {};
+
+    // Track anvil visuals by server ID
+    this._anvilSprites = {};
 
     // Camera
     const cam = this.cameras.main;
@@ -164,6 +239,7 @@ export default class GameScene extends Phaser.Scene {
     // ── Target unit frame (top-center, shown when something is selected) ─────
     this._targetFrame = null;
     this._targetFrameElements = [];
+    this._buildSensePanel();
     this._armedStatus = this.addHud(this.add.text(screenW / 2, screenH - 72, '', {
       fontSize: '18px', color: '#ff6666', backgroundColor: '#000000aa',
       padding: { x: 10, y: 6 },
@@ -189,12 +265,11 @@ export default class GameScene extends Phaser.Scene {
     // ── Hotbar (bottom center) ─────────────────────────────────────────────
     this._hotbar = [];     // [{ key, label, icon, action }, ...]
     this._hotbarEls = [];  // Phaser display objects
+    this._hotbarPickerEls = [];
+    this._hotbarPickerSlot = null;
     this._inventoryOpen = false;
     this._inventoryEls = [];
-    this._hotbarItems = [
-      { id: 'log', label: 'Log', frame: 526, action: 'drop_log' },
-      { id: 'gate', label: 'Gate', frame: FRAME_GATE, action: 'place_gate', cost: 10 },
-    ];
+    this._hotbarAssignments = this._loadHotbarAssignments();
     this._buildHotbar();
 
     // Connection status
@@ -209,6 +284,7 @@ export default class GameScene extends Phaser.Scene {
         ptr._fgHandled = false;
         return;
       }
+      if (this._hotbarPickerSlot != null) this._closeHotbarPicker();
       if (this._isPointerOverContextMenu(ptr)) return;
       if (!this._isPointerInWorldViewport(ptr)) {
         if (ptr.rightButtonDown() || ptr.button === 2) this._closeContextMenu();
@@ -249,7 +325,33 @@ export default class GameScene extends Phaser.Scene {
         return;
       }
 
+      // Right-click on dummy or ki target — delete it
       if (isRightClick) {
+        const worldX = ptr.worldX;
+        const worldY = ptr.worldY;
+        const clickRange = TILE_SIZE * 0.8;
+
+        // Check dummies
+        for (const dummy of (this.dummies ?? [])) {
+          if (dummy.isDead?.()) continue;
+          const d = Phaser.Math.Distance.Between(worldX, worldY, dummy.x, dummy.y);
+          if (d < clickRange && dummy._serverId) {
+            this._conn?.send({ type: 'delete_dummy', dummy_id: dummy._serverId });
+            this._closeContextMenu();
+            return;
+          }
+        }
+
+        // Check ki targets
+        for (const [ktid, ktSprite] of Object.entries(this._kiTargetSprites || {})) {
+          const d = Phaser.Math.Distance.Between(worldX, worldY, ktSprite.x, ktSprite.y);
+          if (d < clickRange) {
+            this._conn?.send({ type: 'delete_ki_target', target_id: ktid });
+            this._closeContextMenu();
+            return;
+          }
+        }
+
         this._closeContextMenu();
         return;
       }
@@ -266,6 +368,7 @@ export default class GameScene extends Phaser.Scene {
 
     // Detail panel overlay
     this._npcDetailPanel = new NPCDetailPanel(this);
+    this._playerDetailPanel = new PlayerDetailPanel(this);
 
     // Player ID — set by server on connect
     this.playerId = 'default';
@@ -332,12 +435,22 @@ export default class GameScene extends Phaser.Scene {
       if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
       this._toggleAdmin();
     });
+    this.input.keyboard.on('keydown-LEFT', () => {
+      if (!this._adminOpen) return;
+      this._adminPage = Math.max(1, (this._adminPage || 1) - 1);
+      this._renderAdminPanel();
+    });
+    this.input.keyboard.on('keydown-RIGHT', () => {
+      if (!this._adminOpen) return;
+      this._adminPage = Math.min(2, (this._adminPage || 1) + 1);
+      this._renderAdminPanel();
+    });
 
-    // Number keys — hotbar actions (1-5)
+    // Number keys — hotbar actions (1-6)
     this.input.keyboard.on('keydown', (event) => {
       if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._inventoryOpen || this._playerKnockedOut) return;
       const slot = parseInt(event.key, 10);
-      if (slot >= 1 && slot <= 5) {
+      if (slot >= 1 && slot <= HOTBAR_SLOT_COUNT) {
         this._useHotbarSlot(slot - 1);
       }
     });
@@ -348,11 +461,28 @@ export default class GameScene extends Phaser.Scene {
       this._toggleInventory();
     });
 
+    // Space bar — fire ki blast
+    this.input.keyboard.on('keydown-SPACE', (event) => {
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._inventoryOpen || this._charMenuOpen || this._playerKnockedOut) return;
+      event.preventDefault();
+      this._fireKiBlast();
+    });
+
+    // C key — toggle character menu
+    this._charMenuOpen = false;
+    this._charMenuEls = [];
+    this.input.keyboard.on('keydown-C', () => {
+      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._inventoryOpen || this._playerKnockedOut) return;
+      this._toggleCharMenu();
+    });
+
     // Escape key — toggle pause/menu
     this._escMenuOpen = false;
     this._escMenuEls = null;
     this.input.keyboard.on('keydown-ESC', () => {
       if (this.chatBox?.isOpen() || this._namingNPC) return;
+      if (this._charMenuOpen) { this._closeCharMenu(); return; }
+      if (this._inventoryOpen) { this._closeInventory(); return; }
       if (this._contextMenuEls) { this._closeContextMenu(); return; }
       if (this._armedAction) { this._disarmActionMode(); return; }
       if (this.selectedNPC || this._focusedRemote) { this._clearSelection(); return; }
@@ -390,12 +520,38 @@ export default class GameScene extends Phaser.Scene {
         this.player.x = me.x;
         this.player.y = me.y;
         this.player.logs = me.logs ?? 0;
+        this.player.stones = me.stones ?? 0;
+        this.player.bastalite = me.bastalite ?? 0;
+        this.player.crystalPristine = me.crystal_pristine ?? 0;
+        this.player.crystalNormal = me.crystal_normal ?? 0;
+        this.player.crystalPoor = me.crystal_poor ?? 0;
+        this.player.setArmorElite?.(!!me.armor_elite);
+        this.player.armorEliteInv = !!me.armor_elite_inv;
         this.player.hp = me.hp ?? this.player.hp;
         this.player.maxHp = me.maxHp ?? this.player.maxHp;
+        this.player.ki = me.ki ?? this.player.ki;
+        this.player.maxKi = me.maxKi ?? this.player.maxKi;
+        this.player.infKi = !!me.inf_ki;
+        this.player.blastLevel = me.blastLevel ?? this.player.blastLevel;
+        this.player.auraTint = me.aura_tint ?? this.player.auraTint;
+        this.player.auraAlpha = me.aura_alpha ?? this.player.auraAlpha;
+        this.player.kiSkillLevel = me.kiSkillLevel ?? this.player.kiSkillLevel;
+        this.player.kiSkillXp = me.kiSkillXp ?? this.player.kiSkillXp;
+        this.player.realmTier = me.realm_tier ?? me.realmTier ?? this.player.realmTier;
+        this.player.realmCrystalT1 = me.realm_crystal_t1 ?? this.player.realmCrystalT1 ?? 0;
+        this.player.kiUpgrades = (me.ki_upgrades && typeof me.ki_upgrades === 'object') ? { ...me.ki_upgrades } : (this.player.kiUpgrades || {});
+        this.player.kiMoves = Array.isArray(me.ki_moves) ? [...me.ki_moves] : (this.player.kiMoves || []);
+        this.player.kiDenominations = Array.isArray(me.ki_denominations) ? [...me.ki_denominations] : (this.player.kiDenominations || []);
+        this.player.kiKnownAugments = (me.ki_known_augments && typeof me.ki_known_augments === 'object') ? { ...me.ki_known_augments } : (this.player.kiKnownAugments || {});
+        this.player.kiEquippedAugments = (me.ki_equipped_augments && typeof me.ki_equipped_augments === 'object') ? { ...me.ki_equipped_augments } : (this.player.kiEquippedAugments || {});
         this.player.str = me.str ?? this.player.str;
         this.player.def = me.def ?? this.player.def;
         this.player.level = me.level ?? this.player.level;
         this.player.xp = me.xp ?? this.player.xp;
+        this.player.setMeditationState?.(me);
+        this.player.setChargeState?.(me);
+        this.player.barrierProcUntil = Number(me.barrier_proc_until || 0);
+        this.player.barrierProcFacing = me.barrier_proc_facing || this.player.barrierProcFacing || 'down';
         this.player._knockedOut = !!me.knocked_out;
         this._playerKnockedOut = !!me.knocked_out;
         if (me.knocked_out && me.knocked_until) {
@@ -408,6 +564,9 @@ export default class GameScene extends Phaser.Scene {
 
       // Sync trees from server snapshot
       this._syncTrees(data.trees);
+
+      // Sync rocks from server snapshot
+      this._syncRocks(data.rocks || []);
 
       // Load saved NPCs
       const savedNpcIds = data.npc_ids || [];
@@ -434,12 +593,14 @@ export default class GameScene extends Phaser.Scene {
       this._handleChatReply(data);
     };
 
+    this.input.keyboard?.on('keydown-V', () => this._toggleClairvoyance());
+
     this._conn.connect();
   }
 
   update(time, delta) {
     // ── Send input to server + client-side prediction ─────────────────────────
-    if (this._conn.connected && !this.chatBox?.isOpen() && !this.player._punching && !this._namingNPC && !this._playerDead && !this._playerKnockedOut && !this._escMenuOpen) {
+    if (this._conn.connected && !this.chatBox?.isOpen() && !this.player._punching && !this.player.meditating && !this._namingNPC && !this._playerDead && !this._playerKnockedOut && !this._escMenuOpen && !this._inventoryOpen && !this._charMenuOpen) {
       const keys = this.player._keys;
       let dx = 0, dy = 0;
       if (keys.left.isDown)  dx -= 1;
@@ -528,9 +689,11 @@ export default class GameScene extends Phaser.Scene {
 
     // Update player unit frame
     this._updatePlayerFrame();
+    this._updateClairvoyanceCamera();
 
     // Update target unit frame
     this._updateTargetFrame();
+    this._updateSensePanel(time);
     this._refreshAttackIndicators();
     this._updateArmedStatus();
 
@@ -552,351 +715,217 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // ── Server state sync ─────────────────────────────────────────────────────────
-
   _applyServerState(data) {
-    this._lastServerState = data;
-    // Don't process state until we know our player ID
-    if (this.playerId === 'default') return;
-
-    const players = data.players || {};
-
-    // Update local player from server (authoritative position)
-    const me = players[this.playerId];
-    if (me) {
-      // Smooth lerp to server position (client prediction reconciliation)
-      this.player.x += (me.x - this.player.x) * 0.3;
-      this.player.y += (me.y - this.player.y) * 0.3;
-      this.player.logs = me.logs ?? 0;
-      this.player.hp = me.hp ?? this.player.hp;
-      this.player.maxHp = me.maxHp ?? this.player.maxHp;
-      this.player.str = me.str ?? this.player.str;
-      this.player.def = me.def ?? this.player.def;
-      this.player.level = me.level ?? this.player.level;
-      this.player.xp = me.xp ?? this.player.xp;
-      if (me.carrying) {
-        const offsetY = TILE_SIZE * 0.35;
-        if (me.carrying.type === 'player') {
-          const carried = this._remotePlayers?.[me.carrying.id];
-          if (carried) {
-            carried._targetX = this.player.x;
-            carried._targetY = this.player.y + offsetY;
-          }
-        } else if (me.carrying.type === 'npc') {
-          const key = `${me.carrying.owner}_${me.carrying.id}`;
-          const carried = this._remoteNPCSprites?.[key];
-          if (carried) {
-            carried._targetX = this.player.x;
-            carried._targetY = this.player.y + offsetY;
-          }
-        }
-      }
-    }
-
-    // Update/create/remove remote players
-    const seenPids = new Set();
-    for (const [pid, pState] of Object.entries(players)) {
-      if (pid === this.playerId) continue;
-      seenPids.add(pid);
-
-      let rp = this._remotePlayers[pid];
-      if (!rp) {
-        rp = new RemotePlayer(this, pState.x, pState.y, pid);
-        this._remotePlayers[pid] = rp;
-      }
-      const wasDead = rp._dead;
-      rp.applyState(pState);
-      // Detect remote player just died
-      if (pState.dead && !wasDead) {
-        this._notifyNearbyNPCsOfKill('player', pid, null, rp.x, rp.y);
-      }
-    }
-
-    // Remove disconnected remote players
-    for (const pid of Object.keys(this._remotePlayers)) {
-      if (!seenPids.has(pid)) {
-        this._remotePlayers[pid].destroy();
-        delete this._remotePlayers[pid];
-      }
-    }
-
-    // Sync trees
-    if (data.trees) {
-      this._syncTrees(data.trees);
-    }
-
-    // Sync ground items
-    this._syncGroundItems(data.ground_items || []);
-
-    // Sync dummies
-    this._syncDummies(data.dummies || {});
-
-    // Sync fences/gates
-    this._syncFences(data.fences || {});
-
-    // Sync remote NPCs from other players
-    this._syncRemoteNPCs(players);
-
-    // Apply server-side damage and log theft to our own NPCs
-    const myData = players[this.playerId];
-    if (myData?.npcs) {
-      if (!this._lastServerNPCLogs) this._lastServerNPCLogs = {};
-      for (const npc of this.npcs) {
-        const serverNPC = myData.npcs[npc.id];
-        if (!serverNPC) continue;
-        const wasKnocked = npc.isKnockedOut?.() || false;
-        npc.maxHp = serverNPC.maxHp ?? npc.maxHp;
-        npc.str = serverNPC.str ?? npc.str;
-        npc.def = serverNPC.def ?? npc.def;
-        npc.level = serverNPC.level ?? npc.level;
-        npc.xp = serverNPC.xp ?? npc.xp;
-        npc.maxLogs = serverNPC.maxLogs ?? npc.maxLogs;
-        npc.setKnockedOut?.(!!serverNPC.knocked_out, {
-          knockedUntil: serverNPC.knocked_until ?? 0,
-          carriedBy: serverNPC.carried_by ?? null,
-        });
-        if (serverNPC.knocked_out && !wasKnocked) {
-          this._handleOwnNPCKnockoutTransition(npc, serverNPC);
-        } else if (!serverNPC.knocked_out && wasKnocked) {
-          this._handleOwnNPCWakeTransition(npc, serverNPC);
-        }
-        if (!serverNPC.knocked_out && wasKnocked) {
-          npc.hp = serverNPC.hp ?? npc.hp;
-        }
-        if (serverNPC.hp > npc.hp) {
-          npc.hp = serverNPC.hp;
-        }
-        if (serverNPC.knocked_out || serverNPC.carried_by) {
-          npc.x = serverNPC.x ?? npc.x;
-          npc.y = serverNPC.y ?? npc.y;
-        }
-
-        // Detect HP damage from server
-        if (serverNPC.hp < npc.hp) {
-          const prevHp = npc.hp;
-          npc.hp = serverNPC.hp;
-
-          // If an attacker is stamped, use assessThreat to decide fight or flee
-          const attackedBy = serverNPC._last_attacked_by;
-          if (attackedBy && attackedBy.id !== this.playerId) {
-            const isNpcAttacker = attackedBy.type === 'npc';
-            const relKey = isNpcAttacker ? `npc:${attackedBy.id}` : attackedBy.id;
-
-            // Build attacker info for assessThreat
-            let attackerInfo;
-            if (isNpcAttacker) {
-              const spriteKey = attackedBy.owner ? `${attackedBy.owner}_${attackedBy.id}` : attackedBy.id;
-              const rnpc = this._remoteNPCSprites[spriteKey];
-              attackerInfo = {
-                type: 'npc', id: attackedBy.id,
-                level: rnpc?.level, str: rnpc?.str, def: rnpc?.def,
-                hp: rnpc?.hp, maxHp: rnpc?.maxHp,
-              };
-            } else {
-              const rp = this._remotePlayers[attackedBy.id];
-              attackerInfo = {
-                type: 'player', id: attackedBy.id,
-                level: rp?.level, str: rp?.str, def: rp?.def,
-                hp: rp?._hp, maxHp: rp?._maxHp,
-              };
-            }
-
-            // Push 'attacked' event to brain
-            const brain = this._npcBrains.get(npc.id);
-            if (brain) {
-              brain.pushEvent({
-                type: 'attacked',
-                attacker_type: attackedBy.type,
-                attacker_id: attackedBy.id,
-                damage: prevHp - npc.hp,
-                hp_remaining: npc.hp,
-              });
-            }
-
-            // Apply emotion based on damage severity
-            const hpPct = npc.hp / npc.maxHp;
-            if (hpPct > 0) {
-              // Grow anger toward attacker (being hit makes you mad)
-              npc.applyEmotionDeltas({ anger: 0.12, fear: 0.05 }, relKey);
-
-              const assessment = npc.assessThreat(attackerInfo);
-              const runner = this._taskRunners.get(npc.id);
-              if (runner) {
-                if (assessment.action === 'fight') {
-                  npc.applyEmotionDeltas({ anger: 0.15, fear: -0.1 }, relKey);
-                  npc.showBubble(`You'll regret that!`, 3000);
-                  if (isNpcAttacker) {
-                    runner.setTasks([{
-                      task: 'attack_npc',
-                      target_owner: attackedBy.owner,
-                      target_npc_id: attackedBy.id,
-                    }]);
-                  } else {
-                    runner.setTasks([{ task: 'attack_player', target_id: attackedBy.id }]);
-                  }
-                } else {
-                  npc.applyEmotionDeltas({ fear: 0.25, anger: -0.1 }, relKey);
-                  npc.showBubble(`I can't take much more of this!`, 3000);
-                  runner.setTasks([{
-                    task: 'flee_player',
-                    target_id: relKey,
-                    target_owner: attackedBy.owner,
-                    target_npc_id: isNpcAttacker ? attackedBy.id : null,
-                  }]);
-                }
-              }
-            }
-          }
-
-          if (serverNPC.dead && !npc.isDead()) {
-            npc._triggerDeath();
-            // Our own NPC was killed — notify other local NPCs
-            this._notifyNearbyNPCsOfKill('own_npc', this.playerId, npc.id, npc.x, npc.y);
-          }
-        }
-
-        // Detect log theft — only when server value *dropped* from its previous known value
-        const serverLogs = serverNPC.logs ?? 0;
-        const prevServerLogs = this._lastServerNPCLogs[npc.id] ?? serverLogs;
-        if (serverLogs < prevServerLogs) {
-          // Skip if NPC voluntarily gave logs to the player
-          if (npc._givingLogs) {
-            npc._givingLogs = false;
-          } else {
-            const stolen = prevServerLogs - serverLogs;
-            npc.logs = Math.max(0, npc.logs - stolen);
-
-            // Identify the thief from server-stamped data
-            const robbedBy = serverNPC._last_robbed_by;
-            let thiefName = 'Someone';
-            let thiefNpcId = null;
-            if (robbedBy && robbedBy.npc_id) {
-              thiefNpcId = robbedBy.npc_id;
-              // Try to find the thief's display name from remote NPC sprites
-              const thiefKey = `${robbedBy.owner}_${robbedBy.npc_id}`;
-              const thiefSprite = this._remoteNPCSprites?.[thiefKey];
-              thiefName = thiefSprite?.getName?.() || `${robbedBy.owner}'s NPC`;
-            }
-
-            const robbedLine = `${thiefName} stole ${stolen} log${stolen > 1 ? 's' : ''} from me!`;
-            npc.showBubble(robbedLine, 4000, { silent: true });
-            this._addNPCSpeechToChat(npc, robbedLine, '#ffaaaa');
-
-            // Push grudge event to brain
-            const brain = this._npcBrains?.get(npc.id);
-            const relKey = thiefNpcId ? `npc:${thiefNpcId}` : 'strangers';
-            if (brain) {
-              brain.pushEvent({
-                type: 'robbed',
-                text: `${thiefName} stole ${stolen} log(s) from me!`,
-                importance: 0.9,
-              });
-              npc.applyEmotionDeltas({ anger: 0.15, trust: -0.1 }, relKey);
-            }
-            npc.addMemory(
-              `${thiefName} stole ${stolen} log(s) from me while I was gathering wood.`,
-              'event', relKey, 0.9
-            );
-          }
-        }
-        this._lastServerNPCLogs[npc.id] = serverLogs;
-      }
-    }
-
-    // Handle local player death from server
-    if (me?.dead && !this._playerDead) {
-      this._playerDead = true;
-      this._notifyNearbyNPCsOfKill('own_player', this.playerId, null, this.player.x, this.player.y);
-      this._showDeathScreen();
-    } else if (me && !me.dead && this._playerDead) {
-      this._playerDead = false;
-      this._hideDeathScreen();
-    }
+    return this._stateSync.applyServerState(data);
   }
 
   _syncTrees(serverTrees) {
-    if (!serverTrees) return;
-    for (const st of serverTrees) {
-      const tree = this.trees[st.id];
-      if (!tree) continue;
-      tree.setChopped(st.chopped);
-    }
+    return this._worldSync.syncTrees(serverTrees);
+  }
+
+  _syncRocks(serverRocks) {
+    return this._worldSync.syncRocks(serverRocks);
   }
 
   _syncGroundItems(serverItems) {
-    const seenIds = new Set();
-    for (const si of serverItems) {
-      seenIds.add(si.id);
-      if (!this._groundItemSprites[si.id]) {
-        // Create visual for this ground item
-        const gi = new GroundItem(this, si.x, si.y, si.resource, si.amount, !!si._placed);
-        gi._serverId = si.id;
-        this._groundItemSprites[si.id] = gi;
-      } else {
-        // Update amount (log stacking)
-        this._groundItemSprites[si.id].updateAmount(si.amount);
-      }
-    }
+    return this._worldSync.syncGroundItems(serverItems);
+  }
 
-    // Remove items no longer on server (picked up)
-    for (const [id, gi] of Object.entries(this._groundItemSprites)) {
-      if (!seenIds.has(id)) {
-        // Remove from groundItems array
-        const idx = this.groundItems.indexOf(gi);
-        if (idx >= 0) this.groundItems.splice(idx, 1);
-        gi.destroy();
-        delete this._groundItemSprites[id];
-      }
-    }
+  _isCampfireLog(item) {
+    return this._worldSync.isCampfireLog(item);
+  }
+
+  _isCampfireStone(item) {
+    return this._worldSync.isCampfireStone(item);
+  }
+
+  _groundItemTile(item) {
+    return this._worldSync.groundItemTile(item);
+  }
+
+  _canLightCampfire(item) {
+    return this._worldSync.canLightCampfire(item);
+  }
+
+  _tryLightCampfire(item, npc = null) {
+    return this._worldSync.tryLightCampfire(item, npc);
+  }
+
+  _tryUseKiShrine(item, npc = null) {
+    return this._worldSync.tryUseKiShrine(item, npc);
+  }
+
+  _getLitCampfires() {
+    return this._worldSync.getLitCampfires();
+  }
+
+  _findNearestLitCampfire(x, y, maxTiles = Infinity) {
+    return this._worldSync.findNearestLitCampfire(x, y, maxTiles);
   }
 
   _syncDummies(serverDummies) {
-    const seenIds = new Set();
-    for (const [did, sd] of Object.entries(serverDummies)) {
-      seenIds.add(did);
-      let dummy = this._dummySprites[did];
-      if (!dummy) {
-        // Create visual dummy
-        dummy = new TrainingDummy(this, sd.x, sd.y, Math.ceil(sd.maxHp / 5));
-        dummy._serverId = did;
-        this._dummySprites[did] = dummy;
-        this.dummies.push(dummy);
-      }
-      // Sync HP
-      dummy.hp = sd.hp;
-      dummy.maxHp = sd.maxHp;
-      dummy._updateHpBar();
-    }
-
-    // Remove dummies not on server
-    for (const [did, dummy] of Object.entries(this._dummySprites)) {
-      if (!seenIds.has(did)) {
-        const idx = this.dummies.indexOf(dummy);
-        if (idx >= 0) this.dummies.splice(idx, 1);
-        dummy.destroy();
-        delete this._dummySprites[did];
-      }
-    }
+    return this._worldSync.syncDummies(serverDummies);
   }
 
   _syncFences(serverFences) {
-    const seenIds = new Set();
-    for (const [fid, sf] of Object.entries(serverFences)) {
-      seenIds.add(fid);
-      let fence = this._fenceSprites[fid];
-      if (!fence) {
-        fence = new Fence(this, sf.x, sf.y, sf);
-        this._fenceSprites[fid] = fence;
-      }
-      fence.applyState(sf);
-    }
+    return this._worldSync.syncFences(serverFences);
+  }
 
-    // Remove fences not on server (destroyed)
-    for (const [fid, fence] of Object.entries(this._fenceSprites)) {
-      if (!seenIds.has(fid)) {
-        fence.destroy();
-        delete this._fenceSprites[fid];
-      }
+  // ── Ki Target sync ──────────────────────────────────────────────────────────
+
+  _syncKiTargets(serverKiTargets) {
+    return this._worldSync.syncKiTargets(serverKiTargets);
+  }
+
+  // ── Anvil sync ────────────────────────────────────────────────────────────
+
+  _syncAnvils(serverAnvils) {
+    return this._worldSync.syncAnvils(serverAnvils);
+  }
+
+  _tryRefineAtAnvil(anvilId, ax, ay) {
+    return this._worldSync.tryRefineAtAnvil(anvilId, ax, ay);
+  }
+
+  _handleRefineResult(result) {
+    return this._worldSync.handleRefineResult(result);
+  }
+
+  _handleMeditationResult(result) {
+    return this._worldSync.handleMeditationResult(result);
+  }
+
+  _formatKiMoveLabel(moveId) {
+    for (const tier of KI_TIER_MOVES) {
+      const found = tier.moves.find((move) => move.id === moveId);
+      if (found) return found.label;
     }
+    return String(moveId || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+  }
+
+  _formatKiUpgradeStat(moveId, statId) {
+    const labels = {
+      ki_shot: { range: 'range', cooldown: 'cooldown', speed: 'speed', damage: 'damage' },
+      charge: { ceiling: 'charge ceiling', decay: 'decay reduction', speed: 'charge speed' },
+      barrier: { physical_block: 'physical block', ki_block: 'ki block' },
+      sense_ki: { range_pct: 'sense range', level_delta: 'level gap read' },
+    };
+    return labels[moveId]?.[statId] || this._formatKiMoveLabel(statId);
+  }
+
+  _getSenseRangeLevel(actor) {
+    const known = new Set(actor?.kiKnownAugments?.sense_ki || []);
+    let level = 0;
+    if (known.has('sense_1')) level += 1;
+    if (known.has('sense_2')) level += 1;
+    if (known.has('sense_3')) level += 1;
+    if (level <= 0) {
+      level = Phaser.Math.Clamp(Number(actor?.kiUpgrades?.sense_ki?.range || 0), 0, 3);
+    }
+    return level;
+  }
+
+  _getActorSenseInfo(actor) {
+    const upgrades = actor?.kiUpgrades || {};
+    const rangeLevel = this._getSenseRangeLevel(actor);
+    const rangePct = Number(upgrades?.sense_ki?.range_pct || 0);
+    const deltaBonus = Number(upgrades?.sense_ki?.level_delta || 0);
+    const senseTiles = [8, 16, 24, 32][rangeLevel] || 8;
+    return {
+      range: TILE_SIZE * senseTiles * (1 + rangePct * 0.01),
+      maxDelta: 10 + deltaBonus,
+    };
+  }
+
+  _canSenseTargetDetails(observer, target) {
+    if (!observer || !target) return false;
+    const info = this._getActorSenseInfo(observer);
+    const distance = Phaser.Math.Distance.Between(observer.x, observer.y, target.x, target.y);
+    if (distance > info.range) return false;
+    const targetLevel = target.level ?? target._level ?? 1;
+    const observerLevel = observer.level ?? 1;
+    return (targetLevel - observerLevel) <= info.maxDelta;
+  }
+
+  _canRevealTargetName(observer, target) {
+    if (!observer || !target) return false;
+    if (!observer.hasKiMove?.('sense_ki')) return false;
+    if (!observer.hasKiAugment?.('sense_ki', 'reveal_name')) return false;
+    const info = this._getActorSenseInfo(observer);
+    return Phaser.Math.Distance.Between(observer.x, observer.y, target.x, target.y) <= info.range;
+  }
+
+  _toggleClairvoyance() {
+    const p = this.player;
+    const target = this._focusedRemote;
+    if (!p || !this._conn?.connected) return;
+    if (p.getEquippedKiAugment?.('sense_ki') !== 'clairvoyance') return;
+    if (p.clairvoyanceActive) {
+      this._conn.send({
+        type: 'toggle_clairvoyance',
+        target_type: null,
+        target_owner: null,
+        target_id: null,
+      });
+      return;
+    }
+    if (!target || (!target.playerId && !target.ownerPid)) return;
+    this._conn.send({
+      type: 'toggle_clairvoyance',
+      target_type: target.playerId ? 'player' : 'npc',
+      target_owner: target.ownerPid || null,
+      target_id: target.playerId || target.npcId || null,
+    });
+  }
+
+  _resolveClairvoyanceTarget() {
+    const p = this.player;
+    if (!p?.clairvoyanceActive) return null;
+    if (p.clairvoyanceTargetType === 'player') {
+      return this._remotePlayers?.[p.clairvoyanceTargetId] || null;
+    }
+    if (p.clairvoyanceTargetType === 'npc') {
+      return this._remoteNPCSprites?.[`${p.clairvoyanceTargetOwner}_${p.clairvoyanceTargetId}`] || null;
+    }
+    return null;
+  }
+
+  _updateClairvoyanceCamera() {
+    const cam = this.cameras.main;
+    const target = this._resolveClairvoyanceTarget();
+    if (target) {
+      if (cam._clairvoyanceTarget !== target) {
+        cam.startFollow(target, true, 0.12, 0.12);
+        cam._clairvoyanceTarget = target;
+      }
+      return;
+    }
+    if (cam._clairvoyanceTarget) {
+      cam.startFollow(this.player, true, 0.1, 0.1);
+      cam._clairvoyanceTarget = null;
+    }
+  }
+
+  _handleShrineResult(result) {
+    if (!result) return;
+    const who = !result.who || result.who === this.playerId ? 'You' : result.who;
+    if (!result.success) {
+      this.chatBox?._addLog(`${who}: ${result.reason || 'The shrine did nothing.'}`, '#99bbcc');
+      return;
+    }
+    const detail = `${this._formatKiUpgradeStat(result.move, result.stat)} +1 (${result.value} total)`;
+    this.chatBox?._addLog(
+      `${who}: ${this._formatKiMoveLabel(result.move)} ${detail}.`,
+      '#88ffcc'
+    );
+  }
+
+  _syncMeditationRealmScene() {
+    return this._worldSync.syncMeditationRealmScene();
+  }
+
+  _handleKiTargetResult(result) {
+    return this._worldSync.handleKiTargetResult(result);
   }
 
   /**
@@ -981,45 +1010,8 @@ export default class GameScene extends Phaser.Scene {
       }
     }
   }
-
   _syncRemoteNPCs(players) {
-    const seenKeys = new Set();
-    for (const [pid, pState] of Object.entries(players)) {
-      if (pid === this.playerId) continue;
-      const npcs = pState.npcs || {};
-      for (const [npcId, npcState] of Object.entries(npcs)) {
-        const key = `${pid}_${npcId}`;
-        seenKeys.add(key);
-        let rnpc = this._remoteNPCSprites[key];
-        if (!rnpc) {
-          rnpc = new RemoteNPC(this, npcState.x, npcState.y, npcId, pid, npcState.name);
-          this._remoteNPCSprites[key] = rnpc;
-        }
-        const wasDead = rnpc._dead;
-        const wasKnocked = rnpc.isKnockedOut?.() || false;
-        rnpc.applyState(npcState);
-        // Apply owner's chat color to NPC labels
-        const ownerColor = pState.chatColor || '#cccccc';
-        rnpc.setOwnerColor(ownerColor);
-        if (npcState.knocked_out && !wasKnocked) {
-          rnpc._koOrigin = { x: npcState.x ?? rnpc.x, y: npcState.y ?? rnpc.y };
-        } else if (!npcState.knocked_out && wasKnocked) {
-          this._handleRemoteNPCWakeTransition(rnpc, npcState);
-        }
-        // Detect remote NPC just died
-        if (npcState.dead && !wasDead) {
-          this._notifyNearbyNPCsOfKill('npc', pid, npcId, rnpc.x, rnpc.y);
-        }
-      }
-    }
-
-    // Remove remote NPCs no longer present
-    for (const [key, rnpc] of Object.entries(this._remoteNPCSprites)) {
-      if (!seenKeys.has(key)) {
-        rnpc.destroy();
-        delete this._remoteNPCSprites[key];
-      }
-    }
+    return this._stateSync.syncRemoteNPCs(players);
   }
 
   // ── Player Death ───────────────────────────────────────────────────────────────
@@ -1063,7 +1055,7 @@ export default class GameScene extends Phaser.Scene {
       if (!res.ok) throw new Error(`Map load failed: ${res.status}`);
       const mapData = await res.json();
 
-      const { treePositions, width, height } = buildTilemapFromData(this, mapData);
+      const { treePositions, rockSpawnTiles, width, height } = buildTilemapFromData(this, mapData);
 
       // Update world bounds to match map
       this._mapCols = width;
@@ -1076,7 +1068,7 @@ export default class GameScene extends Phaser.Scene {
       // Spawn trees at positions found in the map
       this._spawnTreesAt(treePositions);
 
-      console.log(`[map] Loaded level1: ${width}x${height}, ${treePositions.length} trees`);
+      console.log(`[map] Loaded level1: ${width}x${height}, ${treePositions.length} trees, ${rockSpawnTiles.length} rock spawn tiles`);
     } catch (e) {
       console.warn('[map] Failed to load level1, using fallback:', e.message);
       buildTilemap(this, this._mapCols, this._mapRows);
@@ -1224,12 +1216,17 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _onNPCCommands(npc, commands) {
+    const normalized = (commands || []).map(cmd => {
+      if (cmd?.task !== 'guard_fire') return cmd;
+      const fire = this._findNearestLitCampfire?.(npc.x, npc.y, 12);
+      return fire ? { ...cmd, fire_item_id: fire._serverId } : { ...cmd };
+    });
     let runner = this._taskRunners.get(npc.id);
     if (!runner) {
       runner = new NPCTaskRunner(this, npc);
       this._taskRunners.set(npc.id, runner);
     }
-    runner.setTasks(commands);
+    runner.setTasks(normalized);
 
     // Notify brain that player issued an explicit command — pause autonomous decisions
     const brain = this._npcBrains.get(npc.id);
@@ -1237,7 +1234,7 @@ export default class GameScene extends Phaser.Scene {
       brain.onPlayerCommand();
       brain.pushEvent({
         type: 'command',
-        text: `Player commanded: ${commands[0]?.task || 'unknown'}`,
+        text: `Player commanded: ${normalized[0]?.task || 'unknown'}`,
         importance: 0.9,
       });
     }
@@ -1264,6 +1261,13 @@ export default class GameScene extends Phaser.Scene {
     return this.scale?.height ?? this.sys?.game?.config?.height ?? this.cameras.main.height;
   }
 
+  _formatKiValue(value) {
+    const num = Number(value ?? 0);
+    if (!Number.isFinite(num)) return '0';
+    const rounded = Math.round(num * 10) / 10;
+    return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+  }
+
   _isPointerInWorldViewport(ptr) {
     const vp = this.cameras.main?.viewport;
     if (!vp) return true; // fallback if camera not ready
@@ -1271,244 +1275,55 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // ── Player Unit Frame (top-left) ──────────────────────────────────────────
-
   _buildPlayerFrame() {
-    const s = PLAYER_FRAME_SCALE;
-    const x = 10, y = 10, w = Math.round(510 * s), h = Math.round(150 * s);
-
-    // Background panel
-    this._pf_bg = this.addHud(this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x111122, 0.88)
-      .setStrokeStyle(2, 0x334466).setDepth(50));
-
-    // Portrait — player sprite face-down frame
-    const portraitSize = Math.round(96 * s);
-    const portraitPad = Math.round(18 * s);
-    const portraitX = x + portraitPad + portraitSize / 2;
-    const portraitY = y + h / 2;
-    this._pf_portrait = this.addHud(
-      this.add.sprite(portraitX, portraitY, PLAYER_KEY, 0)
-        .setScale(4.2 * s).setDepth(51)
-    );
-    // Portrait border
-    this._pf_portraitBorder = this.addHud(
-      this.add.rectangle(portraitX, portraitY, portraitSize, portraitSize, 0x000000, 0)
-        .setStrokeStyle(2, 0x556688).setDepth(51)
-    );
-
-    const textX = x + portraitPad + portraitSize + portraitPad;
-
-    // Name
-    this._pf_name = this.addHud(this.add.text(textX, y + 12, '', {
-      fontSize: `${Math.round(24 * s)}px`, color: '#ffffff', fontStyle: 'bold',
-    }).setDepth(51));
-
-    // Level
-    this._pf_level = this.addHud(this.add.text(x + w - 18, y + 12, '', {
-      fontSize: `${Math.round(20 * s)}px`, color: '#aabb99',
-    }).setDepth(51).setOrigin(1, 0));
-
-    // HP bar
-    const barX = textX, barY = y + Math.round(48 * s), barW = w - textX + x - Math.round(20 * s), barH = Math.round(30 * s);
-    this._pf_hpBg = this.addHud(this.add.rectangle(barX + barW / 2, barY + barH / 2, barW, barH, 0x331111)
-      .setStrokeStyle(1, 0x442222).setDepth(51));
-    this._pf_hpBar = this.addHud(this.add.rectangle(barX, barY, barW, barH, 0x44cc44)
-      .setOrigin(0, 0).setDepth(52));
-    this._pf_hpText = this.addHud(this.add.text(barX + barW / 2, barY + barH / 2, '', {
-      fontSize: `${Math.round(20 * s)}px`, color: '#ffffff', fontStyle: 'bold',
-    }).setOrigin(0.5).setDepth(53));
-    this._pf_barW = barW;
-    this._pf_barH = barH;
-
-    // Stats line
-    this._pf_stats = this.addHud(this.add.text(textX, y + Math.round(87 * s), '', {
-      fontSize: `${Math.round(20 * s)}px`, color: '#99aacc',
-    }).setDepth(51));
-
-    // XP line
-    this._pf_xp = this.addHud(this.add.text(textX, y + Math.round(117 * s), '', {
-      fontSize: `${Math.round(18 * s)}px`, color: '#778899',
-    }).setDepth(51));
+    return this._hud.buildPlayerFrame();
   }
-
   _updatePlayerFrame() {
-    const p = this.player;
-    this._pf_name.setText(this.playerId || 'Player');
-    this._pf_level.setText(`Lv ${p.level}`);
-
-    const hpPct = p.hp / p.maxHp;
-    this._pf_hpBar.setDisplaySize(this._pf_barW * Math.max(0, hpPct), this._pf_barH);
-    const hpColor = hpPct > 0.5 ? 0x44cc44 : hpPct > 0.25 ? 0xddaa22 : 0xcc3333;
-    this._pf_hpBar.setFillStyle(hpColor);
-    this._pf_hpText.setText(`${p.hp} / ${p.maxHp}`);
-
-    this._pf_stats.setText(`STR: ${p.str}   DEF: ${p.def}   Logs: ${p.logs}`);
-    this._pf_xp.setText(`XP: ${p.xp} / ${p.level * 20}`);
+    return this._hud.updatePlayerFrame();
   }
 
   // ── Target Unit Frame (top-center, shows selected entity) ─────────────────
-
+  _buildSensePanel() {
+    return this._hud.buildSensePanel();
+  }
+  _clearSensePanelRows() {
+    return this._hud.clearSensePanelRows();
+  }
+  _clearSensePanelActions() {
+    return this._hud.clearSensePanelActions();
+  }
+  _updateSenseTabVisuals() {
+    return this._hud.updateSenseTabVisuals();
+  }
+  _updateSensePanel(now = 0) {
+    return this._hud.updateSensePanel(now);
+  }
+  _collectSensedEntities(tab = 'others') {
+    return this._hud.collectSensedEntities(tab);
+  }
+  _buildSensedEntityEntry(observer, entity, kind, own, distPx) {
+    return this._hud.buildSensedEntityEntry(observer, entity, kind, own, distPx);
+  }
+  _buildSenseRow(entry, x, y, w, h) {
+    return this._hud.buildSenseRow(entry, x, y, w, h);
+  }
+  _selectSensedEntity(entry) {
+    return this._hud.selectSensedEntity(entry);
+  }
+  _senseDirection(fromX, fromY, toX, toY) {
+    return this._hud.senseDirection(fromX, fromY, toX, toY);
+  }
+  _showSenseEntryActions(entry, x, y) {
+    return this._hud.showSenseEntryActions(entry, x, y);
+  }
   _updateTargetFrame() {
-    const target = this._focusedRemote || this.selectedNPC;
-
-    if (!target || target.isDead?.()) {
-      this._hideTargetFrame();
-      return;
-    }
-
-    if (!this._targetFrame) this._buildTargetFrame();
-
-    let name = '', hp = 0, maxHp = 1, spriteKey = '', frame = 0;
-    let extra = '';
-
-    if (target.playerId) {
-      name = target.playerId;
-      hp = target._hp ?? 0;
-      maxHp = target._maxHp ?? 1;
-      spriteKey = PLAYER_KEY;
-    } else if (target.ownerPid) {
-      name = `${target.getName?.()} [${target.ownerPid}]`;
-      hp = target.hp ?? 0;
-      maxHp = target.maxHp ?? 1;
-      spriteKey = NPC_KEY;
-      extra = `STR: ${target.str ?? '?'}  DEF: ${target.def ?? '?'}  Logs: ${target.logs ?? 0}`;
-    } else if (target.getName) {
-      name = target.getName();
-      hp = target.hp ?? 0;
-      maxHp = target.maxHp ?? 1;
-      spriteKey = NPC_KEY;
-      extra = `STR: ${target.str ?? '?'}  DEF: ${target.def ?? '?'}  Logs: ${target.logs ?? 0}`;
-    }
-
-    this._tf_name.setText(name);
-    if (target.isKnockedOut?.()) {
-      this._tf_name.setText(`${name} [KO]`);
-    }
-    const hpPct = maxHp > 0 ? hp / maxHp : 0;
-    this._tf_hpBar.setDisplaySize(this._tf_barW * Math.max(0, hpPct), this._tf_barH);
-    const hpColor = hpPct > 0.5 ? 0x44cc44 : hpPct > 0.25 ? 0xddaa22 : 0xcc3333;
-    this._tf_hpBar.setFillStyle(hpColor);
-    this._tf_hpText.setText(`${hp} / ${maxHp}`);
-    this._tf_extra.setText(extra);
-
-    // Show soul/relationship info for NPCs
-    let soulInfo = '';
-    if (target.soul && target._getRelationship) {
-      // Own NPC — pull from local soul
-      const es = target.getEmotionalState(this.playerId);
-      const relLabel = target.getRelationshipLabel?.(this.playerId) || '?';
-      soulInfo = [
-        `Feels: ${relLabel}`,
-        `Trust ${es.trust.toFixed(2)}   Fear ${es.fear.toFixed(2)}   Anger ${es.anger.toFixed(2)}`,
-        `Coop ${target.soul.personality.cooperation.toFixed(2)}   Aggro ${target.soul.personality.aggression.toFixed(2)}`,
-      ].join('\n');
-    } else if (target._soul) {
-      // Remote NPC — pull from synced soul data
-      const rel = target._soul[this.playerId];
-      const pers = target._personality;
-      if (rel) {
-        soulInfo = [
-          `Feels: ${rel.label}`,
-          `Trust ${rel.trust.toFixed(2)}   Fear ${rel.fear.toFixed(2)}   Anger ${rel.anger.toFixed(2)}`,
-        ].join('\n');
-        if (pers) soulInfo += `\nCoop ${pers.cooperation.toFixed(2)}   Aggro ${pers.aggression.toFixed(2)}`;
-      } else if (pers) {
-        soulInfo = `Coop ${pers.cooperation.toFixed(2)}   Aggro ${pers.aggression.toFixed(2)}`;
-      }
-    }
-    this._tf_soul.setText(soulInfo);
-
-    // Reposition hint below soul text and resize background to fit
-    const soulBottom = soulInfo ? this._tf_soul.y + this._tf_soul.height + 4 : this._tf_extra.y + this._tf_extra.height + 4;
-    this._tf_hint.setY(soulBottom);
-    const baseY = this._tfBaseY ?? 10;
-    const totalH = soulBottom + this._tf_hint.height + 8 - baseY;
-    this._tf_bg.setSize(this._tf_bg.width, totalH);
-    this._tf_bg.setPosition(this._tf_bg.x, baseY + totalH / 2);
-
-    if (this._tf_portrait.texture.key !== spriteKey) {
-      this._tf_portrait.setTexture(spriteKey, frame);
-    }
-
-    const borderColor = target === this._focusedRemote ? 0xff5555 : 0x44eeff;
-    this._tf_portraitBorder.setStrokeStyle(3, borderColor);
-    this._tf_bg.setStrokeStyle(3, borderColor, 0.95);
-    if (target.ownerPid) this._tf_hint.setText(this._armedAction === 'attack' ? 'Attack armed - left click a red target' : 'Left click selects, right click opens actions');
-    else if (target.playerId) this._tf_hint.setText(this._armedAction === 'attack' ? 'Attack armed - left click a red target' : 'Right click opens actions');
-    else this._tf_hint.setText('Left click selects, right click opens actions');
-
-    for (const el of this._targetFrameElements) el.setVisible(true);
+    return this._hud.updateTargetFrame();
   }
-
   _buildTargetFrame() {
-    const s = PLAYER_FRAME_SCALE * TARGET_FRAME_RELATIVE_TO_PLAYER;
-    const x = this._screenWidth() - RIGHT_HUD_MARGIN + 12;
-    const y = TOP_HUD_MARGIN + 12;
-    const w = RIGHT_HUD_MARGIN - 24;
-    const h = Math.round(270 * s);
-
-    const els = [];
-    const add = (obj) => { this.addHud(obj); els.push(obj); return obj; };
-    this._tfBaseY = y;
-
-    this._tf_bg = add(this.add.rectangle(x + w / 2, y + h / 2, w, h, 0x111122, 0.88)
-      .setStrokeStyle(2, 0x334466).setDepth(50)
-      .setInteractive({ useHandCursor: true }));
-    this._tf_bg.on('pointerdown', () => {
-      if (this.selectedNPC && !this._focusedRemote) this._openNPCDetail(this.selectedNPC);
-    });
-
-    const portraitSize = Math.round(92 * s);
-    const portraitPad = Math.round(16 * s);
-    const portraitX = x + portraitPad + portraitSize / 2;
-    const portraitY = y + Math.round(78 * s);
-    this._tf_portrait = add(
-      this.add.sprite(portraitX, portraitY, PLAYER_KEY, 0).setScale(3.5 * s).setDepth(51)
-    );
-    this._tf_portraitBorder = add(
-      this.add.rectangle(portraitX, portraitY, portraitSize, portraitSize, 0x000000, 0)
-        .setStrokeStyle(2, 0x556688).setDepth(51)
-    );
-
-    const textX = x + portraitPad + portraitSize + portraitPad;
-    const textMaxW = w - (textX - x) - Math.round(18 * s);
-
-    this._tf_name = add(this.add.text(textX, y + Math.round(10 * s), '', {
-      fontSize: `${Math.round(22 * s)}px`, color: '#ffffff', fontStyle: 'bold',
-      wordWrap: { width: textMaxW },
-    }).setDepth(51));
-
-    const barX = textX, barY = y + Math.round(46 * s);
-    this._tf_barW = textMaxW;
-    this._tf_barH = Math.round(26 * s);
-    this._tf_hpBg = add(this.add.rectangle(barX + this._tf_barW / 2, barY + this._tf_barH / 2, this._tf_barW, this._tf_barH, 0x331111)
-      .setStrokeStyle(1, 0x442222).setDepth(51));
-    this._tf_hpBar = add(this.add.rectangle(barX, barY, this._tf_barW, this._tf_barH, 0x44cc44)
-      .setOrigin(0, 0).setDepth(52));
-    this._tf_hpText = add(this.add.text(barX + this._tf_barW / 2, barY + this._tf_barH / 2, '', {
-      fontSize: `${Math.round(16 * s)}px`, color: '#ffffff', fontStyle: 'bold',
-    }).setOrigin(0.5).setDepth(53));
-
-    this._tf_extra = add(this.add.text(textX, y + Math.round(86 * s), '', {
-      fontSize: `${Math.round(15 * s)}px`, color: '#a8c0df',
-      wordWrap: { width: textMaxW },
-    }).setDepth(51));
-
-    this._tf_soul = add(this.add.text(textX, y + Math.round(122 * s), '', {
-      fontSize: `${Math.round(14 * s)}px`, color: '#d2d9f0', lineSpacing: Math.max(2, Math.round(4 * s)),
-      wordWrap: { width: textMaxW },
-    }).setDepth(51));
-
-    this._tf_hint = add(this.add.text(textX, y + Math.round(222 * s), 'Click panel for details · right click world target for actions', {
-      fontSize: `${Math.round(13 * s)}px`, color: '#7f8fa8',
-    }).setDepth(51));
-
-    this._targetFrame = true;
-    this._targetFrameElements = els;
+    return this._hud.buildTargetFrame();
   }
-
   _hideTargetFrame() {
-    if (!this._targetFrame) return;
-    for (const el of this._targetFrameElements) el.setVisible(false);
+    return this._hud.hideTargetFrame();
   }
 
   _getChatTarget() {
@@ -1516,127 +1331,41 @@ export default class GameScene extends Phaser.Scene {
     if (this._focusedRemote?.ownerPid && !this._focusedRemote?.isKnockedOut?.()) return this._focusedRemote;
     return this.selectedNPC || null;
   }
-
   _buildTabCycleList() {
-    const px = this.player?.x ?? 0;
-    const py = this.player?.y ?? 0;
-    const distToPlayer = (entity) => Phaser.Math.Distance.Between(px, py, entity.x, entity.y);
-
-    const own = (this.npcs || [])
-      .filter(n => !n.isDead?.() && !n.isKnockedOut?.())
-      .map(entity => ({ kind: 'own_npc', entity, distance: distToPlayer(entity) }))
-      .sort((a, b) => a.distance - b.distance);
-
-    const remotePlayers = Object.values(this._remotePlayers || {})
-      .filter(p => !p.isDead?.() && !p.isKnockedOut?.())
-      .map(entity => ({ kind: 'remote_player', entity, distance: distToPlayer(entity) }));
-
-    const remoteNpcs = Object.values(this._remoteNPCSprites || {})
-      .filter(n => !n.isDead?.() && !n.isKnockedOut?.())
-      .map(entity => ({ kind: 'remote_npc', entity, distance: distToPlayer(entity) }));
-
-    const remote = [...remotePlayers, ...remoteNpcs]
-      .sort((a, b) => a.distance - b.distance);
-
-    return [...own, ...remote];
+    return this._selection.buildTabCycleList();
   }
-
   _clearSelection() {
-    if (this.selectedNPC) this.selectedNPC.deselect();
-    if (this._focusedRemote?.setSelected) this._focusedRemote.setSelected(false);
-    this.selectedNPC = null;
-    this._focusedRemote = null;
-    this._hideNPCPanel();
+    return this._selection.clearSelection();
   }
-
   _selectNPC(npc) {
-    if (this.selectedNPC === npc && !this._focusedRemote) return;
-    this._clearSelection();
-    this.selectedNPC = npc;
-    if (npc) {
-      npc.select();
-    }
+    return this._selection.selectNPC(npc);
   }
-
   _selectRemote(entity) {
-    if (this._focusedRemote === entity && !this.selectedNPC) return;
-    this._clearSelection();
-    this._focusedRemote = entity;
-    entity?.setSelected?.(true);
+    return this._selection.selectRemote(entity);
   }
-
   _handleOwnNPCPointerDown(npc, pointer) {
-    const isRightClick = pointer.rightButtonDown() || pointer.button === 2;
-    if (isRightClick) {
-      this._selectNPC(npc);
-      this._openContextMenu(npc, pointer);
-      return;
-    }
-
-    this._closeContextMenu();
-    if (this._armedAction) this._disarmActionMode();
-
-    this._selectNPC(npc);
+    return this._selection.handleOwnNPCPointerDown(npc, pointer);
   }
-
   _handleRemoteEntityPointerDown(entity, pointer, event) {
-    event?.stopPropagation?.();
-    if (pointer._fgHandled) return;
-    const isRightClick = pointer.rightButtonDown() || pointer.button === 2;
-    if (isRightClick) {
-      this._selectRemote(entity);
-      this._openContextMenu(entity, pointer);
-      pointer._fgHandled = true;
-      return;
-    }
-
-    this._closeContextMenu();
-
-    if (this._armedAction === 'attack') {
-      pointer._fgHandled = true;
-      if (this._isAttackableEntity(entity)) this._executeAttack(entity);
-      this._disarmActionMode();
-      return;
-    }
-
-    this._selectRemote(entity);
+    return this._selection.handleRemoteEntityPointerDown(entity, pointer, event);
   }
-
   _isAttackableEntity(entity) {
-    if (!entity || entity.isDead?.() || entity.isKnockedOut?.()) return false;
-    return !!(entity.playerId || entity.ownerPid);
+    return this._selection.isAttackableEntity(entity);
   }
-
   _executeAttack(entity) {
-    if (this._playerKnockedOut || !this._isAttackableEntity(entity)) return;
-    entity._onAttackClicked?.();
+    return this._selection.executeAttack(entity);
   }
-
   _armActionMode(action) {
-    this._armedAction = action;
-    this._closeContextMenu();
+    return this._selection.armActionMode(action);
   }
-
   _disarmActionMode() {
-    this._armedAction = null;
+    return this._selection.disarmActionMode();
   }
-
   _refreshAttackIndicators() {
-    const armed = this._armedAction === 'attack';
-    for (const rp of Object.values(this._remotePlayers || {})) {
-      rp.setAttackable?.(armed && !rp.isDead?.());
-    }
-    for (const rnpc of Object.values(this._remoteNPCSprites || {})) {
-      rnpc.setAttackable?.(armed && !rnpc.isDead?.());
-    }
+    return this._selection.refreshAttackIndicators();
   }
-
   _updateArmedStatus() {
-    if (this._armedAction === 'attack') {
-      this._armedStatus.setText('Attack Mode - left click a red target, Esc to cancel').setVisible(true);
-    } else {
-      this._armedStatus.setVisible(false);
-    }
+    return this._selection.updateArmedStatus();
   }
 
   _addNPCSpeechToChat(npc, text, color = '#aaccff') {
@@ -1835,58 +1564,15 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _openContextMenu(entity, pointer) {
-    this._closeContextMenu();
-    const actions = this._buildContextActions(entity);
-    if (actions.length === 0) return;
-
-    const els = [];
-    const add = (obj) => { this.addHud(obj); els.push(obj); return obj; };
-    const rowH = 28;
-    const width = 150;
-    const height = 10 + actions.length * rowH + 6;
-    const W = this._screenWidth();
-    const H = this._screenHeight();
-    const px = Number.isFinite(pointer?.x) ? pointer.x : pointer?.downX;
-    const py = Number.isFinite(pointer?.y) ? pointer.y : pointer?.downY;
-    const x = Phaser.Math.Clamp((px ?? W / 2) + 10, 12, W - width - 12);
-    const y = Phaser.Math.Clamp((py ?? H / 2) + 10, 12, H - height - 12);
-    this._contextMenuBounds = { x, y, width, height };
-
-    add(this.add.rectangle(x + width / 2, y + height / 2, width, height, 0x111122, 0.96)
-      .setStrokeStyle(2, 0x553333).setDepth(70));
-
-    actions.forEach((item, idx) => {
-      const by = y + 8 + idx * rowH;
-      const btn = add(this.add.rectangle(x + width / 2, by + 10, width - 12, 22, 0x223344, 1)
-        .setDepth(71).setInteractive({ useHandCursor: true }));
-      const lbl = add(this.add.text(x + 12, by + 3, item.label, {
-        fontSize: '15px', color: '#dde8ff',
-      }).setDepth(72));
-      btn.on('pointerover', () => btn.setFillStyle(0x335566));
-      btn.on('pointerout', () => btn.setFillStyle(0x223344));
-      btn.on('pointerdown', () => {
-        this._closeContextMenu();
-        item.action();
-      });
-    });
-
-    this._contextMenuEls = els;
+    return this._inventoryUi.openContextMenu(entity, pointer);
   }
 
   _closeContextMenu() {
-    this._contextMenuBounds = null;
-    if (!this._contextMenuEls) return;
-    for (const el of this._contextMenuEls) {
-      this.removeHud?.(el);
-      el.destroy();
-    }
-    this._contextMenuEls = null;
+    return this._inventoryUi.closeContextMenu();
   }
 
   _isPointerOverContextMenu(ptr) {
-    if (!this._contextMenuBounds) return false;
-    const { x, y, width, height } = this._contextMenuBounds;
-    return ptr.x >= x && ptr.x <= x + width && ptr.y >= y && ptr.y <= y + height;
+    return this._inventoryUi.isPointerOverContextMenu(ptr);
   }
 
   async _loadSavedNPCs(npcIds) {
@@ -2074,89 +1760,35 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _toggleAdmin() {
-    if (this._adminOpen) {
-      this._closeAdmin();
-    } else {
-      this._openAdmin();
-    }
+    return this._adminUi.toggleAdmin();
   }
 
   _openAdmin() {
-    this._adminOpen = true;
-    const W = this._screenWidth();
-    const H = this._screenHeight();
-    const panelW = 240;
-    const panelH = 316;
-    const px = W / 2 - panelW / 2;
-    const py = H / 2 - panelH / 2;
+    return this._adminUi.openAdmin();
+  }
 
-    const admin = (field, value) => this._conn.send({ type: 'admin', field, value });
-    const items = [
-      { label: '+10 Logs',       action: () => admin('logs', 10) },
-      { label: '+50 Logs',       action: () => admin('logs', 50) },
-      { label: 'Full HP',        action: () => admin('full_hp', 0) },
-      { label: '+5 Max HP',      action: () => admin('maxHp', 5) },
-      { label: '+1 STR',         action: () => admin('str', 1) },
-      { label: '+1 DEF',         action: () => admin('def', 1) },
-      { label: 'Spawn NPC',      action: () => { this._adminSpawnNPC(); } },
-      { label: 'Heal NPC',       action: () => { for (const n of this.npcs) { n.hp = n.maxHp; } } },
-      { label: 'Spawn Dummy',    action: () => { this._conn.send({ type: 'build_dummy', logs: 20 }); } },
-    ];
+  _getAdminTargetNpc() {
+    return this._adminUi.getAdminTargetNpc();
+  }
 
-    const els = [];
+  _getAdminTargetActor() {
+    return this._adminUi.getAdminTargetActor();
+  }
 
-    const bg = this.addHud(this.add.rectangle(px, py, panelW, panelH, 0x111122, 0.95)
-      .setDepth(60).setOrigin(0, 0));
-    els.push(bg);
+  _sendAdmin(field, value = 0, extra = {}) {
+    return this._adminUi.sendAdmin(field, value, extra);
+  }
 
-    const title = this.addHud(this.add.text(px + panelW / 2, py + 12, 'ADMIN  [Q to close]', {
-      fontSize: '13px', color: '#ffcc44',
-    }).setDepth(61).setOrigin(0.5, 0));
-    els.push(title);
-
-    const btnH = 28;
-    const btnW = panelW - 24;
-    items.forEach((item, i) => {
-      const by = py + 38 + i * (btnH + 4);
-      const btn = this.addHud(this.add.rectangle(px + 12, by, btnW, btnH, 0x223344, 1)
-        .setDepth(61).setOrigin(0, 0)
-        .setInteractive({ useHandCursor: true }));
-
-      const lbl = this.addHud(this.add.text(px + 12 + btnW / 2, by + btnH / 2, item.label, {
-        fontSize: '13px', color: '#ccddff',
-      }).setDepth(62).setOrigin(0.5, 0.5));
-
-      btn.on('pointerover', () => { btn.setFillStyle(0x335566); lbl.setColor('#ffffff'); });
-      btn.on('pointerout',  () => { btn.setFillStyle(0x223344); lbl.setColor('#ccddff'); });
-      btn.on('pointerdown', () => { item.action(); });
-
-      els.push(btn, lbl);
-    });
-
-    this._adminPanel = els;
+  _renderAdminPanel() {
+    return this._adminUi.renderAdminPanel();
   }
 
   _closeAdmin() {
-    this._adminOpen = false;
-    if (this._adminPanel) {
-      for (const el of this._adminPanel) { this.removeHud(el); el.destroy(); }
-      this._adminPanel = null;
-    }
+    return this._adminUi.closeAdmin();
   }
 
   _adminSpawnNPC() {
-    const pos = tilePos(
-      Math.floor(this.player.x / TILE_SIZE) + 1,
-      Math.floor(this.player.y / TILE_SIZE),
-    );
-    const npc = new NPC(this, pos.x, pos.y, undefined, this.playerId);
-    this.npcs.push(npc);
-    const runner = new NPCTaskRunner(this, npc);
-    this._taskRunners.set(npc.id, runner);
-    this._npcBrains.set(npc.id, new NPCBrain(this, npc, runner));
-    this._selectNPC(npc);
-    this._conn.send({ type: 'register_npc', npc_id: npc.id });
-    npc.showBubble('Admin spawned me!', 3000);
+    return this._adminUi.adminSpawnNPC();
   }
 
   // ── NPC Server Sync (PvP visibility) ──────────────────────────────────────────
@@ -2183,13 +1815,41 @@ export default class GameScene extends Phaser.Scene {
       npcs[npc.id] = {
         x: npc.x, y: npc.y,
         hp: npc.hp, maxHp: npc.maxHp,
+        ki: npc.ki, maxKi: npc.maxKi,
+        inf_ki: !!npc.infKi,
         str: npc.str, def: npc.def,
         level: npc.level, xp: npc.xp,
+        blastLevel: npc.blastLevel,
+        kiSkillLevel: npc.kiSkillLevel ?? 1,
+        kiSkillXp: npc.kiSkillXp ?? 0,
+        realm_tier: npc.realmTier ?? 0,
+        ki_moves: npc.kiMoves ?? [],
+        ki_denominations: npc.kiDenominations ?? [],
+        ki_known_augments: npc.kiKnownAugments ?? {},
+        ki_equipped_augments: npc.kiEquippedAugments ?? {},
+        ki_upgrades: npc.kiUpgrades ?? {},
+        facing: (npc.getFacing?.() ? npc.getFacing() : 'down'),
+        barrier_proc_until: Number(npc.barrierProcUntil || 0),
+        barrier_proc_facing: npc.barrierProcFacing ? npc.barrierProcFacing : (npc.getFacing?.() ? npc.getFacing() : 'down'),
+        aura_tint: npc.auraTint != null ? npc.auraTint : 0x4fd6ff,
+        aura_alpha: npc.auraAlpha != null ? npc.auraAlpha : 0.42,
         name: npc.getName(),
         dead: npc.isDead(),
         knocked_out: npc.isKnockedOut?.() || false,
+        meditating: !!npc.meditating,
+        meditation_started_at: npc.meditationStartedAt ?? 0,
+        meditation_until: npc.meditationUntil ?? 0,
+        meditation_total_ms: npc.meditationTotalMs ?? 0,
+        meditation_crystal_quality: npc.meditationCrystalQuality ?? null,
         owner: this.playerId,
         logs: npc.logs, maxLogs: npc.maxLogs,
+        stones: npc.stones ?? 0,
+        bastalite: npc.bastalite ?? 0,
+        crystal_pristine: npc.crystalPristine ?? 0,
+        crystal_normal: npc.crystalNormal ?? 0,
+        crystal_poor: npc.crystalPoor ?? 0,
+        realm_crystal_t1: npc.realmCrystalT1 ?? 0,
+        armor_elite: !!npc.armorElite,
         gathering: this._taskRunners.get(npc.id)?.getStatus()?.tasks?.[0]?.task === 'gather',
         soul: soulData,
         personality,
@@ -2223,7 +1883,7 @@ export default class GameScene extends Phaser.Scene {
 
   /** Another player talks to one of our NPCs — run LLM dialogue and send reply back. */
   async _handleIncomingChat(data) {
-    const { from, from_color, target_npc_id, text } = data;
+    const { from, from_color, target_npc_id, text, meta } = data;
     // Find our local NPC by ID
     const npc = this.npcs.find(n => n.id === target_npc_id);
     if (!npc || npc.isDead()) return;
@@ -2233,6 +1893,48 @@ export default class GameScene extends Phaser.Scene {
     this.chatBox?._addLog(`${from} → ${npc.getName()}: ${text}`, from_color || '#ffddaa');
 
     try {
+      if (meta?.type === 'fire_warning') {
+        const runner = this._taskRunners.get(npc.id);
+        const personality = npc.soul?.personality || {};
+        const cooperation = personality.cooperation ?? 0.5;
+        const aggression = personality.aggression ?? 0.3;
+        const neuroticism = personality.neuroticism ?? 0.3;
+        const complies = (cooperation + neuroticism * 0.35) >= (aggression + 0.15);
+        const reply = complies
+          ? (aggression > 0.55 ? 'Fine. I will leave the fire alone.' : 'Alright, I will leave the fire area.')
+          : (aggression > 0.6 ? 'No. I need this fire.' : 'I just need to heal.');
+
+        if (complies && runner) {
+          const existingTasks = runner.getStatus()?.tasks || [];
+          runner.setTasks([
+            {
+              task: 'move_away_from_fire',
+              fire_x: Number(meta.fire_x || 0),
+              fire_y: Number(meta.fire_y || 0),
+              min_distance: TILE_SIZE * Math.max(3, Number(meta.leave_distance_tiles || 5)),
+              duration_ms: 5000,
+            },
+            ...existingTasks,
+          ]);
+        }
+
+        npc.showBubble(reply, 3200, { silent: true });
+        this.chatBox?._addLog(`${npc.getName()}: ${reply}`, '#aaddff');
+        this._conn.send({
+          type: 'chat_reply',
+          to: from,
+          npc_id: target_npc_id,
+          npc_name: npc.getName(),
+          reply,
+          meta: {
+            type: 'fire_warning_reply',
+            complies,
+            fire_item_id: meta.fire_item_id || null,
+          },
+        });
+        return;
+      }
+
       // Non-owner command filtering
       const obeys = npc.shouldObey(from);
       const soulCtx = npc.getSoulContext(from);
@@ -2289,7 +1991,7 @@ export default class GameScene extends Phaser.Scene {
 
   /** Reply from a remote NPC we talked to — show bubble and log. */
   _handleChatReply(data) {
-    const { from_owner, npc_id, npc_name, reply, emotion_deltas } = data;
+    const { from_owner, npc_id, npc_name, reply, emotion_deltas, meta } = data;
     const key = `${from_owner}_${npc_id}`;
     const rnpc = this._remoteNPCSprites?.[key];
 
@@ -2306,6 +2008,11 @@ export default class GameScene extends Phaser.Scene {
     let logLine = `${name}: ${reply}`;
     if (deltaStr) logLine += ` ${deltaStr}`;
     this.chatBox?._addLog(logLine, '#aaddff');
+    if (meta?.type === 'fire_warning_reply') {
+      for (const runner of this._taskRunners.values()) {
+        runner.handleFireWarningReply?.(key, { complies: !!meta.complies, reply });
+      }
+    }
   }
 
   /** Format emotion deltas for display. */
@@ -2323,75 +2030,11 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _processOverheardConversation({ speakerNpc, playerText = '', npcReply = '', topicEntity = null, playerId = '' }) {
-    if (!speakerNpc || !topicEntity?.id) return;
-
-    const overhearers = this._findOverhearTargets(speakerNpc, topicEntity);
-    if (overhearers.length === 0) return;
-
-    const sentiment = this._analyzeOverheardSentiment(playerText, npcReply, topicEntity.name || '');
-    if (sentiment.kind === 'neutral') return;
-
-    const transcript = `${playerId || 'Player'}: ${playerText} | ${speakerNpc.getName?.() || 'NPC'}: ${npcReply}`.slice(0, 180);
-
-    for (const heard of overhearers) {
-      if (heard.kind === 'local_npc') {
-        const targetNpc = heard.entity;
-        targetNpc.addMemory(
-          `Overheard ${transcript}`,
-          'dialogue',
-          playerId || 'default',
-          sentiment.importance
-        );
-        targetNpc.applyEmotionDeltas(sentiment.playerDeltas, playerId || 'default');
-        if (speakerNpc?.id && speakerNpc !== targetNpc) {
-          targetNpc.applyEmotionDeltas(sentiment.npcDeltas, `npc:${speakerNpc.id}`);
-        }
-        if (Math.random() < sentiment.interjectChance) {
-          this._maybeInterjectOverheardConversation({
-            overhearer: targetNpc,
-            speakerNpc,
-            playerText,
-            npcReply,
-            topicEntity,
-            playerId: playerId || 'default',
-            sentiment,
-          });
-        } else if (Math.random() < sentiment.replyChance) {
-          targetNpc.showBubble(sentiment.localBubble, 2600, { silent: true });
-        }
-      } else if (heard.kind === 'remote_npc') {
-        if (Math.random() < sentiment.replyChance) {
-          heard.entity.showBubble(sentiment.remoteBubble, 2400);
-        }
-      }
-    }
+    return this._dialogue.processOverheardConversation({ speakerNpc, playerText, npcReply, topicEntity, playerId });
   }
 
   _findOverhearTargets(speakerNpc, topicEntity) {
-    const results = [];
-    const heardRange = TILE_SIZE * 10;
-    const inRange = (ent) => Phaser.Math.Distance.Between(speakerNpc.x, speakerNpc.y, ent.x, ent.y) <= heardRange;
-
-    if (topicEntity.type === 'npc') {
-      const local = this.npcs.find(n => `npc:${n.id}` === topicEntity.id && n !== speakerNpc && !n.isDead?.());
-      if (local && inRange(local)) results.push({ kind: 'local_npc', entity: local });
-
-      const remote = Object.values(this._remoteNPCSprites || {}).find(r => `npc:${r.npcId}` === topicEntity.id && !r.isDead?.());
-      if (remote && inRange(remote)) results.push({ kind: 'remote_npc', entity: remote });
-    } else if (topicEntity.type === 'player') {
-      for (const rnpc of Object.values(this._remoteNPCSprites || {})) {
-        if (rnpc.ownerPid === topicEntity.id && !rnpc.isDead?.() && inRange(rnpc)) {
-          results.push({ kind: 'remote_npc', entity: rnpc });
-        }
-      }
-      for (const npc of this.npcs) {
-        if (npc !== speakerNpc && !npc.isDead?.() && inRange(npc) && npc.soul?.relationships?.[topicEntity.id]) {
-          results.push({ kind: 'local_npc', entity: npc });
-        }
-      }
-    }
-
-    return results;
+    return this._dialogue.findOverhearTargets(speakerNpc, topicEntity);
   }
 
   async _maybeInterjectOverheardConversation({
@@ -2403,91 +2046,19 @@ export default class GameScene extends Phaser.Scene {
     playerId,
     sentiment,
   }) {
-    if (!overhearer || overhearer.isDead?.()) return;
-
-    const key = `${overhearer.id}|${topicEntity.id}|${playerId}`;
-    const now = Date.now();
-    const last = this._overhearInterjectCooldowns[key] ?? 0;
-    if (now - last < 15000) return;
-    this._overhearInterjectCooldowns[key] = now;
-
-    try {
-      const soulCtx = overhearer.getSoulContext(playerId || 'default');
-      soulCtx.nearby_entities = this.chatBox?._buildNearbyContext(overhearer) || [];
-      soulCtx.topic_entity = overhearer.getContextAboutEntity(topicEntity.id, topicEntity.name);
-      soulCtx.system_note = [
-        `You overheard ${playerId} talking with ${speakerNpc.getName?.() || 'another NPC'} about ${topicEntity.name}.`,
-        'Give a single short interjection into the conversation.',
-        'Keep it under 10 words.',
-        'Do not describe actions or explain yourself.',
-        'Only speak as the overhearing NPC.',
-      ].join(' ');
-
-      const prompt = `Overheard conversation:\n${playerId}: ${playerText}\n${speakerNpc.getName?.() || 'NPC'}: ${npcReply}\n\nInterject briefly.`;
-      const data = await generateDialogue(soulCtx, prompt, {
-        speakingPlayer: playerId || 'default',
-        owner: this.playerId || 'default',
-      });
-
-      const line = (data?.dialogue || '').trim();
-      if (!line || line === '...') return;
-
-      const actual = data.emotion_deltas
-        ? overhearer.applyEmotionDeltas(data.emotion_deltas, playerId || 'default')
-        : null;
-      const deltaStr = this._formatDeltas(actual);
-      const bubbleText = deltaStr ? `${line}\n${deltaStr}` : line;
-      overhearer.showBubble(bubbleText, deltaStr ? 7000 : 4500, { silent: true });
-      this.chatBox?._addLog(`${overhearer.getName()}: ${line}`, '#ffccaa');
-      overhearer.addMemory(
-        `I interrupted after overhearing talk about ${topicEntity.name}: "${line}"`,
-        'dialogue',
-        playerId || 'default',
-        Math.min(0.9, sentiment.importance + 0.08),
-      );
-    } catch {
-      overhearer.showBubble(sentiment.localBubble, 2200, { silent: true });
-    }
+    return this._dialogue.maybeInterjectOverheardConversation({
+      overhearer,
+      speakerNpc,
+      playerText,
+      npcReply,
+      topicEntity,
+      playerId,
+      sentiment,
+    });
   }
 
   _analyzeOverheardSentiment(playerText, npcReply, topicName) {
-    const text = `${playerText} ${npcReply}`.toLowerCase();
-    const escapedName = String(topicName || '').toLowerCase();
-    const directlyNamed = escapedName && text.includes(escapedName);
-    if (!directlyNamed) {
-      return { kind: 'neutral' };
-    }
-
-    const threat = /\b(kill|attack|hurt|smash|destroy|beat|rob|steal from)\b/i.test(text);
-    const negative = /\b(hate|stupid|idiot|dumb|loser|trash|clanker|jerk|sucks?|thief|coward)\b/i.test(text) || threat;
-    const positive = /\b(friend|ally|trust|like|good|nice|helpful|kind|brave|cool|best|loyal)\b/i.test(text);
-
-    if (negative) {
-      return {
-        kind: 'negative',
-        importance: threat ? 0.85 : 0.72,
-        playerDeltas: { trust: -0.05, anger: 0.06, fear: threat ? 0.04 : 0.01 },
-        npcDeltas: { trust: -0.02, anger: 0.03 },
-        replyChance: threat ? 0.8 : 0.55,
-        interjectChance: threat ? 0.45 : 0.25,
-        localBubble: threat ? 'I heard that.' : 'Watch your mouth.',
-        remoteBubble: threat ? 'Back off.' : 'I heard that.',
-      };
-    }
-    if (positive) {
-      return {
-        kind: 'positive',
-        importance: 0.62,
-        playerDeltas: { trust: 0.04, anger: -0.02, fear: 0 },
-        npcDeltas: { trust: 0.02, anger: -0.01 },
-        replyChance: 0.35,
-        interjectChance: 0.15,
-        localBubble: 'Heh. Good.',
-        remoteBubble: '...Noted.',
-      };
-    }
-
-    return { kind: 'neutral' };
+    return this._dialogue.analyzeOverheardSentiment(playerText, npcReply, topicName);
   }
 
   /**
@@ -2495,62 +2066,7 @@ export default class GameScene extends Phaser.Scene {
    * Uses simple pattern matching (same as ChatBox LOCAL_PATTERNS) — no LLM needed.
    */
   _tryExecuteCoercedCommand(npc, text, fromPlayerId) {
-    const runner = this._taskRunners.get(npc.id);
-    if (!runner) return;
-
-    const lower = text.toLowerCase();
-
-    // Give/drop logs
-    if (/\b(give|hand|drop|surrender)\b.*\b(log|wood|stuff|inventory|item|everything)\b/i.test(lower) ||
-        /\b(give|hand\s+over|drop)\b.*\b(me|here)\b/i.test(lower)) {
-      const logCount = npc.logs;
-      if (logCount > 0) {
-        // Drop logs on the ground (NPC can't deliver to a remote player)
-        npc.logs = 0;
-        const conn = this._conn;
-        if (conn?.connected) {
-          conn.send({ type: 'admin', field: 'logs', value: -logCount }); // remove from NPC
-          // Spawn ground items at NPC position
-          conn.send({ type: 'drop_item', item: 'log', amount: logCount, x: npc.x, y: npc.y });
-        }
-        npc.showBubble(`F-fine! Take them! (dropped ${logCount} log${logCount > 1 ? 's' : ''})`, 5000, { silent: true });
-        this.chatBox?._addLog(`${npc.getName()} dropped ${logCount} log${logCount > 1 ? 's' : ''} out of fear of ${fromPlayerId}!`, '#ff8866');
-        // Send feedback to the threatening player
-        this._conn?.send({
-          type: 'chat_reply',
-          to: fromPlayerId,
-          npc_id: npc.id,
-          npc_name: npc.getName(),
-          reply: `*trembling* F-fine! Here! (dropped ${logCount} log${logCount > 1 ? 's' : ''})`,
-          emotion_deltas: null,
-        });
-      } else {
-        npc.showBubble(`I don't have any logs!`, 3000, { silent: true });
-        this._conn?.send({
-          type: 'chat_reply',
-          to: fromPlayerId,
-          npc_id: npc.id,
-          npc_name: npc.getName(),
-          reply: `I-I don't have anything! Please don't hurt me!`,
-          emotion_deltas: null,
-        });
-      }
-      runner.setTasks([{ task: 'idle' }]);
-      return;
-    }
-    // Stop / idle
-    if (/\b(stop|stay|wait|don't move|freeze)\b/i.test(lower)) {
-      runner.setTasks([{ task: 'idle' }]);
-      npc.showBubble(`O-okay! I won't move!`, 3000, { silent: true });
-      this.chatBox?._addLog(`${npc.getName()} froze in fear of ${fromPlayerId}`, '#ff8866');
-      return;
-    }
-    // Follow
-    if (/\b(follow|come\s+with|come\s+here)\b/i.test(lower)) {
-      runner.setTasks([{ task: 'idle' }]);
-      npc.showBubble(`I-I can't leave my post...`, 3000, { silent: true });
-      return;
-    }
+    return this._dialogue.tryExecuteCoercedCommand(npc, text, fromPlayerId);
   }
 
   async _tryLoadNPC(npcId, npc) {
@@ -2571,179 +2087,141 @@ export default class GameScene extends Phaser.Scene {
 
   // ── Hotbar ──────────────────────────────────────────────────────────────────
 
-  _buildHotbar() {
-    const W = this._screenWidth();
-    const H = this._screenHeight();
-    const slotSize = 72;
-    const padding = 6;
-    const items = this._hotbarItems;
-    const totalW = items.length * (slotSize + padding) - padding;
-    const rightPaneX = W - RIGHT_HUD_MARGIN + Math.floor((RIGHT_HUD_MARGIN - totalW) / 2);
-    const startX = Math.max(W - RIGHT_HUD_MARGIN + 12, rightPaneX);
-    const bottomMargin = 18;
-    const y = H - slotSize - bottomMargin;
-
-    // Clear old
-    for (const el of this._hotbarEls) el.destroy();
-    this._hotbarEls = [];
-
-    const add = (obj) => { this.addHud(obj); this._hotbarEls.push(obj); return obj; };
-
-    for (let i = 0; i < items.length; i++) {
-      const x = startX + i * (slotSize + padding);
-      const item = items[i];
-
-      // Slot background
-      add(this.add.rectangle(x + slotSize / 2, y + slotSize / 2, slotSize, slotSize, 0x111122, 0.85)
-        .setStrokeStyle(1, 0x334466).setDepth(50));
-
-      // Sprite icon
-      add(this.add.image(x + slotSize / 2, y + slotSize / 2, SHEET_KEY, item.frame)
-        .setScale(3).setDepth(51));
-
-      // Key number
-      add(this.add.text(x + 4, y + 3, `${i + 1}`, {
-        fontSize: '15px', color: '#ffcc44', fontStyle: 'bold',
-      }).setDepth(52));
-
-      // Label
-      add(this.add.text(x + slotSize / 2, y + slotSize - 3, item.label, {
-        fontSize: '12px', color: '#aabbcc',
-      }).setOrigin(0.5, 1).setDepth(52));
-
-      // Count text (updated each frame)
-      const countText = add(this.add.text(x + slotSize - 4, y + 3, '', {
-        fontSize: '15px', color: '#ffffff', fontStyle: 'bold',
-      }).setOrigin(1, 0).setDepth(52));
-      item._countText = countText;
-    }
+  _loadHotbarAssignments() {
+    return this._inventoryUi.loadHotbarAssignments();
   }
 
-  _updateHotbar() {
-    const p = this.player;
-    if (!p) return;
-    const logs = p.logs ?? 0;
+  _saveHotbarAssignments() {
+    return this._inventoryUi.saveHotbarAssignments();
+  }
 
-    for (const item of this._hotbarItems) {
-      if (!item._countText) continue;
-      if (item.id === 'log') {
-        item._countText.setText(logs > 0 ? `${logs}` : '');
-      } else if (item.id === 'gate') {
-        const canCraft = logs >= (item.cost || 10);
-        item._countText.setText(canCraft ? '1' : '');
-      }
-    }
+  _getHotbarEntry(slotIndex) {
+    return this._inventoryUi.getHotbarEntry(slotIndex);
+  }
+
+  _getAvailableHotbarActions() {
+    return this._inventoryUi.getAvailableHotbarActions();
+  }
+
+  _closeHotbarPicker() {
+    return this._inventoryUi.closeHotbarPicker();
+  }
+
+  _openHotbarPicker(slotIndex, centerX, topY) {
+    return this._inventoryUi.openHotbarPicker(slotIndex, centerX, topY);
+  }
+  _buildHotbar() {
+    return this._hud.buildHotbar();
+  }
+  _updateHotbar() {
+    return this._hud.updateHotbar();
   }
 
   _useHotbarSlot(index) {
-    const item = this._hotbarItems[index];
-    if (!item) return;
+    return this._inventoryUi.useHotbarSlot(index);
+  }
 
-    if (item.action === 'drop_log') {
-      this._dropLog();
-    } else if (item.action === 'place_gate') {
-      this._placeGate();
-    }
+  _toggleCharge() {
+    return this._inventoryUi.toggleCharge();
   }
 
   _dropLog() {
-    const p = this.player;
-    if (!p || this._playerDead) return;
-    if ((p.logs ?? 0) < 1) {
-      this.chatBox?._addLog('No logs to drop.', '#ff4444');
-      return;
-    }
-    const conn = this._conn;
-    if (conn?.connected) {
-      conn.send({ type: 'drop_item', item: 'log', amount: 1 });
-    }
+    return this._inventoryUi.dropLog();
+  }
+
+  _dropStone() {
+    return this._inventoryUi.dropStone();
   }
 
   _placeGate() {
-    const p = this.player;
-    if (!p || this._playerDead) return;
-    if ((p.logs ?? 0) < 10) {
-      this.chatBox?._addLog('Need 10 logs to build a gate.', '#ff4444');
-      return;
-    }
-    const conn = this._conn;
-    if (conn?.connected) {
-      conn.send({ type: 'build_gate' });
-      this.chatBox?._addLog('Building fence gate...', '#88bbff');
-    }
+    return this._inventoryUi.placeGate();
+  }
+
+  _placeAnvil() {
+    return this._inventoryUi.placeAnvil();
+  }
+
+  _placeKiShrine() {
+    return this._inventoryUi.placeKiShrine();
   }
 
   // ── Inventory ───────────────────────────────────────────────────────────────
 
   _toggleInventory() {
-    if (this._inventoryOpen) {
-      this._closeInventory();
-    } else {
-      this._openInventory();
-    }
+    return this._inventoryUi.toggleInventory();
   }
 
   _openInventory() {
-    this._inventoryOpen = true;
-    const W = this._screenWidth();
-    const H = this._screenHeight();
-    const panelW = 390, panelH = 300;
-    const x = Math.floor(W / 2 - panelW / 2);
-    const y = Math.floor(H / 2 - panelH / 2);
+    return this._inventoryUi.openInventory();
+  }
 
-    const add = (obj) => { this.addHud(obj); this._inventoryEls.push(obj); return obj; };
-
-    // Background
-    add(this.add.rectangle(W / 2, H / 2, panelW, panelH, 0x111122, 0.95)
-      .setStrokeStyle(2, 0x334466).setDepth(60));
-
-    // Title
-    add(this.add.text(W / 2, y + 18, 'Inventory [I]', {
-      fontSize: '21px', color: '#ffcc44', fontStyle: 'bold',
-    }).setOrigin(0.5, 0).setDepth(61));
-
-    // Log count
-    const logs = this.player?.logs ?? 0;
-    add(this.add.text(x + 30, y + 60, `Logs: ${logs}`, {
-      fontSize: '20px', color: '#ccaa77',
-    }).setDepth(61));
-
-    // Crafting recipes
-    add(this.add.text(x + 30, y + 100, 'Crafting:', {
-      fontSize: '18px', color: '#aabbcc', fontStyle: 'bold',
-    }).setDepth(61));
-
-    // Gate recipe
-    const canGate = logs >= 10;
-    const gateBtn = add(this.add.text(x + 45, y + 135, `[Gate] - 10 logs ${canGate ? '' : '(need more)'}`, {
-      fontSize: '18px', color: canGate ? '#88bbff' : '#666666',
-      backgroundColor: canGate ? '#22334488' : '#11111188',
-      padding: { x: 8, y: 6 },
-    }).setDepth(61));
-    if (canGate) {
-      gateBtn.setInteractive({ useHandCursor: true });
-      gateBtn.on('pointerdown', () => {
-        this._placeGate();
-        this._closeInventory();
-      });
-      gateBtn.on('pointerover', () => gateBtn.setColor('#aaddff'));
-      gateBtn.on('pointerout', () => gateBtn.setColor('#88bbff'));
-    }
-
-    // Instructions
-    add(this.add.text(x + 30, y + 195, 'Drop logs on ground (key 1),\nthen tell NPC to build fence.\n3 logs on a tile = strongest fence.', {
-      fontSize: '15px', color: '#667788', wordWrap: { width: panelW - 60 },
-    }).setDepth(61));
-
-    // Close hint
-    add(this.add.text(W / 2, y + panelH - 18, 'Press I to close', {
-      fontSize: '15px', color: '#556677',
-    }).setOrigin(0.5, 1).setDepth(61));
+  _closeInvContextMenu() {
+    return this._inventoryUi.closeInvContextMenu();
   }
 
   _closeInventory() {
-    this._inventoryOpen = false;
-    for (const el of this._inventoryEls) el.destroy();
-    this._inventoryEls = [];
+    return this._inventoryUi.closeInventory();
+  }
+
+  _getKiShotUpgrade(actor, stat) {
+    return this._combatFx.getKiShotUpgrade(actor, stat);
+  }
+
+  _getKiBlastRange(actor) {
+    return this._combatFx.getKiBlastRange(actor);
+  }
+
+  _getKiBlastCooldownMs(actor) {
+    return this._combatFx.getKiBlastCooldownMs(actor);
+  }
+
+  _getKiBlastProjectileSpeed(actor) {
+    return this._combatFx.getKiBlastProjectileSpeed(actor);
+  }
+
+  _getKiBlastAimInfo(actor) {
+    return this._combatFx.getKiBlastAimInfo(actor);
+  }
+
+  // ── Ki Blast ─────────────────────────────────────────────────────────────────
+  _fireKiBlast() {
+    return this._combatFx.firePlayerKiBlast();
+  }
+  _getKiBlastImpactPoint(startX, startY, endX, endY, allowEarlyDetonation = false) {
+    return this._combatFx.getKiBlastImpactPoint(startX, startY, endX, endY, allowEarlyDetonation);
+  }
+  _showKiBlastImpact(worldX, worldY, tint = 0x44aaff, radius = 18, placeCrater = false) {
+    return this._combatFx.showKiBlastImpact(worldX, worldY, tint, radius, placeCrater);
+  }
+  _handleReplicatedFxEvents(events) {
+    return this._combatFx.handleReplicatedFxEvents(events);
+  }
+  _renderReplicatedKiBlast(event) {
+    return this._combatFx.renderReplicatedKiBlast(event);
+  }
+  _placeTemporaryCrater(worldX, worldY) {
+    return this._combatFx.placeTemporaryCrater(worldX, worldY);
+  }
+
+  // ── Character Menu ─────────────────────────────────────────────────────────
+
+  _toggleCharMenu() {
+    if (this._charMenuOpen) {
+      this._closeCharMenu();
+    } else {
+      this._openCharMenu();
+    }
+  }
+
+  _openCharMenu() {
+    this._charMenuOpen = true;
+    this._playerDetailPanel?.open();
+  }
+
+  _closeCharMenu() {
+    this._charMenuOpen = false;
+    for (const el of this._charMenuEls) el.destroy();
+    this._charMenuEls = [];
+    this._playerDetailPanel?.close();
   }
 }

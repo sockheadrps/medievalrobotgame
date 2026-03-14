@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import LoginScene from './scenes/LoginScene.js';
 import GameScene from './scenes/GameScene.js';
+import MeditationRealmScene from './scenes/MeditationRealmScene.js';
 
 const HUD_SCALE = 0.7;
 const TOP_HUD_MARGIN = Math.round(190 * HUD_SCALE);
@@ -24,7 +25,7 @@ const config = {
       debug: false
     }
   },
-  scene: [LoginScene, GameScene]
+  scene: [LoginScene, GameScene, MeditationRealmScene]
 };
 
 new Phaser.Game(config);

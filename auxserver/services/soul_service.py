@@ -79,6 +79,8 @@ def _build_template_context(
     }
     if soul.learned_phrases:
         ctx["learned_phrases"] = soul.learned_phrases[:6]
+    if getattr(soul, "nearby_threats", None):
+        ctx["nearby_threats"] = soul.nearby_threats[:6]
     if system_note:
         ctx["system_note"] = system_note
     if topic_entity:
@@ -106,6 +108,7 @@ def build_template_context(
     speaking_player: str = "",
     owner: str = "",
     world_context: dict | None = None,
+    nearby_threats: list | None = None,
 ) -> dict:
     """Build a template context dict from plain values (for API use)."""
     personality = personality or {}
@@ -128,6 +131,8 @@ def build_template_context(
     }
     if learned_phrases:
         ctx["learned_phrases"] = learned_phrases[:6]
+    if nearby_threats:
+        ctx["nearby_threats"] = nearby_threats[:6]
     if system_note:
         ctx["system_note"] = system_note
     if topic_entity:

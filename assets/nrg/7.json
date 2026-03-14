@@ -1,0 +1,43 @@
+{
+  "spriteSheet": "7.png",
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 768,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 24,
+    "rows": 1
+  },
+  "totalFrames": 24,
+  "namedFrames": {
+    "0": "blast_1_down",
+    "1": "blast_1_up",
+    "2": "blast_1_right",
+    "3": "blast_1_left",
+    "4": "blast_1_down_right",
+    "5": "blast_1_down_left",
+    "6": "blast_1_up_right",
+    "7": "blast_1_up_left",
+    "8": "blast_2_down",
+    "9": "blast_2_up",
+    "10": "blast_2_right",
+    "11": "blast_2_left",
+    "12": "blast_2_down_right",
+    "13": "blast_2_down_left",
+    "14": "blast_2_up_right",
+    "15": "blast_2_up_left",
+    "16": "blast_3_down",
+    "17": "blast_3_up",
+    "18": "blast_3_right",
+    "19": "blast_3_left",
+    "20": "blast_3_down_right",
+    "21": "blast_3_down_left",
+    "22": "blast_3_up_right",
+    "23": "blast_3_up_left"
+  }
+}

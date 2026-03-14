@@ -3,7 +3,7 @@
 // Does not fight back. Shakes when hit. Destroyed when HP reaches 0.
 
 import Phaser from 'phaser';
-import { TILE_SIZE } from '../constants.js';
+import { KI_MAX_BASE, KI_MAX_PER_LEVEL, TILE_SIZE } from '../constants.js';
 
 const DUMMY_KEY = 'trainingdummy';
 const DUMMY_FRAME = 0;
@@ -183,6 +183,8 @@ export class TrainingDummy extends Phaser.GameObjects.Container {
       entity.hp = entity.maxHp;
       entity.str += 1;
       entity.def += 1;
+      entity.maxKi = Math.max(entity.maxKi ?? KI_MAX_BASE, KI_MAX_BASE + Math.max(0, (entity.level ?? 1) - 1) * KI_MAX_PER_LEVEL);
+      entity.ki = entity.maxKi;
 
       // Level up visual
       const name = entity.getName?.() ?? 'Player';

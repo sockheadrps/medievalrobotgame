@@ -1,0 +1,200 @@
+{
+  "id": "test_2026-03-10_211736_cb8f58",
+  "name": "Flow Run 3/10/2026, 9:17:36 PM",
+  "created_at": "2026-03-11T01:17:36.700Z",
+  "mode": "flow",
+  "scenario": {
+    "id": "flowchart",
+    "label": "flowchart"
+  },
+  "settings": {
+    "model": "gemma3:12b",
+    "temperature": 0.7,
+    "max_tokens": 300,
+    "context_window": 4096
+  },
+  "initial_state": {
+    "personality": {
+      "cooperation": 0.7,
+      "aggression": 0.15,
+      "neuroticism": 0.35
+    },
+    "emotions": {
+      "trust": 0.7,
+      "fear": 0.05,
+      "anger": 0.02
+    },
+    "baselines": {
+      "trust": 0.5,
+      "fear": 0,
+      "anger": 0
+    },
+    "relationship_label": "allied",
+    "memories": []
+  },
+  "inputs": [
+    {
+      "type": "spawn_player",
+      "params": {
+        "playerId": "player_1",
+        "playerHp": 30
+      }
+    },
+    {
+      "type": "spawn_npc",
+      "params": {
+        "name": "Rusty",
+        "owner": "player_1",
+        "cooperation": 0.5,
+        "aggression": 0.15,
+        "neuroticism": 0.95,
+        "trust": 0.7,
+        "fear": 0.05,
+        "anger": 0.02,
+        "trust_baseline": 0.5,
+        "fear_baseline": 0,
+        "anger_baseline": 0
+      }
+    }
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "input": {
+        "node": "spawn_player",
+        "params": {
+          "playerId": "player_1",
+          "playerHp": 30
+        }
+      },
+      "raw_response": "Player \"player_1\" (HP=30)",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": null,
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 2,
+      "input": {
+        "node": "spawn_npc",
+        "params": {
+          "name": "Rusty",
+          "owner": "player_1",
+          "cooperation": 0.5,
+          "aggression": 0.15,
+          "neuroticism": 0.95,
+          "trust": 0.7,
+          "fear": 0.05,
+          "anger": 0.02,
+          "trust_baseline": 0.5,
+          "fear_baseline": 0,
+          "anger_baseline": 0
+        }
+      },
+      "raw_response": "Spawned \"Rusty\" [player_1] coop=0.5 aggr=0.15 neur=0.95",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 1,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0,
+        "fear": 0.05,
+        "anger": 1
+      },
+      "after": {
+        "trust": 0.7,
+        "fear": 0.05,
+        "anger": 0.02
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    }
+  ],
+  "final_state": {
+    "emotions": {
+      "trust": 0.7,
+      "fear": 0.05,
+      "anger": 0.02
+    },
+    "world": {
+      "npcs": {
+        "Rusty": {
+          "owner": "player_1",
+          "personality": {
+            "cooperation": 0.7,
+            "aggression": 0.15,
+            "neuroticism": 0.35
+          },
+          "trust": 0.7,
+          "fear": 0.05,
+          "anger": 0.02,
+          "trust_baseline": 0.5,
+          "fear_baseline": 0,
+          "anger_baseline": 0,
+          "escalation": 1,
+          "lastInteraction": 0,
+          "memories": [],
+          "npcName": "Rusty",
+          "playerId": "player_1"
+        },
+        "Busty": {
+          "owner": "player_2",
+          "personality": {
+            "cooperation": 0.7,
+            "aggression": 0.15,
+            "neuroticism": 0.35
+          },
+          "trust": 0.7,
+          "fear": 0.05,
+          "anger": 0.02,
+          "trust_baseline": 0.5,
+          "fear_baseline": 0,
+          "anger_baseline": 0,
+          "escalation": 1,
+          "lastInteraction": 0,
+          "memories": [],
+          "npcName": "Busty",
+          "playerId": "player_2"
+        }
+      },
+      "players": {
+        "player_1": {
+          "hp": 30,
+          "maxHp": 30,
+          "npcs": [
+            "Rusty"
+          ]
+        },
+        "player_2": {
+          "hp": 30,
+          "maxHp": 30,
+          "npcs": [
+            "Busty"
+          ]
+        }
+      }
+    }
+  },
+  "summary": {
+    "trust_delta": 0,
+    "fear_delta": 0,
+    "anger_delta": 0,
+    "escalation_max": 1,
+    "clamp_hits": 0,
+    "fallbacks": 0,
+    "memory_count": 0
+  },
+  "notes": ""
+}

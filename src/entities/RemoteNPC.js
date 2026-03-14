@@ -7,6 +7,10 @@ import {
   NFRAME_FACE_DOWN, NFRAME_FACE_UP, NFRAME_FACE_LEFT, NFRAME_FACE_RIGHT,
   NFRAME_WALK1_DOWN, NFRAME_WALK1_UP, NFRAME_WALK1_LEFT, NFRAME_WALK1_RIGHT,
 } from '../constants.js';
+import { createArmorOverlay, getNpcArmorFrameName, syncArmorOverlay } from './ArmorOverlay.js';
+import { createAuraOverlay, syncAuraOverlay } from './AuraOverlay.js';
+import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
+import { applyActorChargeState, initializeActorKiState } from './actorKiState.js';
 
 const SCALE = TILE_SIZE / NPC_FRAME_H;
 const LERP_SPEED = 0.35;
@@ -47,6 +51,8 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this._facing = 'down';
     this._walkToggle = false;
     this._walkTimer = 0;
+    this.armorElite = false;
+    initializeActorKiState(this);
     this._selected = false;
     this._attackable = false;
     this._hovered = false;
@@ -74,6 +80,26 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
       .setOrigin(0, 0.5).setDepth(3);
     this._hpBar = scene.add.rectangle(x - 20, y - TILE_SIZE - 2, 40, 4, 0xcc4444)
       .setOrigin(0, 0.5).setDepth(3);
+
+    // Ki bar (below HP bar)
+    this._kiBarBg = scene.add.rectangle(x - 20, y - TILE_SIZE + 3, 40, 3, 0x222233)
+      .setOrigin(0, 0.5).setDepth(3);
+    this._kiBar = scene.add.rectangle(x - 20, y - TILE_SIZE + 3, 40, 3, 0x4488ff)
+      .setOrigin(0, 0.5).setDepth(3);
+    this._meditationLabel = scene.add.text(x, y - TILE_SIZE - 30, '', {
+      fontSize: '9px', color: '#99ddff', backgroundColor: '#001122aa',
+      padding: { x: 4, y: 2 },
+    }).setOrigin(0.5, 1).setDepth(11).setVisible(false);
+    this._meditationBarBg = scene.add.rectangle(x, y - TILE_SIZE - 20, 34, 4, 0x112233, 0.95)
+      .setDepth(11).setVisible(false);
+    this._meditationBar = scene.add.rectangle(x - 17, y - TILE_SIZE - 20, 34, 4, 0x66bbff, 0.95)
+      .setOrigin(0, 0.5).setDepth(12).setVisible(false);
+
+    this.ki = 20;
+    this.maxKi = 20;
+    this._armorOverlay = createArmorOverlay(scene, this);
+    this._auraOverlay = createAuraOverlay(scene, this);
+    this._barrierOverlay = createBarrierOverlay(scene, this);
 
     this.on('pointerdown', (pointer, _localX, _localY, event) => {
       this.scene?._handleRemoteEntityPointerDown?.(this, pointer, event);
@@ -114,11 +140,16 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this._targetY = state.y;
     this.hp = state.hp ?? this.hp;
     this.maxHp = state.maxHp ?? this.maxHp;
+    this.ki = state.ki ?? this.ki;
+    this.maxKi = state.maxKi ?? this.maxKi;
     this.str = state.str ?? this.str;
     this.def = state.def ?? this.def;
     this.level = state.level ?? this.level;
+    this.kiSkillLevel = state.kiSkillLevel ?? this.kiSkillLevel;
+    this.realmTier = state.realm_tier ?? state.realmTier ?? this.realmTier;
     this.logs = state.logs ?? this.logs;
     this.maxLogs = state.maxLogs ?? this.maxLogs;
+    this.armorElite = !!state.armor_elite;
     this.gathering = state.gathering ?? false;
     this._name = state.name || this._name;
     this._nameLabel?.setText(this._name);
@@ -126,6 +157,14 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     if (state.personality) this._personality = state.personality;
     this._knockedOut = !!state.knocked_out;
     this._carriedBy = state.carried_by ?? null;
+    this.meditating = !!state.meditating;
+    this.meditationStartedAt = Number(state.meditation_started_at || 0);
+    this.meditationUntil = Number(state.meditation_until || 0);
+    this.meditationTotalMs = Number(state.meditation_total_ms || 0);
+    applyActorChargeState(this, state, { facingFallback: this._facing });
+    this.kiDenominations = Array.isArray(state.ki_denominations) ? [...state.ki_denominations] : this.kiDenominations;
+    this.kiKnownAugments = (state.ki_known_augments && typeof state.ki_known_augments === 'object') ? { ...state.ki_known_augments } : this.kiKnownAugments;
+    this.kiEquippedAugments = (state.ki_equipped_augments && typeof state.ki_equipped_augments === 'object') ? { ...state.ki_equipped_augments } : this.kiEquippedAugments;
 
     if (state.dead && !this._dead) {
       this._dead = true;
@@ -134,6 +173,9 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
       this._ownerLabel?.setVisible(false);
       this._hpBar?.setVisible(false);
       this._hpBarBg?.setVisible(false);
+      this._kiBar?.setVisible(false);
+      this._kiBarBg?.setVisible(false);
+      this._armorOverlay?.setVisible(false);
     } else if (!state.dead && this._dead) {
       this._dead = false;
       this.setVisible(true);
@@ -141,8 +183,24 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
       this._ownerLabel?.setVisible(true);
       this._hpBar?.setVisible(true);
       this._hpBarBg?.setVisible(true);
+      this._kiBar?.setVisible(true);
+      this._kiBarBg?.setVisible(true);
     }
     this._updateVisualState();
+  }
+
+  _updateMeditationVisuals() {
+    const active = !!this.meditating;
+    const totalSec = Math.max(0.001, this.meditationTotalMs / 1000);
+    const remaining = Math.max(0, this.meditationUntil - (Date.now() / 1000));
+    const pct = Phaser.Math.Clamp(remaining / totalSec, 0, 1);
+    this._meditationLabel?.setVisible(active).setText(active ? `Meditating ${Math.ceil(remaining)}s` : '');
+    this._meditationBarBg?.setVisible(active);
+    this._meditationBar?.setVisible(active);
+    this._meditationLabel?.setPosition(this.x, this.y - TILE_SIZE - 26);
+    this._meditationBarBg?.setPosition(this.x, this.y - TILE_SIZE - 16);
+    this._meditationBar?.setPosition(this.x - 17, this.y - TILE_SIZE - 16);
+    this._meditationBar?.setDisplaySize(34 * pct, 4);
   }
 
   _updateVisualState() {
@@ -164,7 +222,11 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
   }
 
   update(time) {
-    if (this._dead) return;
+    if (this._dead) {
+      this._armorOverlay?.setVisible(false);
+      this._updateMeditationVisuals();
+      return;
+    }
 
     const prevX = this.x;
     const prevY = this.y;
@@ -184,7 +246,13 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
 
     if (this._knockedOut) {
       this.setFrame(FACE_FRAMES[this._facing]);
+    } else if (this.meditating) {
+      this.stop();
+      this.setFlipX(false);
+      this.setTint(0x88bbff);
+      this.setFrame(FACE_FRAMES.down);
     } else if (moving) {
+      this.clearTint();
       if (Math.abs(dx) > Math.abs(dy)) this._facing = dx > 0 ? 'right' : 'left';
       else this._facing = dy > 0 ? 'down' : 'up';
 
@@ -194,6 +262,7 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
       }
       this.setFrame(this._walkToggle ? WALK_FRAMES[this._facing] : FACE_FRAMES[this._facing]);
     } else {
+      this.clearTint();
       this.setFrame(FACE_FRAMES[this._facing]);
     }
 
@@ -201,6 +270,8 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this._ownerLabel?.setPosition(this.x, this.y - TILE_SIZE - 20);
     this._hpBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
     this._hpBar?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
+    this._kiBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
+    this._kiBar?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
     this._bubble?.setPosition(this.x, this.y - TILE_SIZE - 30);
     this._selectRing?.setPosition(this.x, this.y - 6);
     this._selectRingPulse?.setPosition(this.x, this.y - 6);
@@ -209,11 +280,20 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
       this._selectRingPulse.setRadius(pulse);
     }
     this._attackRing?.setPosition(this.x, this.y - 6);
+    this._updateMeditationVisuals();
 
     const hpPct = this.hp / this.maxHp;
     this._hpBar?.setDisplaySize(40 * hpPct, 4);
     const color = hpPct > 0.5 ? 0xcc4444 : hpPct > 0.25 ? 0xffaa00 : 0xff2222;
     this._hpBar?.setFillStyle(color);
+
+    const kiPct = this.maxKi > 0 ? this.ki / this.maxKi : 0;
+    this._kiBar?.setDisplaySize(40 * Phaser.Math.Clamp(kiPct, 0, 1), 3);
+    const kiColor = (this.charging || this.chargePower > 0.01) ? 0x67d8ff : kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa;
+    this._kiBar?.setFillStyle(kiColor);
+    syncArmorOverlay(this._armorOverlay, this, getNpcArmorFrameName(this, moving, this._walkToggle), this.armorElite && !this._dead);
+    syncAuraOverlay(this._auraOverlay, this, (this.charging || this.chargePower > 0.01) && !this._dead && !this._knockedOut);
+    syncBarrierOverlay(this._barrierOverlay, this);
   }
 
   showBubble(text, duration = 4000) {
@@ -259,10 +339,17 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this._ownerLabel?.destroy();
     this._hpBar?.destroy();
     this._hpBarBg?.destroy();
+    this._kiBar?.destroy();
+    this._kiBarBg?.destroy();
+    this._meditationLabel?.destroy();
+    this._meditationBar?.destroy();
+    this._meditationBarBg?.destroy();
     this._bubble?.destroy();
     this._selectRing?.destroy();
     this._selectRingPulse?.destroy();
     this._attackRing?.destroy();
+    this._auraOverlay?.destroy();
+    this._armorOverlay?.destroy();
     super.destroy(fromScene);
   }
 }

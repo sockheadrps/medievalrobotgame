@@ -30,7 +30,16 @@ const INTENT_TO_TASK = {
   gather_wood:      { task: 'gather', item: 'wood' },
   give_logs:        { task: 'give_logs' },
   build_fence:      { task: 'build_fence' },
+  light_campfire:   { task: 'light_campfire' },
+  guard_fire:       { task: 'guard_fire' },
   train:            { task: 'train' },
+  learn_ki:         { task: 'learn_ki' },
+  show_blast:       { task: 'show_blast' },
+  practice_ki:      { task: 'practice_ki' },
+  pickup_stone:     { task: 'pickup_stone' },
+  refine_stone:     { task: 'refine_stone' },
+  give_materials:   { task: 'give_materials' },
+  meditate:         { task: 'meditate' },
   socialize_npc:    null, // handled specially — needs target info
   steal_logs:       null, // handled specially — needs target info
 };
@@ -99,7 +108,7 @@ export class NPCBrain {
 
   /** Called every frame from GameScene. */
   update(delta) {
-    if (!this._enabled || this._npc.isDead() || this._pending) return;
+    if (!this._enabled || this._npc.isDead() || this._npc.meditating || this._pending) return;
 
     const now = Date.now();
     const elapsed = now - this._lastDecisionTime;
@@ -210,6 +219,38 @@ export class NPCBrain {
       }
     }
 
+    // Nearby threats tracked from recent combat events
+    const nearbyThreats = [];
+    const recentThreats = scene._recentThreats || {};
+    for (const rp of Object.values(scene._remotePlayers || {})) {
+      if (rp.isDead?.()) continue;
+      const threatKey = `player:${rp.playerId}`;
+      if (!recentThreats[threatKey]) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rp.x, rp.y) / TILE_SIZE;
+      if (dist >= 12) continue;
+      nearbyThreats.push({
+        id: rp.playerId,
+        type: 'player',
+        name: rp.playerId,
+        distance: parseFloat(dist.toFixed(1)),
+      });
+    }
+    for (const rnpc of Object.values(scene._remoteNPCSprites || {})) {
+      if (rnpc.isDead?.()) continue;
+      const threatKey = `npc:${rnpc.npcId}`;
+      if (!recentThreats[threatKey]) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rnpc.x, rnpc.y) / TILE_SIZE;
+      if (dist >= 12) continue;
+      nearbyThreats.push({
+        id: `${rnpc.ownerPid}_${rnpc.npcId}`,
+        npc_id: rnpc.npcId,
+        type: 'enemy_npc',
+        name: rnpc.getName(),
+        owner: rnpc.ownerPid,
+        distance: parseFloat(dist.toFixed(1)),
+      });
+    }
+
     // Nearby trees (un-chopped)
     let nearbyTrees = 0;
     for (const tree of (scene.trees ?? [])) {
@@ -287,6 +328,7 @@ export class NPCBrain {
         logs: player?.logs ?? 0,
       },
       nearby_entities: nearbyEntities,
+      nearby_threats: nearbyThreats,
       nearby_trees: nearbyTrees,
       learned_phrases: soul.learned_phrases || [],
       recent_events: recentEvents,
@@ -300,8 +342,8 @@ export class NPCBrain {
       'follow', 'stay_near_player', 'defend_player', 'attack_enemy',
       'attack_player', 'attack_npc',
       'retreat', 'hold_position', 'observe', 'do_nothing',
-      'gather_wood', 'give_logs', 'build_fence', 'train',
-      'socialize_npc', 'steal_logs',
+      'gather_wood', 'give_logs', 'build_fence', 'light_campfire', 'guard_fire', 'train',
+      'learn_ki', 'socialize_npc', 'steal_logs',
     ];
   }
 
@@ -368,7 +410,10 @@ export class NPCBrain {
     const isDelivering = currentTasks.some(t => t.task === 'give_logs');
     const isSocializing = currentTasks.some(t => t.task === 'socialize_npc');
     const isStealing = currentTasks.some(t => t.task === 'steal_logs');
-    if (isDelivering || isSocializing || isStealing) {
+    const isLearningKi = currentTasks.some(t => t.task === 'learn_ki');
+    const isPracticingKi = currentTasks.some(t => t.task === 'practice_ki');
+    const isRefining = currentTasks.some(t => t.task === 'refine_stone');
+    if (isDelivering || isSocializing || isStealing || isLearningKi || isPracticingKi || isRefining) {
       this._lastIntent = intent;
       this._lastDecision = decision;
       return;
@@ -500,7 +545,37 @@ export class NPCBrain {
       }
     }
 
+    const hasThreats = this._getNearbyThreatCount() > 0;
+    if (hasThreats) {
+      if (out.secondary_intent === 'gather_wood') out.secondary_intent = null;
+      if (!['retreat', 'defend_player'].includes(out.primary_intent)) {
+        out.secondary_intent = null;
+      }
+    }
+
     return out;
+  }
+
+  _getNearbyThreatCount() {
+    const scene = this._scene;
+    const npc = this._npc;
+    const recentThreats = scene?._recentThreats || {};
+    let count = 0;
+
+    for (const rp of Object.values(scene?._remotePlayers || {})) {
+      if (rp.isDead?.()) continue;
+      if (!recentThreats[`player:${rp.playerId}`]) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rp.x, rp.y) / TILE_SIZE;
+      if (dist < 12) count++;
+    }
+    for (const rnpc of Object.values(scene?._remoteNPCSprites || {})) {
+      if (rnpc.isDead?.()) continue;
+      if (!recentThreats[`npc:${rnpc.npcId}`]) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rnpc.x, rnpc.y) / TILE_SIZE;
+      if (dist < 12) count++;
+    }
+
+    return count;
   }
 }
 

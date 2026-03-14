@@ -9,7 +9,20 @@ import {
   NFRAME_FACE_DOWN, NFRAME_FACE_UP, NFRAME_FACE_RIGHT, NFRAME_FACE_LEFT,
   NFRAME_WALK1_DOWN, NFRAME_WALK1_UP, NFRAME_WALK1_RIGHT, NFRAME_WALK1_LEFT,
   NFRAME_PUNCH_RIGHT, NFRAME_PUNCH_LEFT,
+  KI_MAX_BASE, KI_MAX_PER_LEVEL, KI_REGEN_MS, KI_BLAST_BASE_COST, KI_BLAST_BASE_DMG, KI_BLAST_SCALE,
 } from '../constants.js';
+import { createArmorOverlay, getNpcArmorFrameName, syncArmorOverlay } from './ArmorOverlay.js';
+import { createAuraOverlay, syncAuraOverlay } from './AuraOverlay.js';
+import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
+import {
+  applyActorChargeState,
+  applyActorMeditationState,
+  getEquippedActorKiAugment,
+  hasActorKiAugment,
+  hasActorKiDenomination,
+  hasActorKiMove,
+  initializeActorKiState,
+} from './actorKiState.js';
 
 const HP_REGEN_MS = 30000;
 const SCALE = TILE_SIZE / NPC_FRAME_H; // 48/32 = 1.5
@@ -69,6 +82,19 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._knockedUntil = 0;
     this._carriedBy = null;
     this._regenAccum = 0;
+
+    // Ki pool
+    this.maxKi = KI_MAX_BASE;
+    this.ki    = this.maxKi;
+    this.infKi = false;
+    this._kiRegenAccum = 0;
+    this.blastLevel = 0;
+    this.kiSkillLevel = 1;
+    this.kiSkillXp = 0;
+    this.realmTier = 0;
+    this.realmCrystalT1 = 0;
+    this.kiMoves = [];
+    initializeActorKiState(this);
     this._emotionDecayAccum = 0;
     this._memoryDecayAccum = 0;
     this._emotionReactAccum = 0; // periodic check for emotion-driven behavior
@@ -80,6 +106,11 @@ export class NPC extends Phaser.GameObjects.Sprite {
     // Inventory — capacity scales with level
     this.logs    = 0;
     this.maxLogs = this._calcMaxLogs();
+    this.stones  = 0;
+    this.bastalite = 0;
+    this.crystalPristine = 0;
+    this.crystalNormal = 0;
+    this.crystalPoor = 0;
 
     // Movement
     this._moveTarget = null;
@@ -89,6 +120,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._baseSpeed  = 100;
     this._facing     = 'down';
     this._punching   = false;
+    this.armorElite = false;
 
     // Soul / personality
     this.soul = _makeSoul();
@@ -105,6 +137,14 @@ export class NPC extends Phaser.GameObjects.Sprite {
       padding: { x: 4, y: 3 }, wordWrap: { width: 160 },
     }).setOrigin(0.5, 1).setDepth(10).setVisible(false);
     this._bubbleTimer = null;
+    this._meditationLabel = scene.add.text(x, y - TILE_SIZE - 36, '', {
+      fontSize: '9px', color: '#99ddff', backgroundColor: '#001122aa',
+      padding: { x: 4, y: 2 },
+    }).setOrigin(0.5, 1).setDepth(11).setVisible(false);
+    this._meditationBarBg = scene.add.rectangle(x, y - TILE_SIZE - 26, 34, 4, 0x112233, 0.95)
+      .setDepth(11).setVisible(false);
+    this._meditationBar = scene.add.rectangle(x - 17, y - TILE_SIZE - 26, 34, 4, 0x66bbff, 0.95)
+      .setOrigin(0, 0.5).setDepth(12).setVisible(false);
 
     // Selection ring
     this._ring = scene.add.circle(x, y - 6, 20, 0x22d8ff, 0.34)
@@ -120,6 +160,15 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._hpBar = scene.add.rectangle(x - 20, y - TILE_SIZE - 2, 40, 4, 0x44ff44)
       .setOrigin(0, 0.5).setDepth(3);
 
+    // Ki bar (below HP bar)
+    this._kiBarBg = scene.add.rectangle(x - 20, y - TILE_SIZE + 3, 40, 3, 0x222233)
+      .setOrigin(0, 0.5).setDepth(3);
+    this._kiBar = scene.add.rectangle(x - 20, y - TILE_SIZE + 3, 40, 3, 0x4488ff)
+      .setOrigin(0, 0.5).setDepth(3);
+    this._armorOverlay = createArmorOverlay(scene, this);
+    this._auraOverlay = createAuraOverlay(scene, this);
+    this._barrierOverlay = createBarrierOverlay(scene, this);
+
     this._ensureAnims(scene);
   }
 
@@ -130,6 +179,45 @@ export class NPC extends Phaser.GameObjects.Sprite {
   isDead()        { return this._dead; }
   isKnockedOut()  { return this._knockedOut; }
   getFacing()     { return this._facing; }
+
+  setMeditationState(state = {}) {
+    applyActorMeditationState(this, state, () => this._updateMeditationVisuals());
+  }
+
+  setChargeState(state = {}) {
+    applyActorChargeState(this, state, { facingFallback: this._facing });
+  }
+
+  hasKiMove(moveId) {
+    return hasActorKiMove(this, moveId);
+  }
+
+  hasKiDenomination(denominationId) {
+    return hasActorKiDenomination(this, denominationId);
+  }
+
+  hasKiAugment(moveId, augmentId) {
+    return hasActorKiAugment(this, moveId, augmentId);
+  }
+
+  getEquippedKiAugment(moveId) {
+    return getEquippedActorKiAugment(this, moveId);
+  }
+
+  _updateMeditationVisuals() {
+    const active = !!this.meditating;
+    const nowSec = Date.now() / 1000;
+    const totalSec = Math.max(0.001, this.meditationTotalMs / 1000);
+    const remaining = Math.max(0, this.meditationUntil - nowSec);
+    const pct = Phaser.Math.Clamp(remaining / totalSec, 0, 1);
+    this._meditationLabel?.setVisible(active).setText(active ? `Meditating ${Math.ceil(remaining)}s` : '');
+    this._meditationBarBg?.setVisible(active);
+    this._meditationBar?.setVisible(active);
+    this._meditationLabel?.setPosition(this.x, this.y - TILE_SIZE - 34);
+    this._meditationBarBg?.setPosition(this.x, this.y - TILE_SIZE - 24);
+    this._meditationBar?.setPosition(this.x - 17, this.y - TILE_SIZE - 24);
+    this._meditationBar?.setDisplaySize(34 * pct, 4);
+  }
 
   /** Play punch frame toward a target. */
   playAttack(targetX) {
@@ -160,6 +248,22 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this.hp = Math.min(this.maxHp, this.hp + amount);
   }
 
+  showHealEffect(amount = 1) {
+    const scene = this.scene;
+    if (!scene?.add || !scene?.tweens || amount <= 0) return;
+    const healText = scene.add.text(this.x, this.y - TILE_SIZE, `+${amount}`, {
+      fontSize: '11px', color: '#6dff8a', fontStyle: 'bold',
+      backgroundColor: '#103018cc', padding: { x: 4, y: 2 },
+    }).setOrigin(0.5, 1).setDepth(20);
+    scene.tweens.add({
+      targets: healText,
+      y: healText.y - 16,
+      alpha: 0,
+      duration: 900,
+      onComplete: () => healText.destroy(),
+    });
+  }
+
   grantXP(amount, reason = '') {
     const xp = Math.max(0, Math.floor(amount || 0));
     if (xp <= 0) return false;
@@ -173,6 +277,8 @@ export class NPC extends Phaser.GameObjects.Sprite {
       this.hp = this.maxHp;
       this.str += 1;
       this.def += 1;
+      this.maxKi = Math.max(this.maxKi, KI_MAX_BASE + Math.max(0, this.level - 1) * KI_MAX_PER_LEVEL);
+      this.ki = this.maxKi;
       this.maxLogs = this._calcMaxLogs();
       leveled = true;
     }
@@ -209,6 +315,33 @@ export class NPC extends Phaser.GameObjects.Sprite {
     return leveled;
   }
 
+  /** Current ki blast cost, reduced 2% per blast level (compound). */
+  getBlastCost() {
+    return Math.max(1, Math.round(KI_BLAST_BASE_COST * Math.pow(1 - KI_BLAST_SCALE, this.blastLevel)));
+  }
+
+  /** Current ki blast damage, increased 2% per blast level (compound). */
+  getBlastDmg() {
+    return Math.max(1, Math.round(KI_BLAST_BASE_DMG * Math.pow(1 + KI_BLAST_SCALE, this.blastLevel)));
+  }
+
+  /** Try to fire a ki blast. Returns { cost, dmg } or null if not enough ki. */
+  tryBlast() {
+    const cost = this.getBlastCost();
+    if (this.infKi) {
+      this.ki = this.maxKi;
+      const dmg = this.getBlastDmg();
+      this.blastLevel += 1;
+      return { cost: 0, dmg };
+    }
+    if (this.ki < cost) return null;
+    this.ki -= cost;
+    this._kiRegenAccum = 0;
+    const dmg = this.getBlastDmg();
+    this.blastLevel += 1;
+    return { cost, dmg };
+  }
+
   _triggerDeath() {
     this._dead = true;
     this._knockedOut = false;
@@ -216,6 +349,8 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._nameLabel?.setVisible(false);
     this._hpBar?.setVisible(false);
     this._hpBarBg?.setVisible(false);
+    this._kiBar?.setVisible(false);
+    this._kiBarBg?.setVisible(false);
     this._ring?.setVisible(false);
     this.hideBubble();
 
@@ -228,12 +363,15 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._knockedOut = false;
     this._carriedBy = null;
     this.hp = this.maxHp;
+    this.ki = this.maxKi;
     this.clearTint();
     this.setAlpha(1);
     this.setVisible(true);
     this._nameLabel?.setVisible(true);
     this._hpBar?.setVisible(true);
     this._hpBarBg?.setVisible(true);
+    this._kiBar?.setVisible(true);
+    this._kiBarBg?.setVisible(true);
   }
 
   setKnockedOut(on, opts = {}) {
@@ -725,7 +863,13 @@ export class NPC extends Phaser.GameObjects.Sprite {
       name: this._name,
       x: this.x,
       y: this.y,
-      stats: { maxHp: this.maxHp, hp: this.hp, str: this.str, def: this.def, level: this.level, xp: this.xp, logs: this.logs },
+      stats: { maxHp: this.maxHp, hp: this.hp, str: this.str, def: this.def, level: this.level, xp: this.xp, logs: this.logs, stones: this.stones, bastalite: this.bastalite, crystalPristine: this.crystalPristine, crystalNormal: this.crystalNormal, crystalPoor: this.crystalPoor, realmCrystalT1: this.realmCrystalT1, maxKi: this.maxKi, ki: this.ki, infKi: !!this.infKi, blastLevel: this.blastLevel, hasKiBlast: !!this._hasKiBlast, kiSkillLevel: this.kiSkillLevel, kiSkillXp: this.kiSkillXp, realmTier: this.realmTier, kiMoves: this.kiMoves ?? [], kiDenominations: this.kiDenominations ?? [], kiKnownAugments: this.kiKnownAugments ?? {}, kiEquippedAugments: this.kiEquippedAugments ?? {}, kiUpgrades: this.kiUpgrades ?? {}, auraTint: this.auraTint, auraAlpha: this.auraAlpha },
+      armorElite: !!this.armorElite,
+      meditating: !!this.meditating,
+      meditation_started_at: this.meditationStartedAt,
+      meditation_until: this.meditationUntil,
+      meditation_total_ms: this.meditationTotalMs,
+      meditation_crystal_quality: this.meditationCrystalQuality,
       soul: this.soul,
     };
   }
@@ -742,8 +886,33 @@ export class NPC extends Phaser.GameObjects.Sprite {
       this.level = data.stats.level ?? this.level;
       this.xp    = data.stats.xp ?? this.xp;
       this.logs  = data.stats.logs ?? this.logs;
+      this.stones = data.stats.stones ?? this.stones;
+      this.bastalite = data.stats.bastalite ?? this.bastalite;
+      this.crystalPristine = data.stats.crystalPristine ?? this.crystalPristine;
+      this.crystalNormal = data.stats.crystalNormal ?? this.crystalNormal;
+      this.crystalPoor = data.stats.crystalPoor ?? this.crystalPoor;
+      this.realmCrystalT1 = data.stats.realmCrystalT1 ?? data.realm_crystal_t1 ?? this.realmCrystalT1;
+      this.auraTint = data.stats.auraTint ?? this.auraTint;
+      this.auraAlpha = data.stats.auraAlpha ?? this.auraAlpha;
+      this.barrierProcUntil = Number(data.stats.barrierProcUntil ?? data.barrier_proc_until ?? this.barrierProcUntil);
+      this.barrierProcFacing = data.stats.barrierProcFacing ?? data.barrier_proc_facing ?? this.barrierProcFacing;
       this.maxLogs = this._calcMaxLogs();
+      this.maxKi = data.stats.maxKi ?? this.maxKi;
+      this.ki    = data.stats.ki ?? this.ki;
+      this.infKi = !!(data.stats.infKi ?? data.inf_ki ?? this.infKi);
+      this.blastLevel = data.stats.blastLevel ?? this.blastLevel;
+      this.kiSkillLevel = data.stats.kiSkillLevel ?? this.kiSkillLevel;
+      this.kiSkillXp = data.stats.kiSkillXp ?? this.kiSkillXp;
+      this.realmTier = data.stats.realmTier ?? this.realmTier;
+      this.kiMoves = Array.isArray(data.stats.kiMoves) ? [...data.stats.kiMoves] : (Array.isArray(data.ki_moves) ? [...data.ki_moves] : this.kiMoves);
+      this.kiDenominations = Array.isArray(data.stats.kiDenominations) ? [...data.stats.kiDenominations] : (Array.isArray(data.ki_denominations) ? [...data.ki_denominations] : this.kiDenominations);
+      this.kiKnownAugments = (data.stats.kiKnownAugments && typeof data.stats.kiKnownAugments === 'object') ? { ...data.stats.kiKnownAugments } : ((data.ki_known_augments && typeof data.ki_known_augments === 'object') ? { ...data.ki_known_augments } : this.kiKnownAugments);
+      this.kiEquippedAugments = (data.stats.kiEquippedAugments && typeof data.stats.kiEquippedAugments === 'object') ? { ...data.stats.kiEquippedAugments } : ((data.ki_equipped_augments && typeof data.ki_equipped_augments === 'object') ? { ...data.ki_equipped_augments } : this.kiEquippedAugments);
+      this.kiUpgrades = (data.stats.kiUpgrades && typeof data.stats.kiUpgrades === 'object') ? { ...data.stats.kiUpgrades } : ((data.ki_upgrades && typeof data.ki_upgrades === 'object') ? { ...data.ki_upgrades } : this.kiUpgrades);
+      if (data.stats.hasKiBlast) this._hasKiBlast = true;
     }
+    this.armorElite = !!(data.armorElite ?? data.stats?.armorElite ?? this.armorElite);
+    this.setMeditationState(data);
     if (data.soul) {
       this.soul = {
         personality: data.soul.personality ?? this.soul.personality,
@@ -775,18 +944,56 @@ export class NPC extends Phaser.GameObjects.Sprite {
   // ── Update ────────────────────────────────────────────────────────────────
 
   update(delta) {
-    if (this._dead) return;
+    if (this._dead) {
+      this._armorOverlay?.setVisible(false);
+      this._updateMeditationVisuals();
+      return;
+    }
     if (this._knockedOut) {
       this._nameLabel?.setPosition(this.x, this.y - TILE_SIZE - 8);
       this._hpBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
       this._hpBar?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
+      this._kiBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
+      this._kiBar?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
       this._ring?.setPosition(this.x, this.y - 4);
       this._ringPulse?.setPosition(this.x, this.y - 4);
       this._hpBar?.setVisible(true);
       this._hpBarBg?.setVisible(true);
+      this._kiBar?.setVisible(true);
+      this._kiBarBg?.setVisible(true);
       this._hpBar?.setDisplaySize(0, 4);
+      this._kiBar?.setDisplaySize(0, 3);
+      syncArmorOverlay(this._armorOverlay, this, getNpcArmorFrameName(this, false, false), this.armorElite);
+      this._updateMeditationVisuals();
       return;
     }
+
+    if (this.meditating) {
+      this.stopMoving();
+      this.stop();
+      this.setFlipX(false);
+      this.setFrame(NFRAME_FACE_DOWN);
+      this.setTint(0x88bbff);
+      this._nameLabel?.setPosition(this.x, this.y - TILE_SIZE - 10);
+      this._bubble?.setPosition(this.x, this.y - TILE_SIZE - 22);
+      this._ring?.setPosition(this.x, this.y - 6);
+      this._ringPulse?.setPosition(this.x, this.y - 6);
+      this._hpBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
+      this._hpBar?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
+      this._kiBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
+      this._kiBar?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
+      syncArmorOverlay(this._armorOverlay, this, getNpcArmorFrameName(this, false, false), this.armorElite && !this._dead);
+      const hpPct = this.hp / this.maxHp;
+      this._hpBar?.setDisplaySize(40 * hpPct, 4);
+      this._hpBar?.setFillStyle(hpPct > 0.5 ? 0x44ff44 : hpPct > 0.25 ? 0xffaa00 : 0xff4444);
+      const kiPct = this.maxKi > 0 ? this.ki / this.maxKi : 0;
+      this._kiBar?.setDisplaySize(40 * kiPct, 3);
+      this._kiBar?.setFillStyle(kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa);
+      this._updateMeditationVisuals();
+      return;
+    }
+
+    this.clearTint();
 
     // Keep maxLogs in sync with level
     this.maxLogs = this._calcMaxLogs();
@@ -800,6 +1007,17 @@ export class NPC extends Phaser.GameObjects.Sprite {
       }
     } else {
       this._regenAccum = 0;
+    }
+
+    // Ki regen
+    if (this.ki < this.maxKi) {
+      this._kiRegenAccum += delta;
+      if (this._kiRegenAccum >= KI_REGEN_MS) {
+        this._kiRegenAccum -= KI_REGEN_MS;
+        this.ki = Math.min(this.maxKi, this.ki + 1);
+      }
+    } else {
+      this._kiRegenAccum = 0;
     }
 
     // Emotion decay — drift toward per-relationship baselines
@@ -944,12 +1162,29 @@ export class NPC extends Phaser.GameObjects.Sprite {
     }
     this._hpBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
     this._hpBar?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
+    this._kiBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
+    this._kiBar?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
+    syncArmorOverlay(
+      this._armorOverlay,
+      this,
+      getNpcArmorFrameName(this, !!this._moveTarget, !!this.anims?.isPlaying),
+      this.armorElite && !this._dead
+    );
+    syncAuraOverlay(this._auraOverlay, this, (this.charging || this.chargePower > 0.01) && !this._dead && !this._knockedOut);
+    syncBarrierOverlay(this._barrierOverlay, this);
 
     // Update HP bar width
     const hpPct = this.hp / this.maxHp;
     this._hpBar?.setDisplaySize(40 * hpPct, 4);
     const color = hpPct > 0.5 ? 0x44ff44 : hpPct > 0.25 ? 0xffaa00 : 0xff4444;
     this._hpBar?.setFillStyle(color);
+
+    // Update Ki bar width
+    const kiPct = this.maxKi > 0 ? this.ki / this.maxKi : 0;
+    this._kiBar?.setDisplaySize(40 * Phaser.Math.Clamp(kiPct, 0, 1), 3);
+    const kiColor = (this.charging || this.chargePower > 0.01) ? 0x67d8ff : kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa;
+    this._kiBar?.setFillStyle(kiColor);
+    this._updateMeditationVisuals();
   }
 
   // ── Animations ────────────────────────────────────────────────────────────
@@ -992,10 +1227,17 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._bubbleTimer?.remove();
     this._nameLabel?.destroy();
     this._bubble?.destroy();
+    this._meditationLabel?.destroy();
+    this._meditationBar?.destroy();
+    this._meditationBarBg?.destroy();
     this._ring?.destroy();
     this._ringPulse?.destroy();
     this._hpBar?.destroy();
     this._hpBarBg?.destroy();
+    this._kiBar?.destroy();
+    this._kiBarBg?.destroy();
+    this._auraOverlay?.destroy();
+    this._armorOverlay?.destroy();
     super.destroy(fromScene);
   }
 }

@@ -34,9 +34,32 @@ def _save_player_state(pid: str):
         "username": pid,
         "x": p["x"], "y": p["y"],
         "hp": p["hp"], "maxHp": p["maxHp"],
+        "ki": p.get("ki", 20), "maxKi": p.get("maxKi", 20),
+        "blastLevel": p.get("blastLevel", 0),
+        "inf_ki": p.get("inf_ki", False),
+        "kiSkillLevel": p.get("kiSkillLevel", 1),
+        "kiSkillXp": p.get("kiSkillXp", 0),
+        "realm_tier": p.get("realm_tier", 0),
+        "realm_insight": p.get("realm_insight", 0),
+        "realm_crystal_t1": p.get("realm_crystal_t1", 0),
+        "ki_upgrades": p.get("ki_upgrades", {}),
         "str": p["str"], "def": p["def"],
         "level": p["level"], "xp": p["xp"],
         "logs": p["logs"],
+        "stones": p.get("stones", 0),
+        "bastalite": p.get("bastalite", 0),
+        "crystal_pristine": p.get("crystal_pristine", 0),
+        "crystal_normal": p.get("crystal_normal", 0),
+        "crystal_poor": p.get("crystal_poor", 0),
+        "armor_elite": p.get("armor_elite", False),
+        "armor_elite_inv": p.get("armor_elite_inv", False),
+        "ki_moves": p.get("ki_moves", []),
+        "ki_denominations": p.get("ki_denominations", []),
+        "ki_known_augments": p.get("ki_known_augments", {}),
+        "ki_equipped_augments": p.get("ki_equipped_augments", {}),
+        "ki_upgrades": p.get("ki_upgrades", {}),
+        "aura_tint": p.get("aura_tint", 0x4fd6ff),
+        "aura_alpha": p.get("aura_alpha", 0.42),
         "npc_ids": p.get("npc_ids", []),
     }
     save_player(pid, data)
@@ -72,12 +95,55 @@ async def game_loop():
                 "facing": p["facing"], "anim": p["anim"],
                 "punching": p["punching"],
                 "hp": p["hp"], "maxHp": p["maxHp"],
+                "ki": p.get("ki", 20), "maxKi": p.get("maxKi", 20),
+                "inf_ki": p.get("inf_ki", False),
+                "blastLevel": p.get("blastLevel", 0),
+                "kiSkillLevel": p.get("kiSkillLevel", 1),
+                "kiSkillXp": p.get("kiSkillXp", 0),
+                "realm_tier": p.get("realm_tier", 0),
+                "realm_insight": p.get("realm_insight", 0),
+                "realm_crystal_t1": p.get("realm_crystal_t1", 0),
+                "ki_upgrades": p.get("ki_upgrades", {}),
+                "ki_moves": p.get("ki_moves", []),
                 "str": p["str"], "def": p["def"],
                 "level": p["level"], "xp": p["xp"],
                 "logs": p["logs"],
+                "stones": p.get("stones", 0),
+                "bastalite": p.get("bastalite", 0),
+                "crystal_pristine": p.get("crystal_pristine", 0),
+                "crystal_normal": p.get("crystal_normal", 0),
+                "crystal_poor": p.get("crystal_poor", 0),
                 "dead": p.get("dead", False),
+                "knocked_out": p.get("knocked_out", False),
+                "knocked_until": p.get("knocked_until"),
+                "meditating": p.get("meditating", False),
+                "meditation_started_at": p.get("meditation_started_at"),
+                "meditation_until": p.get("meditation_until"),
+                "meditation_total_ms": p.get("meditation_total_ms", 0),
+                "meditation_crystal_quality": p.get("meditation_crystal_quality"),
+                "charging": p.get("charging", False),
+                "charge_power": p.get("charge_power", 0.0),
+                "clairvoyance_active": p.get("clairvoyance_active", False),
+                "clairvoyance_target_type": p.get("clairvoyance_target_type"),
+                "clairvoyance_target_id": p.get("clairvoyance_target_id"),
+                "clairvoyance_target_owner": p.get("clairvoyance_target_owner"),
+                "barrier_proc_until": p.get("barrier_proc_until", 0.0),
+                "barrier_proc_facing": p.get("barrier_proc_facing", "down"),
+                "carrying": p.get("carrying"),
+                "carried_by": p.get("carried_by"),
+                "armor_elite": p.get("armor_elite", False),
+                "armor_elite_inv": p.get("armor_elite_inv", False),
+                "aura_tint": p.get("aura_tint", 0x4fd6ff),
+                "aura_alpha": p.get("aura_alpha", 0.42),
+                "ki_denominations": p.get("ki_denominations", []),
+                "ki_known_augments": p.get("ki_known_augments", {}),
+                "ki_equipped_augments": p.get("ki_equipped_augments", {}),
                 "npcs": p.get("npcs", {}),
                 "chatColor": p.get("chatColor", "#cccccc"),
+                "_ki_target_result": p.pop("_ki_target_result", None),
+                "_refine_result": p.pop("_refine_result", None),
+                "_meditation_result": p.pop("_meditation_result", None),
+                "_shrine_result": p.pop("_shrine_result", None),
             }
         clean_dummies = {}
         for did, d in game.dummies.items():
@@ -93,14 +159,34 @@ async def game_loop():
                     "tier": f["tier"], "hp": f["hp"], "maxHp": f["maxHp"],
                     "owner": f["owner"], "gate": f["gate"], "dead": f["dead"],
                 }
+        clean_ki_targets = {}
+        for ktid, kt in game.ki_targets.items():
+            if not kt.get("dead"):
+                clean_ki_targets[ktid] = {
+                    "id": kt["id"], "x": kt["x"], "y": kt["y"],
+                    "hp": kt["hp"], "maxHp": kt["maxHp"],
+                    "owner": kt.get("owner", ""),
+                }
+        clean_anvils = {}
+        for aid, a in game.anvils.items():
+            if not a.get("dead"):
+                clean_anvils[aid] = {
+                    "id": a["id"], "x": a["x"], "y": a["y"],
+                    "owner": a.get("owner", ""),
+                }
         state = {
             "type": "state",
             "players": clean_players,
             "trees": game.trees,
+            "rocks": game.rocks,
             "ground_items": game.ground_items,
             "dummies": clean_dummies,
             "fences": clean_fences,
+            "ki_targets": clean_ki_targets,
+            "anvils": clean_anvils,
+            "fx_events": list(game.fx_events),
         }
+        game.fx_events.clear()
         payload = json.dumps(state)
 
         # Broadcast to all connected clients
@@ -162,12 +248,37 @@ async def websocket_endpoint(ws: WebSocket):
         player["y"] = saved.get("y", player["y"])
         player["hp"] = saved.get("hp", player["hp"])
         player["maxHp"] = saved.get("maxHp", player["maxHp"])
+        player["ki"] = saved.get("ki", player.get("ki", 20))
+        player["maxKi"] = saved.get("maxKi", player.get("maxKi", 20))
+        player["blastLevel"] = saved.get("blastLevel", player.get("blastLevel", 0))
+        player["inf_ki"] = saved.get("inf_ki", player.get("inf_ki", False))
+        player["kiSkillLevel"] = saved.get("kiSkillLevel", player.get("kiSkillLevel", 1))
+        player["kiSkillXp"] = saved.get("kiSkillXp", player.get("kiSkillXp", 0))
+        player["realm_tier"] = saved.get("realm_tier", player.get("realm_tier", 0))
+        player["realm_insight"] = saved.get("realm_insight", player.get("realm_insight", 0))
+        player["realm_crystal_t1"] = saved.get("realm_crystal_t1", player.get("realm_crystal_t1", 0))
+        player["ki_upgrades"] = saved.get("ki_upgrades", player.get("ki_upgrades", {}))
         player["str"] = saved.get("str", player["str"])
         player["def"] = saved.get("def", player["def"])
         player["level"] = saved.get("level", player["level"])
         player["xp"] = saved.get("xp", player["xp"])
         player["logs"] = saved.get("logs", player["logs"])
+        player["stones"] = saved.get("stones", player.get("stones", 0))
+        player["bastalite"] = saved.get("bastalite", 0)
+        player["crystal_pristine"] = saved.get("crystal_pristine", 0)
+        player["crystal_normal"] = saved.get("crystal_normal", 0)
+        player["crystal_poor"] = saved.get("crystal_poor", 0)
+        player["armor_elite"] = saved.get("armor_elite", False)
+        player["armor_elite_inv"] = saved.get("armor_elite_inv", False)
+        player["ki_moves"] = saved.get("ki_moves", [])
+        player["ki_denominations"] = saved.get("ki_denominations", [])
+        player["ki_known_augments"] = saved.get("ki_known_augments", {})
+        player["ki_equipped_augments"] = saved.get("ki_equipped_augments", {})
+        player["aura_tint"] = saved.get("aura_tint", player.get("aura_tint", 0x4fd6ff))
+        player["aura_alpha"] = saved.get("aura_alpha", player.get("aura_alpha", 0.42))
         player["npc_ids"] = saved.get("npc_ids", [])
+        game._normalize_ki_progression(player)
+        game._ensure_level_based_ki(player)
         print(f"[ws] Restored player {pid} (level {player['level']}, {player['logs']} logs)")
     else:
         player["npc_ids"] = []
@@ -183,6 +294,8 @@ async def websocket_endpoint(ws: WebSocket):
         "ground_items": snap["ground_items"],
         "dummies": snap["dummies"],
         "fences": snap["fences"],
+        "ki_targets": snap.get("ki_targets", {}),
+        "anvils": snap.get("anvils", {}),
         "npc_ids": player.get("npc_ids", []),
     }
     await ws.send_text(json.dumps(welcome))
@@ -216,6 +329,7 @@ async def websocket_endpoint(ws: WebSocket):
                             "from_color": player.get("chatColor", "#cccccc"),
                             "target_npc_id": data.get("target_npc_id"),
                             "text": data.get("text", ""),
+                            "meta": data.get("meta"),
                         }
                         try:
                             await target_ws.send_text(json.dumps(relay))
@@ -232,6 +346,7 @@ async def websocket_endpoint(ws: WebSocket):
                             "npc_name": data.get("npc_name"),
                             "reply": data.get("reply", ""),
                             "emotion_deltas": data.get("emotion_deltas"),
+                            "meta": data.get("meta"),
                         }
                         try:
                             await target_ws.send_text(json.dumps(relay))

@@ -23,6 +23,7 @@ export class NPCDetailPanel {
     this._npc = null;
     this._el = null;
     this._updateTimer = null;
+    this._refreshSuspendUntil = 0;
   }
 
   isOpen() { return !!this._el; }
@@ -65,6 +66,10 @@ export class NPCDetailPanel {
             <div class="ndp-section ndp-stats">
               <h3>Stats</h3>
               <div class="ndp-stat-grid"></div>
+            </div>
+            <div class="ndp-section ndp-ki-abilities">
+              <h3>Ki Abilities</h3>
+              <div class="ndp-ki-content"></div>
             </div>
             <div class="ndp-section ndp-inventory">
               <h3>Inventory</h3>
@@ -114,9 +119,14 @@ export class NPCDetailPanel {
     // Events
     el.querySelector('.ndp-close-btn').addEventListener('click', () => this.close());
     el.querySelector('.ndp-backdrop').addEventListener('click', () => this.close());
+    el.querySelector('.ndp-container').addEventListener('click', (event) => event.stopPropagation());
+    el.querySelector('.ndp-container').addEventListener('pointerdown', (event) => event.stopPropagation());
+    el.querySelector('.ndp-container').addEventListener('pointerdown', (event) => this._handlePointerDown(event));
+    el.addEventListener('input', (event) => this._handleInput(event));
     el.querySelector('.ndp-take-logs-btn').addEventListener('click', () => this._takeLogs());
     el.querySelector('.ndp-delete-btn').addEventListener('click', () => this._deleteNPC());
     el.querySelector('.ndp-reset-btn').addEventListener('click', () => this._resetSoul());
+    el.addEventListener('change', (event) => this._handleChange(event));
 
     // Delegate phrase button clicks (delete, +, -)
     el.querySelector('.ndp-soul-content').addEventListener('click', (e) => {
@@ -226,6 +236,7 @@ export class NPCDetailPanel {
   _refresh() {
     const npc = this._npc;
     if (!npc || !this._el) return;
+    if (Date.now() < this._refreshSuspendUntil) return;
     const scene = this._scene;
     const playerId = scene.playerId;
 
@@ -252,7 +263,78 @@ export class NPCDetailPanel {
         <div class="ndp-stat-cell"><span class="ndp-stat-label">Lv</span><span class="ndp-stat-big">${npc.level}</span></div>
         <div class="ndp-stat-cell"><span class="ndp-stat-label">XP</span><span class="ndp-stat-val">${npc.xp}</span></div>
       </div>
+      <div class="ndp-stat-row">
+        <div class="ndp-stat-cell"><span class="ndp-stat-label">Ki Skill</span><span class="ndp-stat-big">${npc.kiSkillLevel ?? 1}</span></div>
+        <div class="ndp-stat-cell"><span class="ndp-stat-label">Ki XP</span><span class="ndp-stat-val">${npc.kiSkillXp ?? 0}</span></div>
+        <div class="ndp-stat-cell"><span class="ndp-stat-label">Realm</span><span class="ndp-stat-big">${npc.realmTier ?? 0}</span></div>
+        <div class="ndp-stat-cell"><span class="ndp-stat-label">Inf Ki</span><span class="ndp-stat-val">${npc.infKi ? 'On' : 'Off'}</span></div>
+      </div>
     `;
+
+    // Ki Abilities
+    const kiContent = this._el.querySelector('.ndp-ki-content');
+    if (npc._hasKiBlast) {
+      const kiPct = npc.maxKi > 0 ? (npc.ki / npc.maxKi * 100) : 0;
+      const kiColor = kiPct > 50 ? '#4488ff' : kiPct > 25 ? '#6644cc' : '#8833aa';
+      const blastCost = npc.getBlastCost();
+      const blastDmg = npc.getBlastDmg();
+      kiContent.innerHTML = `
+        <div class="ndp-stat">
+          <span class="ndp-stat-label">Ki</span>
+          <div class="ndp-bar-wrap"><div class="ndp-bar" style="width:${kiPct}%;background:${kiColor}"></div></div>
+          <span class="ndp-stat-val">${npc.ki}/${npc.maxKi}</span>
+        </div>
+        <div class="ndp-ki-blast-entry">
+          <span class="ndp-ki-blast-name">Energy Blast</span>
+          <span class="ndp-ki-blast-lv">Lv.${npc.blastLevel}</span>
+        </div>
+        <div class="ndp-ki-blast-stats">
+          <span>Dmg: ${blastDmg}</span>
+          <span>Cost: ${blastCost} Ki</span>
+          <span>Fired: ${npc.blastLevel}x</span>
+        </div>
+        <div class="ndp-ki-blast-stats">
+          <span>Ki Skill: ${npc.kiSkillLevel ?? 1}</span>
+          <span>Ki XP: ${npc.kiSkillXp ?? 0}/${(npc.kiSkillLevel ?? 1) * 20}</span>
+          <span>Realm: ${npc.realmTier ?? 0}</span>
+        </div>
+        <div class="ndp-ki-blast-stats">
+          <span>Moves: ${((npc.kiMoves || []).length > 0 ? npc.kiMoves.join(', ') : 'None')}</span>
+        </div>
+        <label class="ndp-color-row">
+          <span class="ndp-color-label">Aura</span>
+          <input type="color" value="${this._tintToHex(npc.auraTint)}" data-action="aura-color">
+          <span class="ndp-color-value">${this._tintToHex(npc.auraTint)}</span>
+        </label>
+        <label class="ndp-range-row">
+          <span class="ndp-color-label">Opacity</span>
+          <input type="range" min="0" max="100" step="1" value="${this._alphaToPercent(npc.auraAlpha)}" data-action="aura-alpha">
+          <span class="ndp-color-value" data-role="aura-alpha-value">${this._alphaToPercent(npc.auraAlpha)}%</span>
+        </label>
+      `;
+    } else {
+      kiContent.innerHTML = `
+        <div class="ndp-empty">No ki abilities learned yet.</div>
+        <div class="ndp-ki-blast-stats">
+          <span>Ki Skill: ${npc.kiSkillLevel ?? 1}</span>
+          <span>Ki XP: ${npc.kiSkillXp ?? 0}/${(npc.kiSkillLevel ?? 1) * 20}</span>
+          <span>Realm: ${npc.realmTier ?? 0}</span>
+        </div>
+        <div class="ndp-ki-blast-stats">
+          <span>Moves: ${((npc.kiMoves || []).length > 0 ? npc.kiMoves.join(', ') : 'None')}</span>
+        </div>
+        <label class="ndp-color-row">
+          <span class="ndp-color-label">Aura</span>
+          <input type="color" value="${this._tintToHex(npc.auraTint)}" data-action="aura-color">
+          <span class="ndp-color-value">${this._tintToHex(npc.auraTint)}</span>
+        </label>
+        <label class="ndp-range-row">
+          <span class="ndp-color-label">Opacity</span>
+          <input type="range" min="0" max="100" step="1" value="${this._alphaToPercent(npc.auraAlpha)}" data-action="aura-alpha">
+          <span class="ndp-color-value" data-role="aura-alpha-value">${this._alphaToPercent(npc.auraAlpha)}%</span>
+        </label>
+      `;
+    }
 
     // Inventory
     const fillPct = npc.maxLogs > 0 ? (npc.logs / npc.maxLogs * 100) : 0;
@@ -263,6 +345,22 @@ export class NPCDetailPanel {
     const takeBtn = this._el.querySelector('.ndp-take-logs-btn');
     takeBtn.disabled = npc.logs <= 0;
     takeBtn.textContent = npc.logs > 0 ? `Take ${npc.logs} Log${npc.logs > 1 ? 's' : ''}` : 'No Logs';
+
+    // Materials line
+    const matsParts = [];
+    if (npc.stones > 0) matsParts.push(`Stone: ${npc.stones}`);
+    if (npc.bastalite > 0) matsParts.push(`Bastalite: ${npc.bastalite}`);
+    if (npc.crystalPristine > 0) matsParts.push(`Pristine: ${npc.crystalPristine}`);
+    if (npc.crystalNormal > 0) matsParts.push(`Crystal: ${npc.crystalNormal}`);
+    if (npc.crystalPoor > 0) matsParts.push(`Cracked: ${npc.crystalPoor}`);
+    let matsEl = this._el.querySelector('.ndp-materials');
+    if (!matsEl) {
+      matsEl = document.createElement('div');
+      matsEl.className = 'ndp-materials';
+      matsEl.style.cssText = 'font-size:11px;color:#44eeff;margin-top:4px;';
+      takeBtn.parentElement.appendChild(matsEl);
+    }
+    matsEl.textContent = matsParts.length > 0 ? matsParts.join('  ') : '';
 
     // Personality
     const pers = npc.soul.personality;
@@ -489,6 +587,68 @@ export class NPCDetailPanel {
     </div>`;
   }
 
+  _handleChange(event) {
+    const input = event.target.closest('input[data-action="aura-color"]');
+    if (input && this._npc) {
+      const color = String(input.value || '').trim();
+      if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
+      this._refreshSuspendUntil = Date.now() + 300;
+      const tint = parseInt(color.slice(1), 16);
+      this._npc.auraTint = tint;
+      if (this._scene?._conn?.connected) {
+        this._scene._conn.send({
+          type: 'admin',
+          field: 'aura_tint',
+          value: color,
+          target_npc_id: this._npc.id,
+        });
+      }
+      this._scene?._saveNPC?.(this._npc);
+      this._refresh();
+      return;
+    }
+    const slider = event.target.closest('input[data-action="aura-alpha"]');
+    if (!slider || !this._npc) return;
+    const percent = Math.max(0, Math.min(100, Number(slider.value || 0)));
+    const alpha = percent / 100;
+    this._refreshSuspendUntil = Date.now() + 300;
+    this._npc.auraAlpha = alpha;
+    if (this._scene?._conn?.connected) {
+      this._scene._conn.send({
+        type: 'admin',
+        field: 'aura_alpha',
+        value: alpha,
+        target_npc_id: this._npc.id,
+      });
+    }
+    this._scene?._saveNPC?.(this._npc);
+    this._refresh();
+  }
+
+  _handlePointerDown(event) {
+    if (event.target.closest('input[data-action="aura-color"], input[data-action="aura-alpha"]')) {
+      this._refreshSuspendUntil = Date.now() + 10000;
+    }
+  }
+
+  _handleInput(event) {
+    const slider = event.target.closest('input[data-action="aura-alpha"]');
+    if (!slider || !this._npc) return;
+    const percent = Math.max(0, Math.min(100, Number(slider.value || 0)));
+    this._npc.auraAlpha = percent / 100;
+    this._refreshSuspendUntil = Date.now() + 10000;
+    const label = this._el?.querySelector('[data-role="aura-alpha-value"]');
+    if (label) label.textContent = `${Math.round(percent)}%`;
+  }
+
+  _tintToHex(value) {
+    return `#${(Number(value ?? 0x4fd6ff) >>> 0).toString(16).padStart(6, '0').slice(-6)}`;
+  }
+
+  _alphaToPercent(value) {
+    return Math.round(Math.max(0, Math.min(1, Number(value ?? 0.42))) * 100);
+  }
+
   _injectStyles() {
     if (document.getElementById('ndp-styles')) return;
     const style = document.createElement('style');
@@ -565,6 +725,18 @@ export class NPCDetailPanel {
 
       /* Type description */
       .ndp-type-desc { font-size:10px; color:#889; margin-bottom:6px; font-style:italic; }
+
+      /* Ki Abilities */
+      .ndp-ki-blast-entry { display:flex; align-items:center; gap:8px; margin:4px 0 2px; }
+      .ndp-ki-blast-name { color:#66bbff; font-size:12px; font-weight:bold; }
+      .ndp-ki-blast-lv { color:#aabbcc; font-size:10px; }
+      .ndp-ki-blast-stats { display:flex; gap:10px; font-size:10px; color:#8899aa; }
+      .ndp-color-row { display:flex; align-items:center; gap:8px; margin-top:6px; }
+      .ndp-range-row { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; margin-top:6px; }
+      .ndp-color-label { color:#8899aa; font-size:10px; min-width:26px; text-transform:uppercase; letter-spacing:0.6px; }
+      .ndp-color-row input { width:36px; height:24px; padding:0; border:1px solid #335; background:#111125; cursor:pointer; }
+      .ndp-range-row input { width:100%; }
+      .ndp-color-value { color:#9fd8ff; font-size:10px; font-family:Consolas, monospace; }
 
       /* Inventory */
       .ndp-inventory .ndp-bar-wrap { height:10px; margin-bottom:3px; }

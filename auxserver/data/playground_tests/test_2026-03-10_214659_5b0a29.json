@@ -1,0 +1,602 @@
+{
+  "id": "test_2026-03-10_214659_5b0a29",
+  "name": "Flow Run 3/10/2026, 9:46:54 PM",
+  "created_at": "2026-03-11T01:46:54.882Z",
+  "mode": "flow",
+  "scenario": {
+    "id": "flowchart",
+    "label": "flowchart"
+  },
+  "settings": {
+    "model": "gemma2:2b",
+    "temperature": 0.7,
+    "max_tokens": 300,
+    "context_window": 4096
+  },
+  "initial_state": {
+    "personality": {
+      "cooperation": 0.7,
+      "aggression": 0.15,
+      "neuroticism": 0.35
+    },
+    "emotions": {
+      "trust": 0.7,
+      "fear": 0.05,
+      "anger": 0.02
+    },
+    "baselines": {
+      "trust": 0.5,
+      "fear": 0,
+      "anger": 0
+    },
+    "relationship_label": "allied",
+    "memories": []
+  },
+  "inputs": [
+    {
+      "type": "spawn_player",
+      "params": {
+        "playerId": "player_1",
+        "playerHp": 30
+      }
+    },
+    {
+      "type": "spawn_npc",
+      "params": {
+        "name": "GuardBot",
+        "owner": "player_1",
+        "personalityType": "Guardian",
+        "cooperation": 0.8,
+        "aggression": 0.3,
+        "neuroticism": 0.35,
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0,
+        "trust_baseline": 0.4,
+        "fear_baseline": 0,
+        "anger_baseline": 0
+      }
+    },
+    {
+      "type": "spawn_npc",
+      "params": {
+        "name": "BerserkBot",
+        "owner": "player_1",
+        "personalityType": "Berserker",
+        "cooperation": 0.3,
+        "aggression": 0.75,
+        "neuroticism": 0.5,
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0,
+        "trust_baseline": 0.4,
+        "fear_baseline": 0,
+        "anger_baseline": 0
+      }
+    },
+    {
+      "type": "spawn_npc",
+      "params": {
+        "name": "ScoutBot",
+        "owner": "player_1",
+        "personalityType": "Scout",
+        "cooperation": 0.6,
+        "aggression": 0.1,
+        "neuroticism": 0.25,
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0,
+        "trust_baseline": 0.4,
+        "fear_baseline": 0,
+        "anger_baseline": 0
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "GuardBot",
+        "player": "player_1",
+        "message": "There's enemies approaching. What do we do?"
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "BerserkBot",
+        "player": "player_1",
+        "message": "There's enemies approaching. What do we do?"
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "ScoutBot",
+        "player": "player_1",
+        "message": "There's enemies approaching. What do we do?"
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "GuardBot",
+        "player": "player_1",
+        "message": "You're the best companion I could ask for."
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "BerserkBot",
+        "player": "player_1",
+        "message": "You're the best companion I could ask for."
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "ScoutBot",
+        "player": "player_1",
+        "message": "You're the best companion I could ask for."
+      }
+    }
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "input": {
+        "node": "spawn_player",
+        "params": {
+          "playerId": "player_1",
+          "playerHp": 30
+        }
+      },
+      "raw_response": "Player \"player_1\" (HP=30)",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": null,
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 2,
+      "input": {
+        "node": "spawn_npc",
+        "params": {
+          "name": "GuardBot",
+          "owner": "player_1",
+          "personalityType": "Guardian",
+          "cooperation": 0.8,
+          "aggression": 0.3,
+          "neuroticism": 0.35,
+          "trust": 0.5,
+          "fear": 0,
+          "anger": 0,
+          "trust_baseline": 0.4,
+          "fear_baseline": 0,
+          "anger_baseline": 0
+        }
+      },
+      "raw_response": "Spawned \"GuardBot\" [player_1] coop=0.8 aggr=0.3 neur=0.35",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 1,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": {
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 2,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 3,
+      "input": {
+        "node": "spawn_npc",
+        "params": {
+          "name": "BerserkBot",
+          "owner": "player_1",
+          "personalityType": "Berserker",
+          "cooperation": 0.3,
+          "aggression": 0.75,
+          "neuroticism": 0.5,
+          "trust": 0.5,
+          "fear": 0,
+          "anger": 0,
+          "trust_baseline": 0.4,
+          "fear_baseline": 0,
+          "anger_baseline": 0
+        }
+      },
+      "raw_response": "Spawned \"BerserkBot\" [player_1] coop=0.3 aggr=0.75 neur=0.5",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 1,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": {
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 4,
+      "input": {
+        "node": "spawn_npc",
+        "params": {
+          "name": "ScoutBot",
+          "owner": "player_1",
+          "personalityType": "Scout",
+          "cooperation": 0.6,
+          "aggression": 0.1,
+          "neuroticism": 0.25,
+          "trust": 0.5,
+          "fear": 0,
+          "anger": 0,
+          "trust_baseline": 0.4,
+          "fear_baseline": 0,
+          "anger_baseline": 0
+        }
+      },
+      "raw_response": "Spawned \"ScoutBot\" [player_1] coop=0.6 aggr=0.1 neur=0.25",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 1,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": {
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 5,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "GuardBot",
+          "player": "player_1",
+          "message": "There's enemies approaching. What do we do?"
+        }
+      },
+      "raw_response": "player_1\u2192GuardBot: \"There's enemies approaching. What do we do?\" \u2192 T=0.52 F=0.00 A=0.00",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 2,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0
+      },
+      "after": {
+        "trust": 0.52,
+        "fear": 0,
+        "anger": 0
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 704,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 6,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "BerserkBot",
+          "player": "player_1",
+          "message": "There's enemies approaching. What do we do?"
+        }
+      },
+      "raw_response": "player_1\u2192BerserkBot: \"There's enemies approaching. What do we do?\" \u2192 T=0.52 F=0.00 A=0.00",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 2,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0
+      },
+      "after": {
+        "trust": 0.52,
+        "fear": 0,
+        "anger": 0
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 525,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 7,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "ScoutBot",
+          "player": "player_1",
+          "message": "There's enemies approaching. What do we do?"
+        }
+      },
+      "raw_response": "player_1\u2192ScoutBot: \"There's enemies approaching. What do we do?\" \u2192 T=0.52 F=0.06 A=0.03",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 2,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.5,
+        "fear": 0,
+        "anger": 0
+      },
+      "after": {
+        "trust": 0.52,
+        "fear": 0.06,
+        "anger": 0.03
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 555,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 8,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "GuardBot",
+          "player": "player_1",
+          "message": "You're the best companion I could ask for."
+        }
+      },
+      "raw_response": "player_1\u2192GuardBot: \"You're the best companion I could ask for.\" \u2192 T=0.56 F=0.00 A=0.00",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 4,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.52,
+        "fear": 0,
+        "anger": 0
+      },
+      "after": {
+        "trust": 0.56,
+        "fear": 0,
+        "anger": 0
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 533,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 9,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "BerserkBot",
+          "player": "player_1",
+          "message": "You're the best companion I could ask for."
+        }
+      },
+      "raw_response": "player_1\u2192BerserkBot: \"You're the best companion I could ask for.\" \u2192 T=0.56 F=0.00 A=0.00",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 4,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.52,
+        "fear": 0,
+        "anger": 0
+      },
+      "after": {
+        "trust": 0.56,
+        "fear": 0,
+        "anger": 0
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 582,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 10,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "ScoutBot",
+          "player": "player_1",
+          "message": "You're the best companion I could ask for."
+        }
+      },
+      "raw_response": "player_1\u2192ScoutBot: \"You're the best companion I could ask for.\" \u2192 T=0.56 F=0.06 A=0.03",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 4,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.52,
+        "fear": 0.06,
+        "anger": 0.03
+      },
+      "after": {
+        "trust": 0.56,
+        "fear": 0.06,
+        "anger": 0.03
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 507,
+      "tokens": null,
+      "clamp_hits": false
+    }
+  ],
+  "final_state": {
+    "emotions": {
+      "trust": 0.56,
+      "fear": 0.06,
+      "anger": 0.03
+    },
+    "world": {
+      "npcs": {
+        "GuardBot": {
+          "owner": "player_1",
+          "personalityType": "Guardian",
+          "personality": {
+            "cooperation": 0.8,
+            "aggression": 0.3,
+            "neuroticism": 0.35
+          },
+          "trust": 0.56,
+          "fear": 0,
+          "anger": 0,
+          "trust_baseline": 0.4,
+          "fear_baseline": 0,
+          "anger_baseline": 0,
+          "escalation": 4,
+          "lastInteraction": 1773193617940,
+          "memories": [
+            {
+              "text": "enemies_approaching",
+              "type": "dialogue",
+              "ts": 1773193616011,
+              "importance": 1
+            },
+            {
+              "text": "enemies_approaching",
+              "type": "dialogue",
+              "ts": 1773193617940,
+              "importance": 1
+            }
+          ],
+          "npcName": "GuardBot",
+          "playerId": "player_1"
+        },
+        "BerserkBot": {
+          "owner": "player_1",
+          "personalityType": "Berserker",
+          "personality": {
+            "cooperation": 0.3,
+            "aggression": 0.75,
+            "neuroticism": 0.5
+          },
+          "trust": 0.56,
+          "fear": 0,
+          "anger": 0,
+          "trust_baseline": 0.4,
+          "fear_baseline": 0,
+          "anger_baseline": 0,
+          "escalation": 4,
+          "lastInteraction": 1773193618628,
+          "memories": [
+            {
+              "text": "enemies_approaching",
+              "type": "dialogue",
+              "ts": 1773193616643,
+              "importance": 1
+            },
+            {
+              "text": "enemies_approaching",
+              "type": "dialogue",
+              "ts": 1773193618629,
+              "importance": 1
+            }
+          ],
+          "npcName": "BerserkBot",
+          "playerId": "player_1"
+        },
+        "ScoutBot": {
+          "owner": "player_1",
+          "personalityType": "Scout",
+          "personality": {
+            "cooperation": 0.6,
+            "aggression": 0.1,
+            "neuroticism": 0.25
+          },
+          "trust": 0.56,
+          "fear": 0.06,
+          "anger": 0.03,
+          "trust_baseline": 0.4,
+          "fear_baseline": 0,
+          "anger_baseline": 0,
+          "escalation": 4,
+          "lastInteraction": 1773193619240,
+          "memories": [
+            {
+              "text": "enemies_approaching",
+              "type": "dialogue",
+              "ts": 1773193617302,
+              "importance": 1
+            },
+            {
+              "text": "enemies_approaching",
+              "type": "dialogue",
+              "ts": 1773193619241,
+              "importance": 1
+            }
+          ],
+          "npcName": "ScoutBot",
+          "playerId": "player_1"
+        }
+      },
+      "players": {
+        "player_1": {
+          "hp": 30,
+          "maxHp": 30,
+          "npcs": [
+            "GuardBot",
+            "BerserkBot",
+            "ScoutBot"
+          ]
+        }
+      }
+    }
+  },
+  "summary": {
+    "trust_delta": -0.14,
+    "fear_delta": 0.01,
+    "anger_delta": 0.01,
+    "escalation_max": 4,
+    "clamp_hits": 0,
+    "fallbacks": 0,
+    "memory_count": 6
+  },
+  "notes": ""
+}

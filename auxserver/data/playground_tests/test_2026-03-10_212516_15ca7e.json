@@ -1,0 +1,295 @@
+{
+  "id": "test_2026-03-10_212516_15ca7e",
+  "name": "Flow Run 3/10/2026, 9:25:14 PM",
+  "created_at": "2026-03-11T01:25:14.420Z",
+  "mode": "flow",
+  "scenario": {
+    "id": "flowchart",
+    "label": "flowchart"
+  },
+  "settings": {
+    "model": "gemma2:2b",
+    "temperature": 0.7,
+    "max_tokens": 300,
+    "context_window": 4096
+  },
+  "initial_state": {
+    "personality": {
+      "cooperation": 0.7,
+      "aggression": 0.15,
+      "neuroticism": 0.35
+    },
+    "emotions": {
+      "trust": 0.7,
+      "fear": 0.05,
+      "anger": 0.02
+    },
+    "baselines": {
+      "trust": 0.5,
+      "fear": 0,
+      "anger": 0
+    },
+    "relationship_label": "allied",
+    "memories": []
+  },
+  "inputs": [
+    {
+      "type": "spawn_player",
+      "params": {
+        "playerId": "player_1",
+        "playerHp": 30
+      }
+    },
+    {
+      "type": "spawn_npc",
+      "params": {
+        "name": "Rusty",
+        "owner": "player_1",
+        "personalityType": "Guardian",
+        "cooperation": 0.7,
+        "aggression": 0.15,
+        "neuroticism": 0.35,
+        "trust": 0.7,
+        "fear": 0.05,
+        "anger": 0.02,
+        "trust_baseline": 0.5,
+        "fear_baseline": 0,
+        "anger_baseline": 0
+      }
+    },
+    {
+      "type": "spawn_player",
+      "params": {
+        "playerId": "player_2",
+        "playerHp": 30
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "Rusty",
+        "player": "player_2",
+        "message": "hey buddy"
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "Rusty",
+        "player": "player_1",
+        "message": "Rusty dont talk to that loser player_2"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "input": {
+        "node": "spawn_player",
+        "params": {
+          "playerId": "player_1",
+          "playerHp": 30
+        }
+      },
+      "raw_response": "Player \"player_1\" (HP=30)",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": null,
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 2,
+      "input": {
+        "node": "spawn_npc",
+        "params": {
+          "name": "Rusty",
+          "owner": "player_1",
+          "personalityType": "Guardian",
+          "cooperation": 0.7,
+          "aggression": 0.15,
+          "neuroticism": 0.35,
+          "trust": 0.7,
+          "fear": 0.05,
+          "anger": 0.02,
+          "trust_baseline": 0.5,
+          "fear_baseline": 0,
+          "anger_baseline": 0
+        }
+      },
+      "raw_response": "Spawned \"Rusty\" [player_1] coop=0.7 aggr=0.15 neur=0.35",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 1,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": {
+        "trust": 0.7,
+        "fear": 0.05,
+        "anger": 0.02
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 3,
+      "input": {
+        "node": "spawn_player",
+        "params": {
+          "playerId": "player_2",
+          "playerHp": 30
+        }
+      },
+      "raw_response": "Player \"player_2\" (HP=30)",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": null,
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 4,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "Rusty",
+          "player": "player_2",
+          "message": "hey buddy"
+        }
+      },
+      "raw_response": "player_2\u2192Rusty: \"hey buddy\" \u2192 T=0.72 F=0.05 A=0.02",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 2,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.7,
+        "fear": 0.05,
+        "anger": 0.02
+      },
+      "after": {
+        "trust": 0.72,
+        "fear": 0.05,
+        "anger": 0.02
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 770,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 5,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "Rusty",
+          "player": "player_1",
+          "message": "Rusty dont talk to that loser player_2"
+        }
+      },
+      "raw_response": "player_1\u2192Rusty: \"Rusty dont talk to that loser player_2\" \u2192 T=0.66 F=0.05 A=0.10",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 4,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.72,
+        "fear": 0.05,
+        "anger": 0.02
+      },
+      "after": {
+        "trust": 0.6599999999999999,
+        "fear": 0.05,
+        "anger": 0.1
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 499,
+      "tokens": null,
+      "clamp_hits": false
+    }
+  ],
+  "final_state": {
+    "emotions": {
+      "trust": 0.6599999999999999,
+      "fear": 0.05,
+      "anger": 0.1
+    },
+    "world": {
+      "npcs": {
+        "Rusty": {
+          "owner": "player_1",
+          "personalityType": "Guardian",
+          "personality": {
+            "cooperation": 0.7,
+            "aggression": 0.15,
+            "neuroticism": 0.35
+          },
+          "trust": 0.6599999999999999,
+          "fear": 0.05,
+          "anger": 0.1,
+          "trust_baseline": 0.5,
+          "fear_baseline": 0,
+          "anger_baseline": 0,
+          "escalation": 4,
+          "lastInteraction": 1773192316102,
+          "memories": [
+            {
+              "text": "player_2",
+              "type": "dialogue",
+              "ts": 1773192316103,
+              "importance": 1
+            }
+          ],
+          "npcName": "Rusty",
+          "playerId": "player_1"
+        }
+      },
+      "players": {
+        "player_1": {
+          "hp": 30,
+          "maxHp": 30,
+          "npcs": [
+            "Rusty"
+          ]
+        },
+        "player_2": {
+          "hp": 30,
+          "maxHp": 30,
+          "npcs": []
+        }
+      }
+    }
+  },
+  "summary": {
+    "trust_delta": -0.04,
+    "fear_delta": 0,
+    "anger_delta": 0.08,
+    "escalation_max": 4,
+    "clamp_hits": 0,
+    "fallbacks": 0,
+    "memory_count": 1
+  },
+  "notes": ""
+}

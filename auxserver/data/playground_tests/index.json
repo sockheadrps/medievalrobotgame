@@ -1,0 +1,572 @@
+[
+  {
+    "id": "test_2026-03-11_035007_2a7019",
+    "name": "Flow Run 3/11/2026, 3:49:57 AM",
+    "created_at": "2026-03-11T07:49:57.266Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": null,
+      "fear_delta": null,
+      "anger_delta": null,
+      "escalation_max": 0,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 2
+    }
+  },
+  {
+    "id": "test_2026-03-11_034231_91361a",
+    "name": "Flow Run 3/11/2026, 3:42:28 AM",
+    "created_at": "2026-03-11T07:42:28.951Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": null,
+      "fear_delta": null,
+      "anger_delta": null,
+      "escalation_max": 0,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-11_031654_659b2f",
+    "name": "Flow Run 3/11/2026, 3:16:47 AM",
+    "created_at": "2026-03-11T07:16:47.327Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": null,
+      "fear_delta": null,
+      "anger_delta": null,
+      "escalation_max": 0,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_214659_5b0a29",
+    "name": "Flow Run 3/10/2026, 9:46:54 PM",
+    "created_at": "2026-03-11T01:46:54.882Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.14,
+      "fear_delta": 0.01,
+      "anger_delta": 0.01,
+      "escalation_max": 4,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 6
+    }
+  },
+  {
+    "id": "test_2026-03-10_214536_b480fc",
+    "name": "Flow Run 3/10/2026, 9:45:33 PM",
+    "created_at": "2026-03-11T01:45:33.338Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.1,
+      "fear_delta": -0.05,
+      "anger_delta": 0.68,
+      "escalation_max": 8,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 5
+    }
+  },
+  {
+    "id": "test_2026-03-10_214338_35df98",
+    "name": "Flow Run 3/10/2026, 9:43:35 PM",
+    "created_at": "2026-03-11T01:43:35.476Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0,
+      "fear_delta": 0.05,
+      "anger_delta": -0.02,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 2
+    }
+  },
+  {
+    "id": "test_2026-03-10_214237_4fac27",
+    "name": "Flow Run 3/10/2026, 9:42:35 PM",
+    "created_at": "2026-03-11T01:42:35.264Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.09,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 16,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 4
+    }
+  },
+  {
+    "id": "test_2026-03-10_214218_03fccd",
+    "name": "Flow Run 3/10/2026, 9:42:16 PM",
+    "created_at": "2026-03-11T01:42:16.703Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.21,
+      "fear_delta": -0.05,
+      "anger_delta": -0.02,
+      "escalation_max": 4,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 2
+    }
+  },
+  {
+    "id": "test_2026-03-10_214142_bf4f26",
+    "name": "Flow Run 3/10/2026, 9:41:37 PM",
+    "created_at": "2026-03-11T01:41:37.195Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.21,
+      "fear_delta": -0.05,
+      "anger_delta": -0.02,
+      "escalation_max": 4,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 2
+    }
+  },
+  {
+    "id": "test_2026-03-10_212516_15ca7e",
+    "name": "Flow Run 3/10/2026, 9:25:14 PM",
+    "created_at": "2026-03-11T01:25:14.420Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.04,
+      "fear_delta": 0,
+      "anger_delta": 0.08,
+      "escalation_max": 4,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_212445_7a3e72",
+    "name": "Flow Run 3/10/2026, 9:24:44 PM",
+    "created_at": "2026-03-11T01:24:44.197Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.02,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-10_212412_7bbfb9",
+    "name": "Flow Run 3/10/2026, 9:24:08 PM",
+    "created_at": "2026-03-11T01:24:08.052Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.03,
+      "fear_delta": 0,
+      "anger_delta": 0.01,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_212038_9aa7fc",
+    "name": "Flow Run 3/10/2026, 9:20:30 PM",
+    "created_at": "2026-03-11T01:20:30.084Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.28,
+      "fear_delta": -0.01,
+      "anger_delta": 0.39,
+      "escalation_max": 4,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_211956_cee231",
+    "name": "Flow Run 3/10/2026, 9:19:48 PM",
+    "created_at": "2026-03-11T01:19:48.271Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.08,
+      "fear_delta": 0,
+      "anger_delta": 0.15,
+      "escalation_max": 4,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_211928_3e9c94",
+    "name": "Flow Run 3/10/2026, 9:19:23 PM",
+    "created_at": "2026-03-11T01:19:23.541Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.02,
+      "fear_delta": 0,
+      "anger_delta": -0.01,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-10_211856_767efd",
+    "name": "Flow Run 3/10/2026, 9:18:51 PM",
+    "created_at": "2026-03-11T01:18:51.943Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.06,
+      "fear_delta": 0,
+      "anger_delta": -0.02,
+      "escalation_max": 4,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-10_211845_af3cfa",
+    "name": "Flow Run 3/10/2026, 9:18:40 PM",
+    "created_at": "2026-03-11T01:18:40.780Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.06,
+      "fear_delta": 0,
+      "anger_delta": -0.02,
+      "escalation_max": 4,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-10_211812_332760",
+    "name": "Flow Run 3/10/2026, 9:18:07 PM",
+    "created_at": "2026-03-11T01:18:07.787Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.02,
+      "fear_delta": 0,
+      "anger_delta": -0.01,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-10_211740_e0446a",
+    "name": "Flow Run 3/10/2026, 9:17:40 PM",
+    "created_at": "2026-03-11T01:17:40.674Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 1,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-10_211736_cb8f58",
+    "name": "Flow Run 3/10/2026, 9:17:36 PM",
+    "created_at": "2026-03-11T01:17:36.700Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 1,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-10_211719_714dab",
+    "name": "Flow Run 3/10/2026, 9:16:52 PM",
+    "created_at": "2026-03-11T01:16:52.998Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.7,
+      "fear_delta": 0,
+      "anger_delta": 0.98,
+      "escalation_max": 8,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 2
+    }
+  },
+  {
+    "id": "test_2026-03-10_211623_cce946",
+    "name": "Flow Run 3/10/2026, 9:16:21 PM",
+    "created_at": "2026-03-11T01:16:21.033Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 1,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-10_211244_cbf4c3",
+    "name": "Flow Run 3/10/2026, 9:12:37 PM",
+    "created_at": "2026-03-11T01:12:37.246Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.28,
+      "fear_delta": 0,
+      "anger_delta": 0.4,
+      "escalation_max": 8,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 2
+    }
+  },
+  {
+    "id": "test_2026-03-10_210650_43ea3e",
+    "name": "Flow Run 3/10/2026, 9:06:48 PM",
+    "created_at": "2026-03-11T01:06:48.794Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.25,
+      "fear_delta": 0.05,
+      "anger_delta": 0.02,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_210639_f845a6",
+    "name": "Flow Run 3/10/2026, 9:06:37 PM",
+    "created_at": "2026-03-11T01:06:37.666Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.25,
+      "fear_delta": -0.03,
+      "anger_delta": 0.04,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-10_210508_2d4b62",
+    "name": "Flow Run 3/10/2026, 9:05:07 PM",
+    "created_at": "2026-03-11T01:05:07.828Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.02,
+      "fear_delta": 0.08,
+      "anger_delta": -0.02,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_210409_c9ca15",
+    "name": "Flow Run 3/10/2026, 9:04:07 PM",
+    "created_at": "2026-03-11T01:04:07.855Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.02,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_210123_02448a",
+    "name": "Flow Run 3/10/2026, 9:01:20 PM",
+    "created_at": "2026-03-11T01:01:20.291Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.7,
+      "fear_delta": 0,
+      "anger_delta": 0.98,
+      "escalation_max": 16,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 4
+    }
+  },
+  {
+    "id": "test_2026-03-10_210045_785436",
+    "name": "Flow Run 3/10/2026, 9:00:41 PM",
+    "created_at": "2026-03-11T01:00:41.720Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.38,
+      "fear_delta": 0,
+      "anger_delta": 0.64,
+      "escalation_max": 8,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 2
+    }
+  },
+  {
+    "id": "test_2026-03-10_210016_b9686d",
+    "name": "Flow Run 3/10/2026, 9:00:12 PM",
+    "created_at": "2026-03-11T01:00:12.321Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.3,
+      "fear_delta": 0,
+      "anger_delta": 0.02,
+      "escalation_max": 8,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 3
+    }
+  },
+  {
+    "id": "test_2026-03-10_205713_ba9303",
+    "name": "Flow Run 3/10/2026, 8:57:09 PM",
+    "created_at": "2026-03-11T00:57:09.356Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0,
+      "fear_delta": 0,
+      "anger_delta": 0.74,
+      "escalation_max": 8,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 2
+    }
+  },
+  {
+    "id": "test_2026-03-10_205626_84170f",
+    "name": "Flow Run 3/10/2026, 8:56:22 PM",
+    "created_at": "2026-03-11T00:56:22.410Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0,
+      "fear_delta": 0,
+      "anger_delta": 0.04,
+      "escalation_max": 8,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 3
+    }
+  },
+  {
+    "id": "test_2026-03-10_205538_c09204",
+    "name": "Flow Run 3/10/2026, 8:55:36 PM",
+    "created_at": "2026-03-11T00:55:36.769Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_205517_7dbcd2",
+    "name": "Flow Run 3/10/2026, 8:55:16 PM",
+    "created_at": "2026-03-11T00:55:16.063Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.02,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  },
+  {
+    "id": "test_2026-03-10_205028_c7db6c",
+    "name": "Flow Run 3/10/2026, 8:50:26 PM",
+    "created_at": "2026-03-11T00:50:26.773Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.02,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_204553_563cc2",
+    "name": "Flow Run 3/10/2026, 8:45:52 PM",
+    "created_at": "2026-03-11T00:45:52.258Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_204537_34e199",
+    "name": "Flow Run 3/10/2026, 8:45:33 PM",
+    "created_at": "2026-03-11T00:45:33.311Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": 0.02,
+      "fear_delta": 0,
+      "anger_delta": 0,
+      "escalation_max": 2,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 1
+    }
+  },
+  {
+    "id": "test_2026-03-10_204528_4c59ee",
+    "name": "Flow Run 3/10/2026, 8:45:28 PM",
+    "created_at": "2026-03-11T00:45:28.585Z",
+    "mode": "flow",
+    "summary": {
+      "trust_delta": -0.7,
+      "fear_delta": -0.05,
+      "anger_delta": -0.02,
+      "escalation_max": 0,
+      "clamp_hits": 0,
+      "fallbacks": 0,
+      "memory_count": 0
+    }
+  }
+]

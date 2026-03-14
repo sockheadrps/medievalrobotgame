@@ -8,6 +8,7 @@ class SoulContext(BaseModel):
     relationship: str = "neutral"
     memories: list = Field(default_factory=list)
     learned_phrases: list = Field(default_factory=list)
+    nearby_threats: list = Field(default_factory=list)
     system_note: str = ""
     topic_entity: dict = Field(default_factory=dict)
 
@@ -39,6 +40,7 @@ class DialoguePromptRequest(BaseModel):
     memories: list = Field(default_factory=list)
     learned_phrases: list = Field(default_factory=list)
     nearby_entities: list = Field(default_factory=list)
+    nearby_threats: list = Field(default_factory=list)
     system_note: str = ""
     topic_entity: dict = Field(default_factory=dict)
     speaking_player: str = ""

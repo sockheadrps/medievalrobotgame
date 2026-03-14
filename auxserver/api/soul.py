@@ -102,9 +102,12 @@ async def build_dialogue_prompt(req: DialoguePromptRequest):
             topic_entity=req.topic_entity,
             speaking_player=req.speaking_player,
             owner=req.owner,
+            nearby_threats=req.nearby_threats,
         )
         if req.nearby_entities:
             ctx["nearby_entities"] = req.nearby_entities[:10]
+        if req.nearby_threats:
+            ctx["nearby_threats"] = req.nearby_threats[:6]
         rendered = render_prompt("dialogue", ctx)
         return {"prompt": rendered}
     except Exception as e:

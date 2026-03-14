@@ -1,6 +1,6 @@
 import {
   TILE_SIZE,
-  FRAME_GRASS, FRAME_TREE,
+  FRAME_GRASS, FRAME_TREE, FRAME_BARE,
   SHEET_KEY, SHEET_TILE, SHEET_COLS,
 } from '../constants.js';
 
@@ -14,13 +14,14 @@ function frameFromGrid(tileX, tileY) {
 
 /**
  * Build tilemap from server-loaded map data.
- * Returns { treePositions: [{col, row}, ...], width, height }.
+ * Returns { treePositions, rockSpawnTiles, width, height }.
  */
 export function buildTilemapFromData(scene, mapData) {
   const width  = mapData.width  || 30;
   const height = mapData.height || 30;
   const tiles  = mapData.tiles  || [];
   const treePositions = [];
+  const rockSpawnTiles = [];
 
   // Build a lookup: "col,row" -> {tileX, tileY}
   const lookup = {};
@@ -50,11 +51,15 @@ export function buildTilemapFromData(scene, mapData) {
       } else {
         scene.add.image(x, y, SHEET_KEY, frame)
           .setScale(SCALE).setDepth(0);
+        // Bare ground tiles can spawn rocks
+        if (frame === FRAME_BARE) {
+          rockSpawnTiles.push({ col, row });
+        }
       }
     }
   }
 
-  return { treePositions, width, height };
+  return { treePositions, rockSpawnTiles, width, height };
 }
 
 /**

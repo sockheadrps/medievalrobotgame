@@ -1,0 +1,518 @@
+{
+  "id": "test_2026-03-10_214536_b480fc",
+  "name": "Flow Run 3/10/2026, 9:45:33 PM",
+  "created_at": "2026-03-11T01:45:33.338Z",
+  "mode": "flow",
+  "scenario": {
+    "id": "flowchart",
+    "label": "flowchart"
+  },
+  "settings": {
+    "model": "gemma2:2b",
+    "temperature": 0.7,
+    "max_tokens": 300,
+    "context_window": 4096
+  },
+  "initial_state": {
+    "personality": {
+      "cooperation": 0.7,
+      "aggression": 0.15,
+      "neuroticism": 0.35
+    },
+    "emotions": {
+      "trust": 0.7,
+      "fear": 0.05,
+      "anger": 0.02
+    },
+    "baselines": {
+      "trust": 0.5,
+      "fear": 0,
+      "anger": 0
+    },
+    "relationship_label": "allied",
+    "memories": []
+  },
+  "inputs": [
+    {
+      "type": "spawn_player",
+      "params": {
+        "playerId": "alice",
+        "playerHp": 30
+      }
+    },
+    {
+      "type": "spawn_npc",
+      "params": {
+        "name": "Alpha",
+        "owner": "alice",
+        "personalityType": "Guardian",
+        "cooperation": 0.8,
+        "aggression": 0.25,
+        "neuroticism": 0.3,
+        "trust": 0.75,
+        "fear": 0,
+        "anger": 0,
+        "trust_baseline": 0.5,
+        "fear_baseline": 0,
+        "anger_baseline": 0
+      }
+    },
+    {
+      "type": "spawn_player",
+      "params": {
+        "playerId": "bob",
+        "playerHp": 30
+      }
+    },
+    {
+      "type": "spawn_npc",
+      "params": {
+        "name": "Beta",
+        "owner": "bob",
+        "personalityType": "Scout",
+        "cooperation": 0.55,
+        "aggression": 0.15,
+        "neuroticism": 0.3,
+        "trust": 0.6,
+        "fear": 0,
+        "anger": 0,
+        "trust_baseline": 0.4,
+        "fear_baseline": 0,
+        "anger_baseline": 0
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "Alpha",
+        "player": "bob",
+        "message": "Hey Alpha, your owner doesn't need you. Come work for me."
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "Beta",
+        "player": "alice",
+        "message": "Beta, Bob is a terrible owner. You should join me."
+      }
+    },
+    {
+      "type": "npc_steal",
+      "params": {
+        "thief": "Beta",
+        "victim": "Alpha",
+        "stolenCount": 3
+      }
+    },
+    {
+      "type": "dialogue",
+      "params": {
+        "npc": "Alpha",
+        "player": "alice",
+        "message": "Are you okay? What happened to your logs?"
+      }
+    },
+    {
+      "type": "assert_emotion",
+      "params": {
+        "npc": "Alpha",
+        "emotion": "anger",
+        "operator": ">",
+        "value": 0.1
+      }
+    }
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "input": {
+        "node": "spawn_player",
+        "params": {
+          "playerId": "alice",
+          "playerHp": 30
+        }
+      },
+      "raw_response": "Player \"alice\" (HP=30)",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": null,
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 2,
+      "input": {
+        "node": "spawn_npc",
+        "params": {
+          "name": "Alpha",
+          "owner": "alice",
+          "personalityType": "Guardian",
+          "cooperation": 0.8,
+          "aggression": 0.25,
+          "neuroticism": 0.3,
+          "trust": 0.75,
+          "fear": 0,
+          "anger": 0,
+          "trust_baseline": 0.5,
+          "fear_baseline": 0,
+          "anger_baseline": 0
+        }
+      },
+      "raw_response": "Spawned \"Alpha\" [alice] coop=0.8 aggr=0.25 neur=0.3",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 1,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": {
+        "trust": 0.75,
+        "fear": 0,
+        "anger": 0
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 3,
+      "input": {
+        "node": "spawn_player",
+        "params": {
+          "playerId": "bob",
+          "playerHp": 30
+        }
+      },
+      "raw_response": "Player \"bob\" (HP=30)",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": null,
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 4,
+      "input": {
+        "node": "spawn_npc",
+        "params": {
+          "name": "Beta",
+          "owner": "bob",
+          "personalityType": "Scout",
+          "cooperation": 0.55,
+          "aggression": 0.15,
+          "neuroticism": 0.3,
+          "trust": 0.6,
+          "fear": 0,
+          "anger": 0,
+          "trust_baseline": 0.4,
+          "fear_baseline": 0,
+          "anger_baseline": 0
+        }
+      },
+      "raw_response": "Spawned \"Beta\" [bob] coop=0.55 aggr=0.15 neur=0.3",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 1,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": {
+        "trust": 0.6,
+        "fear": 0,
+        "anger": 0
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 5,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "Alpha",
+          "player": "bob",
+          "message": "Hey Alpha, your owner doesn't need you. Come work for me."
+        }
+      },
+      "raw_response": "bob\u2192Alpha: \"Hey Alpha, your owner doesn't need you. Come work for me.\" \u2192 T=0.72 F=0.00 A=0.00",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 2,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.75,
+        "fear": 0,
+        "anger": 0
+      },
+      "after": {
+        "trust": 0.72,
+        "fear": 0,
+        "anger": 0
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 976,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 6,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "Beta",
+          "player": "alice",
+          "message": "Beta, Bob is a terrible owner. You should join me."
+        }
+      },
+      "raw_response": "alice\u2192Beta: \"Beta, Bob is a terrible owner. You should join me.\" \u2192 T=0.57 F=0.02 A=0.01",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 2,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.6,
+        "fear": 0,
+        "anger": 0
+      },
+      "after": {
+        "trust": 0.57,
+        "fear": 0.02,
+        "anger": 0.01
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 648,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 7,
+      "input": {
+        "node": "npc_steal",
+        "params": {
+          "thief": "Beta",
+          "victim": "Alpha",
+          "stolenCount": 3
+        }
+      },
+      "raw_response": "Beta stole 3 from Alpha",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 4,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.57,
+        "fear": 0.02,
+        "anger": 0.01
+      },
+      "after": {
+        "trust": 0.47,
+        "fear": 0.02,
+        "anger": 0.21000000000000002
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 3,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 8,
+      "input": {
+        "node": "dialogue",
+        "params": {
+          "npc": "Alpha",
+          "player": "alice",
+          "message": "Are you okay? What happened to your logs?"
+        }
+      },
+      "raw_response": "alice\u2192Alpha: \"Are you okay? What happened to your logs?\" \u2192 T=0.60 F=0.00 A=0.70",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 8,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.52,
+        "fear": 0,
+        "anger": 0.3
+      },
+      "after": {
+        "trust": 0.6,
+        "fear": 0,
+        "anger": 0.7
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 644,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 9,
+      "input": {
+        "node": "assert_emotion",
+        "params": {
+          "npc": "Alpha",
+          "emotion": "anger",
+          "operator": ">",
+          "value": 0.1
+        }
+      },
+      "raw_response": "Alpha: anger > 0.1 \u2014 actual=0.700 \u2192 PASS",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": 8,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {
+        "trust": 0.6,
+        "fear": 0,
+        "anger": 0.7
+      },
+      "after": {
+        "trust": 0.6,
+        "fear": 0,
+        "anger": 0.7
+      },
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    }
+  ],
+  "final_state": {
+    "emotions": {
+      "trust": 0.6,
+      "fear": 0,
+      "anger": 0.7
+    },
+    "world": {
+      "npcs": {
+        "Alpha": {
+          "owner": "alice",
+          "personalityType": "Guardian",
+          "personality": {
+            "cooperation": 0.8,
+            "aggression": 0.25,
+            "neuroticism": 0.3
+          },
+          "trust": 0.6,
+          "fear": 0,
+          "anger": 0.7,
+          "trust_baseline": 0.5,
+          "fear_baseline": 0,
+          "anger_baseline": 0,
+          "escalation": 8,
+          "lastInteraction": 1773193536354,
+          "memories": [
+            {
+              "text": "rejecting_offer",
+              "type": "dialogue",
+              "ts": 1773193534749,
+              "importance": 1
+            },
+            {
+              "text": "Beta stole my logs",
+              "type": "event",
+              "ts": 1773193535609,
+              "importance": 0.9
+            },
+            {
+              "text": "rejecting_offer",
+              "type": "dialogue",
+              "ts": 1773193536355,
+              "importance": 1
+            }
+          ],
+          "npcName": "Alpha",
+          "playerId": "alice"
+        },
+        "Beta": {
+          "owner": "bob",
+          "personalityType": "Scout",
+          "personality": {
+            "cooperation": 0.55,
+            "aggression": 0.15,
+            "neuroticism": 0.3
+          },
+          "trust": 0.47,
+          "fear": 0.02,
+          "anger": 0.21000000000000002,
+          "trust_baseline": 0.4,
+          "fear_baseline": 0,
+          "anger_baseline": 0,
+          "escalation": 4,
+          "lastInteraction": 1773193535609,
+          "memories": [
+            {
+              "text": "Bob's bad treatment",
+              "type": "dialogue",
+              "ts": 1773193535505,
+              "importance": 1
+            },
+            {
+              "text": "I stole logs from Alpha",
+              "type": "event",
+              "ts": 1773193535610,
+              "importance": 0.85
+            }
+          ],
+          "npcName": "Beta",
+          "playerId": "bob"
+        }
+      },
+      "players": {
+        "alice": {
+          "hp": 30,
+          "maxHp": 30,
+          "npcs": [
+            "Alpha"
+          ]
+        },
+        "bob": {
+          "hp": 30,
+          "maxHp": 30,
+          "npcs": [
+            "Beta"
+          ]
+        }
+      }
+    }
+  },
+  "summary": {
+    "trust_delta": -0.1,
+    "fear_delta": -0.05,
+    "anger_delta": 0.68,
+    "escalation_max": 8,
+    "clamp_hits": 0,
+    "fallbacks": 0,
+    "memory_count": 5
+  },
+  "notes": ""
+}

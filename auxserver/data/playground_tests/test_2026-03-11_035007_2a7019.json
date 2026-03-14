@@ -1,0 +1,340 @@
+{
+  "id": "test_2026-03-11_035007_2a7019",
+  "name": "Flow Run 3/11/2026, 3:49:57 AM",
+  "created_at": "2026-03-11T07:49:57.266Z",
+  "mode": "flow",
+  "scenario": {
+    "id": "flowchart",
+    "label": "flowchart"
+  },
+  "settings": {
+    "model": "hf.co/Andycurrent/Gemma-3-4B-VL-it-Gemini-Pro-Heretic-Uncensored-Thinking_GGUF:Q4_K_M",
+    "temperature": 0.7,
+    "max_tokens": 300,
+    "context_window": 4096
+  },
+  "initial_state": {
+    "personality": {
+      "cooperation": 0.7,
+      "aggression": 0.15,
+      "neuroticism": 0.35
+    },
+    "emotions": {
+      "trust": 0.7,
+      "fear": 0.05,
+      "anger": 0.02
+    },
+    "baselines": {
+      "trust": 0.5,
+      "fear": 0,
+      "anger": 0
+    },
+    "relationship_label": "allied",
+    "memories": []
+  },
+  "inputs": [
+    {
+      "type": "spawn_player",
+      "params": {
+        "playerId": "player_1",
+        "playerHp": 30
+      }
+    },
+    {
+      "type": "spawn_npc",
+      "params": {
+        "name": "Rivet",
+        "owner": "player_1",
+        "personalityType": "Berserker",
+        "cooperation": 0.25,
+        "aggression": 0.8,
+        "neuroticism": 0.45,
+        "trust": 0.4,
+        "fear": 0,
+        "anger": 0.3,
+        "trust_baseline": 0.3,
+        "fear_baseline": 0,
+        "anger_baseline": 0.1
+      }
+    },
+    {
+      "type": "spawn_npc",
+      "params": {
+        "name": "Patch",
+        "owner": "player_1",
+        "personalityType": "Caretaker",
+        "cooperation": 0.9,
+        "aggression": 0.05,
+        "neuroticism": 0.25,
+        "trust": 0.4,
+        "fear": 0.1,
+        "anger": 0,
+        "trust_baseline": 0.3,
+        "fear_baseline": 0,
+        "anger_baseline": 0
+      }
+    },
+    {
+      "type": "npc_chat",
+      "params": {
+        "npcA": "Rivet",
+        "npcB": "Patch"
+      }
+    },
+    {
+      "type": "npc_chat",
+      "params": {
+        "npcA": "Patch",
+        "npcB": "Rivet"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "input": {
+        "node": "spawn_player",
+        "params": {
+          "playerId": "player_1",
+          "playerHp": 30
+        }
+      },
+      "raw_response": "Player \"player_1\" (HP=30)",
+      "parsed_response": null,
+      "clamp_range": null,
+      "escalation": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": null,
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 2,
+      "input": {
+        "node": "spawn_npc",
+        "params": {
+          "name": "Rivet",
+          "owner": "player_1",
+          "personalityType": "Berserker",
+          "cooperation": 0.25,
+          "aggression": 0.8,
+          "neuroticism": 0.45,
+          "trust": 0.4,
+          "fear": 0,
+          "anger": 0.3,
+          "trust_baseline": 0.3,
+          "fear_baseline": 0,
+          "anger_baseline": 0.1
+        }
+      },
+      "raw_response": "Spawned \"Rivet\" [player_1] Berserker coop=0.25 aggr=0.8 neur=0.45",
+      "parsed_response": null,
+      "clamp_range": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": {},
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 3,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 3,
+      "input": {
+        "node": "spawn_npc",
+        "params": {
+          "name": "Patch",
+          "owner": "player_1",
+          "personalityType": "Caretaker",
+          "cooperation": 0.9,
+          "aggression": 0.05,
+          "neuroticism": 0.25,
+          "trust": 0.4,
+          "fear": 0.1,
+          "anger": 0,
+          "trust_baseline": 0.3,
+          "fear_baseline": 0,
+          "anger_baseline": 0
+        }
+      },
+      "raw_response": "Spawned \"Patch\" [player_1] Caretaker coop=0.9 aggr=0.05 neur=0.25",
+      "parsed_response": null,
+      "clamp_range": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": null,
+      "after": {},
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 3,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 4,
+      "input": {
+        "node": "npc_chat",
+        "params": {
+          "npcA": "Rivet",
+          "npcB": "Patch"
+        }
+      },
+      "raw_response": "Rivet \u2194 Patch chat \u2014 A\u2192B: T=0.15 A=0.30",
+      "parsed_response": null,
+      "clamp_range": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {},
+      "after": {},
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 8277,
+      "tokens": null,
+      "clamp_hits": false
+    },
+    {
+      "step": 5,
+      "input": {
+        "node": "npc_chat",
+        "params": {
+          "npcA": "Patch",
+          "npcB": "Rivet"
+        }
+      },
+      "raw_response": "Patch \u2194 Rivet chat \u2014 A\u2192B: T=0.10 A=0.20",
+      "parsed_response": null,
+      "clamp_range": null,
+      "clamped_deltas": null,
+      "scaled_deltas": null,
+      "before": {},
+      "after": {},
+      "memory_stored": [],
+      "fallback": null,
+      "latency_ms": 1784,
+      "tokens": null,
+      "clamp_hits": false
+    }
+  ],
+  "final_state": {
+    "emotions": {},
+    "world": {
+      "npcs": {
+        "Rivet": {
+          "owner": "player_1",
+          "personalityType": "Berserker",
+          "personality": {
+            "cooperation": 0.25,
+            "aggression": 0.8,
+            "neuroticism": 0.45
+          },
+          "relationships": {
+            "player_1": {
+              "trust": 0.4,
+              "fear": 0,
+              "anger": 0.3,
+              "trust_baseline": 0.3,
+              "fear_baseline": 0,
+              "anger_baseline": 0.1,
+              "cooperation_mod": 0,
+              "aggression_mod": 0,
+              "escalation": 1,
+              "lastInteraction": 0
+            },
+            "Patch": {
+              "trust": 0.15,
+              "fear": 0.05,
+              "anger": 0.3,
+              "trust_baseline": 0.25,
+              "fear_baseline": 0,
+              "anger_baseline": 0,
+              "cooperation_mod": 0,
+              "aggression_mod": 0,
+              "escalation": 2,
+              "lastInteraction": 1773215405868
+            }
+          },
+          "memories": [
+            {
+              "text": "Cautious, demanding; Shield recovery needed",
+              "type": "relationship",
+              "ts": 1773215405870,
+              "importance": 0.8
+            }
+          ],
+          "npcName": "Rivet"
+        },
+        "Patch": {
+          "owner": "player_1",
+          "personalityType": "Caretaker",
+          "personality": {
+            "cooperation": 0.9,
+            "aggression": 0.05,
+            "neuroticism": 0.25
+          },
+          "relationships": {
+            "player_1": {
+              "trust": 0.4,
+              "fear": 0.1,
+              "anger": 0,
+              "trust_baseline": 0.3,
+              "fear_baseline": 0,
+              "anger_baseline": 0,
+              "cooperation_mod": 0,
+              "aggression_mod": 0,
+              "escalation": 1,
+              "lastInteraction": 0
+            },
+            "Rivet": {
+              "trust": 0.09999999999999998,
+              "fear": 0.05,
+              "anger": 0.2,
+              "trust_baseline": 0.25,
+              "fear_baseline": 0,
+              "anger_baseline": 0,
+              "cooperation_mod": 0,
+              "aggression_mod": 0,
+              "escalation": 2,
+              "lastInteraction": 1773215407758
+            }
+          },
+          "memories": [
+            {
+              "text": "Insulting, questioning logging speed",
+              "type": "relationship",
+              "ts": 1773215407758,
+              "importance": 0.8
+            }
+          ],
+          "npcName": "Patch"
+        }
+      },
+      "players": {
+        "player_1": {
+          "hp": 30,
+          "maxHp": 30,
+          "npcs": [
+            "Rivet",
+            "Patch"
+          ]
+        }
+      }
+    }
+  },
+  "summary": {
+    "trust_delta": null,
+    "fear_delta": null,
+    "anger_delta": null,
+    "escalation_max": 0,
+    "clamp_hits": 0,
+    "fallbacks": 0,
+    "memory_count": 2
+  },
+  "notes": ""
+}

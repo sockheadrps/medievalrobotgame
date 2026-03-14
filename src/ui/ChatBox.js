@@ -16,6 +16,7 @@ const LOCAL_PATTERNS = [
   { re: /\b(follow|come\s+with|come\s+here|stay\s+close)\b/i, commands: [{ task: 'follow' }], reply: 'Right behind you, boss.' },
   { re: /\b(stop|idle|wait|stand|stay)\b/i, commands: [{ task: 'idle' }], reply: 'Alright, taking a break.' },
   { re: /\b(train|practice|spar)\b/i, commands: [{ task: 'train' }], reply: 'Time to train! Heading to the dummy.' },
+  { re: /\b(guard|protect|watch|keep)\b.*\b(fire|campfire)\b/i, commands: [{ task: 'guard_fire' }], reply: 'I will guard the fire.' },
   { re: /\b(guard|defend|protect)\s*(me|us)?\b/i, commands: [{ task: 'defend_player' }], reply: 'I\'ll keep you safe.' },
   { re: /\b(give|hand|drop|deliver|bring)\b.*\b(wood|logs?|inventory|stuff)\b/i, commands: [{ task: 'give_logs' }], reply: 'Coming to drop off logs!' },
   { re: /\b(give|hand\s+over|drop\s+off|bring)\b.*\b(me|here)\b/i, commands: [{ task: 'give_logs' }], reply: 'On my way with the goods!' },
@@ -23,6 +24,16 @@ const LOCAL_PATTERNS = [
   // "attack <name>" → handled dynamically in _submit via _resolveAttackTarget
   { re: /^(attack|fight|kill)$/i, commands: [{ task: 'attack_nearest_enemy' }], reply: 'Looking for enemies!' },
   { re: /\b(build|make|construct)\b.*\b(fences?|walls?|barriers?)\b/i, commands: [{ task: 'build_fence' }], reply: 'Building fences from nearby logs!' },
+  { re: /\b(light|ignite|start)\b.*\b(fire|campfire|log)\b/i, commands: [{ task: 'light_campfire' }], reply: 'I will light the fire.' },
+  { re: /\b(pick\s*up|get|grab|take|collect)\b.*\b(stone|rocks?)\b/i, commands: [{ task: 'pickup_stone' }], reply: 'I\'ll go grab that stone!' },
+  { re: /\b(refine|smelt|use)\b.*\b(stone|rocks?|anvil)\b/i, commands: [{ task: 'refine_stone' }], reply: 'Heading to the anvil to refine!' },
+  { re: /\b(learn|study|practice|train)\b.*\b(ki|blast|energy)\b/i, commands: [{ task: 'learn_ki' }], altTask: 'practice_ki', reply: 'I\'ll gather wood and build a Ki Target to learn!', altReply: 'Time to practice my ki blast!' },
+  { re: /\b(build|make|craft)\b.*\b(ki\s*target)\b/i, commands: [{ task: 'learn_ki' }], reply: 'Building a Ki Target to learn ki blast!' },
+  { re: /\b(show|demonstrate|fire|shoot|use)\b.*\b(ki|blast|energy)\b/i, commands: [{ task: 'show_blast' }], reply: 'Watch this!' },
+  { re: /\bmeditate\b.*\b(pristine)\b/i, commands: [{ task: 'meditate', crystal_quality: 'pristine' }], reply: 'I will enter a deep meditation.' },
+  { re: /\bmeditate\b.*\b(ki|normal)\s+crystal\b/i, commands: [{ task: 'meditate', crystal_quality: 'normal' }], reply: 'I will meditate with a ki crystal.' },
+  { re: /\bmeditate\b.*\b(cracked|poor)\b/i, commands: [{ task: 'meditate', crystal_quality: 'poor' }], reply: 'I will meditate with a cracked crystal.' },
+  { re: /\bmeditate\b/i, commands: [{ task: 'meditate' }], reply: 'I will begin meditating.' },
 ];
 
 /** Format emotion deltas into a compact display string. Returns '' if no meaningful changes. */
@@ -129,6 +140,7 @@ export class ChatBox {
 
   /** Add a line to the persistent chat log. */
   _addLog(text, color = '#cccccc') {
+    console.log(`[Chat] ${text}`);
     this._chatLog.push({ text, color });
     if (this._chatLog.length > MAX_LOG_LINES) this._chatLog.shift();
     this._refreshLog();
@@ -365,10 +377,17 @@ export class ChatBox {
     // Try local pattern matching first
     for (const pat of LOCAL_PATTERNS) {
       if (pat.re.test(text)) {
-        npc.showBubble(pat.reply, 3000, { silent: true });
+        // If NPC already knows ki blast, use altTask for learn_ki patterns
+        let commands = pat.commands;
+        let reply = pat.reply;
+        if (pat.altTask && npc._hasKiBlast) {
+          commands = [{ task: pat.altTask }];
+          reply = pat.altReply || pat.reply;
+        }
+        npc.showBubble(reply, 3000, { silent: true });
         npc.addMemory(`Player commanded: "${text}"`, 'command', playerId);
-        this._onCommands(npc, pat.commands);
-        this._addLog(`${npc.getName()}: ${pat.reply}`);
+        this._onCommands(npc, commands);
+        this._addLog(`${npc.getName()}: ${reply}`);
         return;
       }
     }
@@ -398,6 +417,7 @@ export class ChatBox {
           attack_npc: 'Targeting their NPC!',
           defend_player: 'I\'ll guard you!',
           train: 'Time to train!',
+          meditate: 'I will meditate.',
         };
         const reply = replies[taskName] ?? 'Got it!';
         npc.showBubble(reply, 3000, { silent: true });
@@ -422,6 +442,7 @@ export class ChatBox {
       const soulCtx = npc.getSoulContext(playerId);
       // Add nearby world context so the NPC can answer questions about surroundings
       soulCtx.nearby_entities = this._buildNearbyContext(npc);
+      soulCtx.nearby_threats = this._buildNearbyThreatContext(npc);
       const topicEntity = this._findMentionedEntity(text, soulCtx.nearby_entities);
       if (topicEntity) {
         soulCtx.topic_entity = npc.getContextAboutEntity(topicEntity.id, topicEntity.name);
@@ -612,6 +633,38 @@ export class ChatBox {
       const dist = Phaser.Math.Distance.Between(npc.x, npc.y, other.x, other.y);
       if (dist > RANGE) continue;
       nearby.push({ id: `npc:${other.id}`, type: 'npc', name: other.getName(), relation: 'ally', distance: Math.round(dist / TILE) });
+    }
+
+    return nearby;
+  }
+
+  _buildNearbyThreatContext(npc) {
+    const scene = this._scene;
+    if (!scene) return [];
+    const TILE = 48;
+    const RANGE = TILE * 10;
+    const nearby = [];
+    const recentThreats = scene._recentThreats || {};
+
+    for (const [pid, rp] of Object.entries(scene._remotePlayers || {})) {
+      if (rp.isDead?.()) continue;
+      if (!recentThreats[`player:${pid}`]) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rp.x, rp.y);
+      if (dist > RANGE) continue;
+      nearby.push({ id: pid, type: 'player', name: pid, distance: Math.round(dist / TILE) });
+    }
+
+    for (const rnpc of Object.values(scene._remoteNPCSprites || {})) {
+      if (rnpc.isDead?.()) continue;
+      if (!recentThreats[`npc:${rnpc.npcId}`]) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rnpc.x, rnpc.y);
+      if (dist > RANGE) continue;
+      nearby.push({
+        id: `npc:${rnpc.npcId}`,
+        type: 'npc',
+        name: rnpc.getName?.() || rnpc.npcId,
+        distance: Math.round(dist / TILE),
+      });
     }
 
     return nearby;

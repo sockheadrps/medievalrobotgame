@@ -26,6 +26,15 @@ VALID_TASKS = {
     "train",
     "give_logs",
     "build_fence",
+    "light_campfire",
+    "guard_fire",
+    "learn_ki",
+    "show_blast",
+    "practice_ki",
+    "pickup_stone",
+    "refine_stone",
+    "give_materials",
+    "meditate",
 }
 VALID_GOALS = {
     "gather",

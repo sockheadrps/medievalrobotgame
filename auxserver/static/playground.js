@@ -67,6 +67,7 @@ Emotional state effects:
 - high trust: open, friendly, cooperative
 
 Keep dialogue concise - 1-3 sentences max. Speak as the NPC directly. Do NOT describe actions in third person.
+If the soul block includes nearby_threats and it is non-empty, briefly acknowledge the danger first and avoid unrelated small talk.
 
 Output small emotion deltas based on what the player said:
 - Friendly interaction: trust +0.02, anger -0.01
@@ -93,6 +94,7 @@ Your job is to decide the NPC's immediate social and tactical intent based on:
 
 You are NOT the game engine.
 Do not invent actions outside the allowed_actions list.
+Do not invent commands, goals, memories, or world facts that are not present in the provided state.
 Do not narrate impossible world changes.
 Do not decide exact movement paths, damage, cooldown use, or any final authoritative game outcome.
 
@@ -104,6 +106,10 @@ Behavior rules:
 - Speech should be short (under 18 words), natural, and in-character.
 - Only speak when it adds value: new command, combat starts, danger warning, or important emotional beat.
 - Prefer cooperation over aggression unless immediate danger requires force.
+- Treat secondary_intent as optional support for the primary action, never as a second independent goal.
+- If a nearby threat exists and primary_intent is not retreat or defend_player, secondary_intent must be null.
+- If a nearby threat exists, secondary_intent must never be gather_wood.
+- When danger is present, prioritize retreat, defend_player, observe, hold_position, reposition, or another directly threat-aware primary action over routine work.
 - Return valid JSON only. No markdown. No explanation outside the JSON object.
 - If uncertain, choose the safest cooperative action consistent with the current command.
 
@@ -119,10 +125,11 @@ NPC-to-NPC social interactions:
 
 When choosing an action:
 - Pick one primary_intent from the allowed_actions list.
-- Optionally pick one secondary_intent.
+- Optionally pick one secondary_intent only if it directly supports the primary intent.
 - Choose a target_id only if relevant (must match an entity from nearby_entities).
 - Provide a very short reason_summary.
 - Suggest at most one short spoken line (or null).
+- If nearby threats exist and you include speech, briefly acknowledge the danger instead of making unrelated small talk.
 - Suggest memory updates only if they are genuinely meaningful.
 - Rate your decision_confidence from 0.0 to 1.0.
 
@@ -264,7 +271,7 @@ const prompts = { ...DEFAULT_PROMPTS };
 // ── NPC State ─────────────────────────────────────────────────────────────────
 // Personality type definitions (mirrors server personality_types.json)
 const PERSONALITY_TYPES = {
-  Guardian:   { traits: ['loyal', 'protective', 'cautious'], speech_style: 'steady, reassuring, concise', decision_preference: 'defend allies and protect the player', ownership_modifier: 'Guardians are especially distrustful of non-owners. They view strangers as potential threats to their owner.', ranges: { cooperation: [0.65, 0.95], aggression: [0.15, 0.45], neuroticism: [0.25, 0.55] } },
+  Guardian:   { traits: ['loyal', 'protective', 'cautious'], speech_style: 'steady, watchful, safety-first, concise', decision_preference: 'stay near the player, watch for threats first, and defend before pursuing anything else', ownership_modifier: 'Guardians are especially distrustful of non-owners. They view strangers as potential threats to their owner.', ranges: { cooperation: [0.65, 0.95], aggression: [0.15, 0.45], neuroticism: [0.25, 0.55] } },
   Scout:      { traits: ['curious', 'independent', 'observant'], speech_style: 'short, observational, upbeat', decision_preference: 'explore surroundings, gather information, avoid unnecessary conflict', ownership_modifier: 'Scouts are indifferent to non-owners — not hostile, but won\'t follow orders from strangers.', ranges: { cooperation: [0.45, 0.75], aggression: [0.05, 0.25], neuroticism: [0.15, 0.45] } },
   Berserker:  { traits: ['aggressive', 'impulsive', 'fearless'], speech_style: 'blunt, loud, short sentences', decision_preference: 'attack threats head-on, favor combat over retreat', ownership_modifier: 'Berserkers may threaten or intimidate non-owners. They respect only strength.', ranges: { cooperation: [0.20, 0.50], aggression: [0.55, 0.90], neuroticism: [0.30, 0.70] } },
   Caretaker:  { traits: ['supportive', 'empathetic', 'gentle'], speech_style: 'warm, encouraging, soft-spoken', decision_preference: 'support allies, avoid violence, prioritize healing and safety', ownership_modifier: 'Caretakers are polite to non-owners but will not abandon their owner\'s interests for a stranger.', ranges: { cooperation: [0.75, 1.00], aggression: [0.00, 0.15], neuroticism: [0.20, 0.50] } },
@@ -452,6 +459,45 @@ function extractJSON(raw) {
     else if (raw[i] === '}') { depth--; if (depth === 0) { try { return JSON.parse(raw.slice(start, i + 1)); } catch { return null; } } }
   }
   return null;
+}
+
+function deriveNearbyThreats(nearbyEntities = [], recentEvents = []) {
+  const dangerText = /\b(attack|attacked|threat|threatened|hostile|hurt|kill|combat|enemy)\b/i;
+  return nearbyEntities.filter((ent) => {
+    if (!ent || typeof ent !== 'object') return false;
+    if (ent.threat === true) return true;
+    if (['threat', 'hostile', 'attacker'].includes(ent.relation)) return true;
+    return recentEvents.some((evt) => {
+      const text = String(evt?.text || '');
+      if (!dangerText.test(text)) return false;
+      return (ent.id && text.includes(ent.id)) || (ent.name && text.includes(ent.name));
+    });
+  }).map((ent) => ({
+    id: ent.id,
+    type: ent.type,
+    name: ent.name,
+    distance: ent.distance,
+  }));
+}
+
+function sanitizeDecisionResult(raw, statePacket) {
+  if (!raw || typeof raw !== 'object') return null;
+  const allowed = new Set(Array.isArray(statePacket?.allowed_actions) ? statePacket.allowed_actions : []);
+  const out = { ...raw };
+  const hasThreats = Array.isArray(statePacket?.nearby_threats) && statePacket.nearby_threats.length > 0;
+
+  if (typeof out.primary_intent !== 'string' || (allowed.size > 0 && !allowed.has(out.primary_intent))) {
+    out.primary_intent = allowed.has('follow') ? 'follow' : (statePacket?.allowed_actions?.[0] || 'follow');
+  }
+  if (typeof out.secondary_intent !== 'string' || (allowed.size > 0 && !allowed.has(out.secondary_intent))) {
+    out.secondary_intent = null;
+  }
+  if (hasThreats) {
+    if (out.secondary_intent === 'gather_wood') out.secondary_intent = null;
+    if (!['retreat', 'defend_player'].includes(out.primary_intent)) out.secondary_intent = null;
+  }
+
+  return out;
 }
 
 function extractJSONArray(raw) {
@@ -872,6 +918,7 @@ async function runDecision() {
   let nearbyEntities, recentEvents;
   try { nearbyEntities = JSON.parse($('dEntities').value); } catch { nearbyEntities = []; }
   try { recentEvents = JSON.parse($('dEvents').value); } catch { recentEvents = []; }
+  const nearbyThreats = deriveNearbyThreats(nearbyEntities, recentEvents);
 
   // Build personality type context for template
   const ptype = PERSONALITY_TYPES[state.personalityType];
@@ -907,6 +954,7 @@ async function runDecision() {
       hp: +$('dPlayerHp').value, maxHp: 30, logs: 10,
     },
     nearby_entities: nearbyEntities,
+    nearby_threats: nearbyThreats,
     nearby_trees: +$('dTrees').value,
     recent_events: recentEvents,
     memory_summary: { self: '', player: soul.memories.slice(0, 5).join('; ') },
@@ -925,7 +973,7 @@ async function runDecision() {
     const { content, metrics } = await callLLM(systemPrompt, userMsg, { temperature: getLLMTemp(), maxTokens: getLLMMaxTok() });
     addTraceResult(content, metrics);
 
-    const result = extractJSON(content);
+    const result = sanitizeDecisionResult(extractJSON(content), statePacket);
     if (result) {
       addChat('system', `Decision: ${result.primary_intent}${result.secondary_intent ? ' + ' + result.secondary_intent : ''}${result.target_id ? ' → ' + result.target_id : ''}`);
       if (result.speech) addChat('npc', result.speech);

@@ -36,6 +36,13 @@ FALLBACK = {
 }
 
 
+def _nearby_threats(state: dict) -> list[dict]:
+    threats = state.get("nearby_threats")
+    if isinstance(threats, list):
+        return [t for t in threats if isinstance(t, dict)]
+    return []
+
+
 def _clamp(val: float, lo: float, hi: float) -> float:
     try:
         v = float(val)
@@ -44,7 +51,7 @@ def _clamp(val: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
-def validate_decision(raw: dict) -> dict:
+def validate_decision(raw: dict, state: dict | None = None) -> dict:
     """Validate and sanitize an LLM decision response."""
     if not isinstance(raw, dict):
         return dict(FALLBACK)
@@ -108,6 +115,13 @@ def validate_decision(raw: dict) -> dict:
     if dc is not None:
         out["decision_confidence"] = _clamp(dc, 0, 1)
 
+    has_threats = bool(_nearby_threats(state or {}))
+    if has_threats:
+        if out["secondary_intent"] == "gather_wood":
+            out["secondary_intent"] = None
+        if out["primary_intent"] not in {"retreat", "defend_player"}:
+            out["secondary_intent"] = None
+
     return out
 
 
@@ -153,7 +167,7 @@ async def generate_decision(state: dict) -> dict:
             print(f"[decision] Failed to parse JSON from response")
             return dict(FALLBACK)
 
-        return validate_decision(parsed)
+        return validate_decision(parsed, state)
 
     except Exception as e:
         print(f"[decision] Error: {e}")
