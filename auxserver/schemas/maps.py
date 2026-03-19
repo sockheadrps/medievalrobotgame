@@ -12,6 +12,20 @@ class TilePlacement(BaseModel):
     layer: int = 0
 
 
+class CollisionTile(BaseModel):
+    x: int
+    y: int
+    color: str = "#ff0033"
+
+
+class MapItem(BaseModel):
+    id: str
+    tileCol: int | None = None
+    tileRow: int | None = None
+    label: str = ""
+    collision: bool = False
+
+
 class CustomSprite(BaseModel):
     id: str
     pixels: List[int] | None = None
@@ -26,3 +40,5 @@ class MapData(BaseModel):
     height: int | None = None
     tiles: List[TilePlacement]
     customSprites: List[CustomSprite] = []
+    collisionTiles: List[CollisionTile] = []
+    mapItems: List[MapItem] = []

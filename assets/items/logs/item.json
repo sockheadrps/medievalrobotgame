@@ -1,0 +1,14 @@
+{
+  "id": "logs",
+  "label": "Logs",
+  "category": "resource",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 41,
+    "tileRow": 10
+  },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#cccccc",
+  "description": ""
+}

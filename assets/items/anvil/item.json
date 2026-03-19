@@ -1,0 +1,14 @@
+{
+  "id": "anvil",
+  "label": "Anvil",
+  "category": "resource",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 15,
+    "tileRow": 0
+  },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#cccccc",
+  "description": ""
+}

@@ -206,6 +206,13 @@ export default class LoginScene extends Phaser.Scene {
       fontSize: '10px', color: '#556677',
     }).setOrigin(0.5);
 
+    // ── Reset game button ──────────────────────────────────────────────────────
+    const resetBtn = this.add.text(W / 2, btnY + 65, 'RESET GAME', {
+      fontSize: '11px', color: '#aa4444', backgroundColor: '#1a1a1a',
+      padding: { x: 12, y: 4 },
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    resetBtn.on('pointerdown', () => this._resetGame());
+
     // Keyboard input
     this.input.keyboard.on('keydown', this._onKey, this);
 
@@ -335,6 +342,32 @@ export default class LoginScene extends Phaser.Scene {
     } catch (e) {
       this._statusText.setText('Server not reachable').setColor('#ff6666');
       this._submitting = false;
+    }
+  }
+
+  async _resetGame() {
+    if (this._resetting) return;
+    // Confirm with user
+    if (!window.confirm('Reset the entire game? All player stats, NPCs, items, and world state will be wiped. Accounts are kept.')) {
+      return;
+    }
+    this._resetting = true;
+    this._statusText.setText('Resetting game...').setColor('#ffaa44');
+
+    try {
+      const res = await fetch(`${API_BASE}/reset_game`, { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        this._clearSession();
+        this._statusText.setText('Game reset! Reloading...').setColor('#66ff66');
+        this.time.delayedCall(1000, () => window.location.reload());
+      } else {
+        this._statusText.setText('Reset failed').setColor('#ff6666');
+        this._resetting = false;
+      }
+    } catch (e) {
+      this._statusText.setText('Server not reachable').setColor('#ff6666');
+      this._resetting = false;
     }
   }
 

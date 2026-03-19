@@ -1,12 +1,10 @@
 import json
 
-import httpx
-
-from core.config import MODEL, OLLAMA_URL
 from schemas.soul import DialogueRequest, NPCSaveRequest, SoulContext
 from services.prompt_loader import load_prompt, render_prompt
 from services import database as db
 from services import personality_types as ptypes
+from services.llm_gateway import chat_completion
 
 
 def extract_soul_json(raw: str) -> dict:
@@ -158,23 +156,15 @@ async def generate_dialogue(request: DialogueRequest) -> dict:
     )
     system_content = render_prompt("dialogue", ctx)
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            OLLAMA_URL,
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": request.player_message},
-                ],
-                "stream": False,
-                "think": False,
-                "options": {"temperature": 0.7, "num_predict": 300},
-            },
-        )
-        resp.raise_for_status()
-
-    raw = resp.json()["message"]["content"].strip()
+    raw = await chat_completion(
+        [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": request.player_message},
+        ],
+        temperature=0.7,
+        max_tokens=300,
+        timeout=60.0,
+    )
     print(f"[dialogue:{request.npc_id}] raw -> {raw!r}")
     result = extract_soul_json(raw)
     dialogue = result.get("dialogue", "...")

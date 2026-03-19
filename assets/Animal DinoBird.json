@@ -1,0 +1,46 @@
+{
+  "spriteSheet": "Animal DinoBird.png",
+  "indexBase": 0,
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 8,
+    "rows": 1
+  },
+  "totalFrames": 8,
+  "namedFrames": {
+    "0": "walk_1_down",
+    "1": "walk_1_up",
+    "2": "walk_1_right",
+    "3": "walk_1_left",
+    "4": "walk_2_down",
+    "5": "walk_2_up",
+    "6": "walk_2_right",
+    "7": "walk_2_left"
+  },
+  "animations": {
+    "walk_down":  { "frames": [0, 4], "frameRate": 4, "repeat": -1 },
+    "walk_up":    { "frames": [1, 5], "frameRate": 4, "repeat": -1 },
+    "walk_right": { "frames": [2, 6], "frameRate": 4, "repeat": -1 },
+    "walk_left":  { "frames": [3, 7], "frameRate": 4, "repeat": -1 }
+  },
+  "entity": {
+    "type": "animal",
+    "species": "dinobird",
+    "loot": [
+      { "item": "meat", "quantity": 1, "chance": 1.0 },
+      { "item": "feather", "quantity": 2, "chance": 0.6 }
+    ],
+    "respawn": {
+      "enabled": true,
+      "delayMs": 30000,
+      "spawnZone": "level_01"
+    },
+    "behavior": "roam",
+    "roamRadius": 5,
+    "speed": 40,
+    "hp": 20
+  }
+}

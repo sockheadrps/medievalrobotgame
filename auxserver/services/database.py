@@ -107,6 +107,28 @@ def init_db():
             owner TEXT,
             dead INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS campfires (
+            id TEXT PRIMARY KEY,
+            x REAL,
+            y REAL,
+            logs INTEGER DEFAULT 1,
+            lit_at REAL DEFAULT 0,
+            duration REAL DEFAULT 20,
+            owner TEXT,
+            dead INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS buildings (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            col INTEGER NOT NULL,
+            row INTEGER NOT NULL,
+            map TEXT DEFAULT 'level_01',
+            owner TEXT DEFAULT '',
+            direction TEXT DEFAULT '',
+            stored TEXT DEFAULT '{}'
+        );
     """)
     conn.commit()
 
@@ -128,6 +150,11 @@ def init_db():
         pass  # column already exists
     try:
         conn.execute("ALTER TABLE players ADD COLUMN state_json TEXT DEFAULT '{}'")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    try:
+        conn.execute("ALTER TABLE buildings ADD COLUMN label TEXT DEFAULT ''")
         conn.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
@@ -188,23 +215,18 @@ def save_player(username: str, data: dict):
         "blastLevel": data.get("blastLevel", 0),
         "kiSkillLevel": data.get("kiSkillLevel", 1),
         "kiSkillXp": data.get("kiSkillXp", 0),
-        "realm_tier": data.get("realm_tier", 0),
-        "realm_insight": data.get("realm_insight", 0),
-        "realm_crystal_t1": data.get("realm_crystal_t1", 0),
-        "ki_upgrades": data.get("ki_upgrades", {}),
         "stones": data.get("stones", 0),
-        "bastalite": data.get("bastalite", 0),
-        "crystal_pristine": data.get("crystal_pristine", 0),
-        "crystal_normal": data.get("crystal_normal", 0),
-        "crystal_poor": data.get("crystal_poor", 0),
-        "armor_elite": data.get("armor_elite", False),
-        "armor_elite_inv": data.get("armor_elite_inv", False),
+        "crystals": data.get("crystals", 0),
+        "copper": data.get("copper", 0),
+        "meat": data.get("meat", 0),
+        "feathers": data.get("feathers", 0),
+        "vegetables": data.get("vegetables", 0),
+        "seeds": data.get("seeds", 0),
+        "ki_blast_bonuses": data.get("ki_blast_bonuses", {}),
         "ki_moves": data.get("ki_moves", []),
-        "ki_denominations": data.get("ki_denominations", []),
-        "ki_known_augments": data.get("ki_known_augments", {}),
-        "ki_equipped_augments": data.get("ki_equipped_augments", {}),
-        "aura_tint": data.get("aura_tint", 0x4fd6ff),
-        "aura_alpha": data.get("aura_alpha", 0.42),
+        "map": data.get("map", "level_01"),
+        "equipment": data.get("equipment", {}),
+        "inventory": data.get("inventory", {}),
     })
     conn.execute("""
         INSERT INTO players (username, x, y, hp, max_hp, str, def, level, xp, logs, npc_ids, state_json)
@@ -251,23 +273,18 @@ def load_player(username: str) -> dict | None:
         "blastLevel": extra.get("blastLevel", 0),
         "kiSkillLevel": extra.get("kiSkillLevel", 1),
         "kiSkillXp": extra.get("kiSkillXp", 0),
-        "realm_tier": extra.get("realm_tier", 0),
-        "realm_insight": extra.get("realm_insight", 0),
-        "realm_crystal_t1": extra.get("realm_crystal_t1", 0),
-        "ki_upgrades": extra.get("ki_upgrades", {}),
         "stones": extra.get("stones", 0),
-        "bastalite": extra.get("bastalite", 0),
-        "crystal_pristine": extra.get("crystal_pristine", 0),
-        "crystal_normal": extra.get("crystal_normal", 0),
-        "crystal_poor": extra.get("crystal_poor", 0),
-        "armor_elite": extra.get("armor_elite", False),
-        "armor_elite_inv": extra.get("armor_elite_inv", False),
+        "crystals": extra.get("crystals", 0),
+        "meat": extra.get("meat", 0),
+        "feathers": extra.get("feathers", 0),
+        "vegetables": extra.get("vegetables", 0),
+        "seeds": extra.get("seeds", 0),
+        "ki_blast_bonuses": extra.get("ki_blast_bonuses", {}),
         "ki_moves": extra.get("ki_moves", []),
-        "ki_denominations": extra.get("ki_denominations", []),
-        "ki_known_augments": extra.get("ki_known_augments", {}),
-        "ki_equipped_augments": extra.get("ki_equipped_augments", {}),
-        "aura_tint": extra.get("aura_tint", 0x4fd6ff),
-        "aura_alpha": extra.get("aura_alpha", 0.42),
+        "copper": extra.get("copper", 0),
+        "map": extra.get("map", "level_01"),
+        "equipment": extra.get("equipment", {}),
+        "inventory": extra.get("inventory", {}),
     }
 
 
@@ -481,6 +498,110 @@ def load_anvils() -> dict:
             "owner": r["owner"], "dead": False,
         }
     return result
+
+
+def save_campfires(campfires: dict):
+    conn = _get_conn()
+    conn.execute("DELETE FROM campfires")
+    for c in campfires.values():
+        if c.get("dead"):
+            continue
+        conn.execute("""
+            INSERT INTO campfires (id, x, y, logs, lit_at, duration, owner, dead)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (c["id"], c["x"], c["y"], c["logs"], c["lit_at"],
+              c["duration"], c.get("owner", ""), 0))
+    conn.commit()
+
+
+def load_campfires() -> dict:
+    conn = _get_conn()
+    rows = conn.execute("SELECT * FROM campfires WHERE dead = 0").fetchall()
+    result = {}
+    for r in rows:
+        result[r["id"]] = {
+            "id": r["id"], "x": r["x"], "y": r["y"],
+            "logs": r["logs"], "lit_at": r["lit_at"],
+            "duration": r["duration"],
+            "owner": r["owner"], "dead": False,
+        }
+    return result
+
+
+# ── Buildings (conveyors, crates, furnaces) ───────────────────────────────────
+
+def save_buildings(buildings: dict):
+    conn = _get_conn()
+    conn.execute("DELETE FROM buildings")
+    for b in buildings.values():
+        # Pack direction and out_direction into "dir|out_dir"
+        dir_str = b.get("direction", "")
+        out_dir = b.get("out_direction", "")
+        packed_dir = f"{dir_str}|{out_dir}" if out_dir else dir_str
+        conn.execute("""
+            INSERT INTO buildings (id, kind, col, row, map, owner, direction, stored, label)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (b["id"], b["kind"], b["col"], b["row"],
+              b.get("map", "level_01"), b.get("owner", ""),
+              packed_dir, json.dumps(b.get("stored", {})),
+              b.get("label", "")))
+    conn.commit()
+
+
+def load_buildings() -> dict:
+    conn = _get_conn()
+    rows = conn.execute("SELECT * FROM buildings").fetchall()
+    result = {}
+    for r in rows:
+        stored = {}
+        try:
+            stored = json.loads(r["stored"]) if r["stored"] else {}
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # Unpack "dir|out_dir"
+        raw_dir = r["direction"] or ""
+        if "|" in raw_dir:
+            direction, out_direction = raw_dir.split("|", 1)
+        else:
+            direction = raw_dir
+            out_direction = ""
+        result[r["id"]] = {
+            "id": r["id"], "kind": r["kind"],
+            "col": r["col"], "row": r["row"],
+            "map": r["map"], "owner": r["owner"],
+            "direction": direction, "out_direction": out_direction,
+            "label": r["label"] if "label" in r.keys() else "",
+            "stored": stored,
+        }
+    return result
+
+
+# ── Game reset ────────────────────────────────────────────────────────────────
+
+def reset_game():
+    """Wipe all world state and reset all player stats to fresh. Keeps accounts."""
+    conn = _get_conn()
+    # Clear world objects
+    conn.execute("DELETE FROM ground_items")
+    conn.execute("DELETE FROM dummies")
+    conn.execute("DELETE FROM anvils")
+    conn.execute("DELETE FROM fences")
+    conn.execute("DELETE FROM ki_targets")
+    conn.execute("DELETE FROM campfires")
+    conn.execute("DELETE FROM buildings")
+    conn.execute("DELETE FROM npcs")
+    # Reset all player stats to defaults (keep username, password, chat_color, llm_model)
+    conn.execute("""
+        UPDATE players SET
+            x = 480, y = 480,
+            hp = 20, max_hp = 20,
+            str = 1, def = 1,
+            level = 1, xp = 0,
+            logs = 0, npc_ids = '[]',
+            state_json = '{}'
+    """)
+    conn.commit()
+    print("[db] Game reset — all world state and player stats wiped")
 
 
 # ── Dev-mode seed accounts ────────────────────────────────────────────────────

@@ -5,12 +5,10 @@ import Phaser from 'phaser';
 import {
   PLAYER_KEY, TILE_SIZE, PLAYER_FRAME_H,
   PFRAME_FACE_DOWN, PFRAME_FACE_UP, PFRAME_FACE_RIGHT, PFRAME_FACE_LEFT,
-  PFRAME_PUNCH_LEFT, PFRAME_PUNCH_RIGHT, PFRAME_MEDITATE,
+  PFRAME_PUNCH_LEFT, PFRAME_PUNCH_RIGHT,
 } from '../constants.js';
-import { createArmorOverlay, getPlayerArmorFrameName, syncArmorOverlay } from './ArmorOverlay.js';
-import { createAuraOverlay, syncAuraOverlay } from './AuraOverlay.js';
 import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
-import { applyActorChargeState, initializeActorKiState } from './actorKiState.js';
+import { createEquipmentOverlay, syncEquipmentOverlay } from './EquipmentOverlay.js';
 
 const SCALE = TILE_SIZE / PLAYER_FRAME_H;
 const LERP_SPEED = 0.35;
@@ -28,6 +26,7 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
 
     this.playerId = playerId;
     this.chatColor = '#cccccc';
+    this.isAIRival = false;
     this._dead = false;
     this._knockedOut = false;
     this._carriedBy = null;
@@ -36,8 +35,6 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
     this._facing = 'down';
     this._anim = 'idle';
     this._punching = false;
-    this.armorElite = false;
-    initializeActorKiState(this);
     this._selected = false;
     this._attackable = false;
     this._hovered = false;
@@ -66,22 +63,23 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
       .setOrigin(0, 0.5).setDepth(3);
     this._kiBar = scene.add.rectangle(x - 20, y - TILE_SIZE + 3, 40, 3, 0x4488ff)
       .setOrigin(0, 0.5).setDepth(3);
-    this._meditationLabel = scene.add.text(x, y - TILE_SIZE - 30, '', {
-      fontSize: '9px', color: '#99ddff', backgroundColor: '#001122aa',
-      padding: { x: 4, y: 2 },
-    }).setOrigin(0.5, 1).setDepth(11).setVisible(false);
-    this._meditationBarBg = scene.add.rectangle(x, y - TILE_SIZE - 20, 34, 4, 0x112233, 0.95)
-      .setDepth(11).setVisible(false);
-    this._meditationBar = scene.add.rectangle(x - 17, y - TILE_SIZE - 20, 34, 4, 0x66bbff, 0.95)
-      .setOrigin(0, 0.5).setDepth(12).setVisible(false);
 
     this._hp = 20;
     this._maxHp = 20;
     this._ki = 20;
     this._maxKi = 20;
     this.level = 1;
+    this.xp = 0;
     this.str = 1;
     this.def = 1;
+    this.logs = 0;
+    this.stones = 0;
+    this.crystals = 0;
+    this.blastLevel = 0;
+    this.kiSkillLevel = 1;
+    this.kiSkillXp = 0;
+    this.kiBlastBonuses = {};
+    this.kiMoves = [];
 
     this.on('pointerdown', (pointer, _localX, _localY, event) => {
       this.scene?._handleRemoteEntityPointerDown?.(this, pointer, event);
@@ -96,9 +94,9 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
       this._updateVisualState();
     });
 
-    this._armorOverlay = createArmorOverlay(scene, this);
-    this._auraOverlay = createAuraOverlay(scene, this);
     this._barrierOverlay = createBarrierOverlay(scene, this);
+    this._equipOverlays = {};
+    this.equipment = {};
     this._ensureAnims(scene);
   }
 
@@ -121,15 +119,22 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
     this._facing = state.facing || 'down';
     this._anim = state.anim || 'idle';
     this._punching = state.punching || false;
-    this.armorElite = !!state.armor_elite;
     this._hp = state.hp ?? 20;
     this._maxHp = state.maxHp ?? 20;
     this._ki = state.ki ?? this._ki;
     this._maxKi = state.maxKi ?? this._maxKi;
     this.level = state.level ?? this.level;
-    this.kiSkillLevel = state.kiSkillLevel ?? this.kiSkillLevel;
+    this.xp = state.xp ?? this.xp;
     this.str = state.str ?? this.str;
     this.def = state.def ?? this.def;
+    this.logs = state.logs ?? this.logs;
+    this.stones = state.stones ?? this.stones;
+    this.crystals = state.crystals ?? this.crystals;
+    this.blastLevel = state.blastLevel ?? this.blastLevel;
+    this.kiSkillLevel = state.kiSkillLevel ?? this.kiSkillLevel;
+    this.kiSkillXp = state.kiSkillXp ?? this.kiSkillXp;
+    if (state.ki_blast_bonuses) this.kiBlastBonuses = state.ki_blast_bonuses;
+    if (Array.isArray(state.ki_moves)) this.kiMoves = state.ki_moves;
     if (state.chatColor) {
       this.chatColor = state.chatColor;
       this._nameLabel?.setColor(state.chatColor);
@@ -137,40 +142,25 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
 
     this._knockedOut = !!state.knocked_out;
     this._carriedBy = state.carried_by ?? null;
-    this.meditating = !!state.meditating;
-    this.meditationStartedAt = Number(state.meditation_started_at || 0);
-    this.meditationUntil = Number(state.meditation_until || 0);
-    this.meditationTotalMs = Number(state.meditation_total_ms || 0);
-    applyActorChargeState(this, state, { facingFallback: this._facing });
-    this.kiDenominations = Array.isArray(state.ki_denominations) ? [...state.ki_denominations] : this.kiDenominations;
-    this.kiKnownAugments = (state.ki_known_augments && typeof state.ki_known_augments === 'object') ? { ...state.ki_known_augments } : this.kiKnownAugments;
-    this.kiEquippedAugments = (state.ki_equipped_augments && typeof state.ki_equipped_augments === 'object') ? { ...state.ki_equipped_augments } : this.kiEquippedAugments;
+    this.equipment = state.equipment ?? this.equipment ?? {};
+
+    // AI rival visual distinction
+    if (state.is_ai_rival && !this.isAIRival) {
+      this.isAIRival = true;
+      this._nameLabel?.setColor('#ff6644');
+      this._nameLabel?.setBackgroundColor('#220000aa');
+    }
 
     if (state.dead && !this._dead) {
       this._dead = true;
       this.setAlpha(0.3);
       this._nameLabel?.setAlpha(0.3);
-      this._armorOverlay?.setVisible(false);
     } else if (!state.dead && this._dead) {
       this._dead = false;
       this.setAlpha(1);
       this._nameLabel?.setAlpha(1);
     }
     this._updateVisualState();
-  }
-
-  _updateMeditationVisuals() {
-    const active = !!this.meditating;
-    const totalSec = Math.max(0.001, this.meditationTotalMs / 1000);
-    const remaining = Math.max(0, this.meditationUntil - (Date.now() / 1000));
-    const pct = Phaser.Math.Clamp(remaining / totalSec, 0, 1);
-    this._meditationLabel?.setVisible(active).setText(active ? `Meditating ${Math.ceil(remaining)}s` : '');
-    this._meditationBarBg?.setVisible(active);
-    this._meditationBar?.setVisible(active);
-    this._meditationLabel?.setPosition(this.x, this.y - TILE_SIZE - 26);
-    this._meditationBarBg?.setPosition(this.x, this.y - TILE_SIZE - 16);
-    this._meditationBar?.setPosition(this.x - 17, this.y - TILE_SIZE - 16);
-    this._meditationBar?.setDisplaySize(34 * pct, 4);
   }
 
   _updateVisualState() {
@@ -188,6 +178,7 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
     }
     this.setAlpha(1);
     if (this._hovered) this.setTint(0xffcc66);
+    else if (this.isAIRival) this.setTint(0xff6644);
     else this.clearTint();
   }
 
@@ -233,10 +224,6 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
         left: PFRAME_FACE_LEFT, right: PFRAME_FACE_RIGHT,
       }[this._facing] ?? PFRAME_FACE_DOWN;
       this.setFrame(idleFrame);
-    } else if (this.meditating) {
-      this.stop();
-      this.setFlipX(false);
-      this.setFrame(PFRAME_MEDITATE);
     } else if (this._punching) {
       this.stop();
       this.setFlipX(false);
@@ -258,6 +245,7 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
     }
 
     this._nameLabel.setPosition(this.x, this.y - TILE_SIZE - 8);
+    if (this._bubble) this._bubble.setPosition(this.x, this.y - TILE_SIZE - 22);
     this._hpBarBg.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
     this._hpBar.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
     this._kiBarBg.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
@@ -269,7 +257,6 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
       this._selectRingPulse.setRadius(pulse);
     }
     this._attackRing?.setPosition(this.x, this.y - 6);
-    this._updateMeditationVisuals();
 
     const hpPct = this._hp / this._maxHp;
     this._hpBar.setDisplaySize(40 * hpPct, 4);
@@ -278,11 +265,44 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
 
     const kiPct = this._maxKi > 0 ? this._ki / this._maxKi : 0;
     this._kiBar.setDisplaySize(40 * Phaser.Math.Clamp(kiPct, 0, 1), 3);
-    const kiColor = (this.charging || this.chargePower > 0.01) ? 0x67d8ff : kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa;
+    const kiColor = kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa;
     this._kiBar.setFillStyle(kiColor);
-    syncArmorOverlay(this._armorOverlay, this, getPlayerArmorFrameName(this), this.armorElite && !this._dead);
-    syncAuraOverlay(this._auraOverlay, this, (this.charging || this.chargePower > 0.01) && !this._dead && !this._knockedOut);
     syncBarrierOverlay(this._barrierOverlay, this);
+    this._syncEquipOverlays();
+  }
+
+  _syncEquipOverlays() {
+    const equipData = this.equipment || {};
+    const textures = this.scene?._equipmentTextures || {};
+    for (const [slot, eqId] of Object.entries(equipData)) {
+      let overlay = this._equipOverlays[slot];
+      const texInfo = textures[eqId];
+      if (!texInfo || !this.scene.textures.exists(texInfo.textureKey)) {
+        if (overlay) overlay.setVisible(false);
+        continue;
+      }
+      if (!overlay || overlay._textureKey !== texInfo.textureKey) {
+        if (overlay) overlay.destroy();
+        overlay = createEquipmentOverlay(this.scene, this, texInfo.textureKey, texInfo.remap);
+        this._equipOverlays[slot] = overlay;
+      }
+      syncEquipmentOverlay(overlay, this);
+    }
+    for (const [slot, overlay] of Object.entries(this._equipOverlays)) {
+      if (!equipData[slot]) overlay.setVisible(false);
+    }
+  }
+
+  showBubble(text, duration = 4000) {
+    if (this._bubble) this._bubble.destroy();
+    this._bubble = this.scene.add.text(this.x, this.y - TILE_SIZE - 22, text, {
+      fontSize: '9px', color: '#ffffff', backgroundColor: '#000000aa',
+      padding: { x: 4, y: 2 }, wordWrap: { width: 160 },
+    }).setOrigin(0.5, 1).setDepth(20);
+    this.scene.time.delayedCall(duration, () => {
+      this._bubble?.destroy();
+      this._bubble = null;
+    });
   }
 
   _ensureAnims(_scene) {
@@ -290,19 +310,18 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
   }
 
   destroy(fromScene) {
+    this._bubble?.destroy();
     this._nameLabel?.destroy();
     this._hpBar?.destroy();
     this._hpBarBg?.destroy();
     this._kiBar?.destroy();
     this._kiBarBg?.destroy();
-    this._meditationLabel?.destroy();
-    this._meditationBar?.destroy();
-    this._meditationBarBg?.destroy();
     this._selectRing?.destroy();
     this._selectRingPulse?.destroy();
     this._attackRing?.destroy();
-    this._auraOverlay?.destroy();
-    this._armorOverlay?.destroy();
+    this._barrierOverlay?.destroy();
+    for (const overlay of Object.values(this._equipOverlays || {})) overlay?.destroy();
+    this._equipOverlays = {};
     super.destroy(fromScene);
   }
 }

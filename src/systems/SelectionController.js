@@ -37,6 +37,7 @@ export class SelectionController {
     scene.selectedNPC = null;
     scene._focusedRemote = null;
     scene._hideNPCPanel();
+    scene._driveIndicator?.detach();
   }
 
   selectNPC(npc) {
@@ -45,6 +46,7 @@ export class SelectionController {
     this.clearSelection();
     scene.selectedNPC = npc;
     if (npc) npc.select();
+    if (npc) scene._driveIndicator?.attach(npc);
   }
 
   selectRemote(entity) {
@@ -86,7 +88,6 @@ export class SelectionController {
     if (scene._armedAction === 'attack') {
       pointer._fgHandled = true;
       if (this.isAttackableEntity(entity)) this.executeAttack(entity);
-      this.disarmActionMode();
       return;
     }
 
@@ -127,8 +128,13 @@ export class SelectionController {
 
   updateArmedStatus() {
     const scene = this.scene;
-    if (scene._armedAction === 'attack') {
+    if (scene._taskRecorder?.isRecording()) {
+      const name = scene._taskRecorder.getTaskName();
+      scene._armedStatus.setText(`Recording Task "${name}" — click ore nodes & crates, then /save_task`).setVisible(true);
+    } else if (scene._armedAction === 'attack') {
       scene._armedStatus.setText('Attack Mode - left click a red target, Esc to cancel').setVisible(true);
+    } else if (scene._armedAction === 'plant_seed') {
+      scene._armedStatus.setText('Plant Mode — click a fertile soil tile, Esc to cancel').setVisible(true);
     } else {
       scene._armedStatus.setVisible(false);
     }

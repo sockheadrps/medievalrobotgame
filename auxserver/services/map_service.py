@@ -58,6 +58,16 @@ def _decode_png_data_url(data_url: str) -> bytes:
         raise HTTPException(status_code=400, detail="Invalid custom sprite PNG payload.") from exc
 
 
+def collision_file_path(name: str) -> Path:
+    map_name = _validated_map_name(name)
+    return MAPS_DIR / f"{map_name}_collision.json"
+
+
+def items_file_path(name: str) -> Path:
+    map_name = _validated_map_name(name)
+    return MAPS_DIR / f"{map_name}_items.json"
+
+
 def save_map_data(data: MapData) -> None:
     map_path = map_file_path(data.name)
     map_name = map_path.stem
@@ -93,7 +103,7 @@ def save_map_data(data: MapData) -> None:
         if existing.name not in saved_files:
             existing.unlink(missing_ok=True)
 
-    payload = {
+    map_payload = {
         "name": data.name,
         "width": data.width,
         "height": data.height,
@@ -102,7 +112,25 @@ def save_map_data(data: MapData) -> None:
     }
 
     with open(map_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f)
+        json.dump(map_payload, f)
+
+    # Save collision tiles to a separate file — not included in the rendered map
+    collision_path = collision_file_path(data.name)
+    collision_payload = {
+        "name": data.name,
+        "collisionTiles": [c.model_dump() for c in data.collisionTiles],
+    }
+    with open(collision_path, "w", encoding="utf-8") as f:
+        json.dump(collision_payload, f)
+
+    # Save map items registry to a separate file
+    items_path = items_file_path(data.name)
+    items_payload = {
+        "name": data.name,
+        "mapItems": [i.model_dump() for i in data.mapItems],
+    }
+    with open(items_path, "w", encoding="utf-8") as f:
+        json.dump(items_payload, f)
 
 
 def load_map_data(name: str) -> dict:
@@ -136,4 +164,23 @@ def load_map_data(name: str) -> dict:
             sprites.append({"id": sid, "pixels": sprite["pixels"]})
 
     data["customSprites"] = sprites
+
+    # Load collision tiles from the separate collision file if it exists
+    col_path = collision_file_path(name)
+    if col_path.exists():
+        with open(col_path, "r", encoding="utf-8") as f:
+            col_data = json.load(f)
+        data["collisionTiles"] = col_data.get("collisionTiles", [])
+    else:
+        data["collisionTiles"] = []
+
+    # Load map items registry
+    itm_path = items_file_path(name)
+    if itm_path.exists():
+        with open(itm_path, "r", encoding="utf-8") as f:
+            itm_data = json.load(f)
+        data["mapItems"] = itm_data.get("mapItems", [])
+    else:
+        data["mapItems"] = []
+
     return data

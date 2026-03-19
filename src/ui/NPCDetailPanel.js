@@ -89,6 +89,10 @@ export class NPCDetailPanel {
               <div class="ndp-emo-bars"></div>
               <div class="ndp-rel-label"></div>
             </div>
+            <div class="ndp-section ndp-drives">
+              <h3>Drives</h3>
+              <div class="ndp-drive-bars"></div>
+            </div>
           </div>
           <div class="ndp-col ndp-col-right">
             <div class="ndp-tabs">
@@ -211,6 +215,13 @@ export class NPCDetailPanel {
     // Keep personality type and numeric traits, wipe everything else
     npc.soul.memories = {};
     npc.soul.learned_phrases = [];
+    // Zero all drives
+    if (npc.soul.drives) {
+      for (const k of ['aggression','attachment','curiosity','greed','social','survival','ambition']) {
+        npc.soul.drives[k] = 0;
+      }
+      npc.soul.drives._commitUntil = 0;
+    }
     // Reset all relationships to defaults
     const defaultRel = { trust: 0.5, fear: 0, anger: 0, trust_baseline: 0.5, fear_baseline: 0, anger_baseline: 0, cooperation_mod: 0, aggression_mod: 0, label: 'neutral' };
     for (const key of Object.keys(npc.soul.relationships)) {
@@ -264,10 +275,7 @@ export class NPCDetailPanel {
         <div class="ndp-stat-cell"><span class="ndp-stat-label">XP</span><span class="ndp-stat-val">${npc.xp}</span></div>
       </div>
       <div class="ndp-stat-row">
-        <div class="ndp-stat-cell"><span class="ndp-stat-label">Ki Skill</span><span class="ndp-stat-big">${npc.kiSkillLevel ?? 1}</span></div>
-        <div class="ndp-stat-cell"><span class="ndp-stat-label">Ki XP</span><span class="ndp-stat-val">${npc.kiSkillXp ?? 0}</span></div>
-        <div class="ndp-stat-cell"><span class="ndp-stat-label">Realm</span><span class="ndp-stat-big">${npc.realmTier ?? 0}</span></div>
-        <div class="ndp-stat-cell"><span class="ndp-stat-label">Inf Ki</span><span class="ndp-stat-val">${npc.infKi ? 'On' : 'Off'}</span></div>
+        <div class="ndp-stat-cell"><span class="ndp-stat-label">Ki</span><span class="ndp-stat-big">${npc.ki ?? 0}/${npc.maxKi ?? 0}</span></div>
       </div>
     `;
 
@@ -293,46 +301,10 @@ export class NPCDetailPanel {
           <span>Cost: ${blastCost} Ki</span>
           <span>Fired: ${npc.blastLevel}x</span>
         </div>
-        <div class="ndp-ki-blast-stats">
-          <span>Ki Skill: ${npc.kiSkillLevel ?? 1}</span>
-          <span>Ki XP: ${npc.kiSkillXp ?? 0}/${(npc.kiSkillLevel ?? 1) * 20}</span>
-          <span>Realm: ${npc.realmTier ?? 0}</span>
-        </div>
-        <div class="ndp-ki-blast-stats">
-          <span>Moves: ${((npc.kiMoves || []).length > 0 ? npc.kiMoves.join(', ') : 'None')}</span>
-        </div>
-        <label class="ndp-color-row">
-          <span class="ndp-color-label">Aura</span>
-          <input type="color" value="${this._tintToHex(npc.auraTint)}" data-action="aura-color">
-          <span class="ndp-color-value">${this._tintToHex(npc.auraTint)}</span>
-        </label>
-        <label class="ndp-range-row">
-          <span class="ndp-color-label">Opacity</span>
-          <input type="range" min="0" max="100" step="1" value="${this._alphaToPercent(npc.auraAlpha)}" data-action="aura-alpha">
-          <span class="ndp-color-value" data-role="aura-alpha-value">${this._alphaToPercent(npc.auraAlpha)}%</span>
-        </label>
       `;
     } else {
       kiContent.innerHTML = `
         <div class="ndp-empty">No ki abilities learned yet.</div>
-        <div class="ndp-ki-blast-stats">
-          <span>Ki Skill: ${npc.kiSkillLevel ?? 1}</span>
-          <span>Ki XP: ${npc.kiSkillXp ?? 0}/${(npc.kiSkillLevel ?? 1) * 20}</span>
-          <span>Realm: ${npc.realmTier ?? 0}</span>
-        </div>
-        <div class="ndp-ki-blast-stats">
-          <span>Moves: ${((npc.kiMoves || []).length > 0 ? npc.kiMoves.join(', ') : 'None')}</span>
-        </div>
-        <label class="ndp-color-row">
-          <span class="ndp-color-label">Aura</span>
-          <input type="color" value="${this._tintToHex(npc.auraTint)}" data-action="aura-color">
-          <span class="ndp-color-value">${this._tintToHex(npc.auraTint)}</span>
-        </label>
-        <label class="ndp-range-row">
-          <span class="ndp-color-label">Opacity</span>
-          <input type="range" min="0" max="100" step="1" value="${this._alphaToPercent(npc.auraAlpha)}" data-action="aura-alpha">
-          <span class="ndp-color-value" data-role="aura-alpha-value">${this._alphaToPercent(npc.auraAlpha)}%</span>
-        </label>
       `;
     }
 
@@ -349,10 +321,8 @@ export class NPCDetailPanel {
     // Materials line
     const matsParts = [];
     if (npc.stones > 0) matsParts.push(`Stone: ${npc.stones}`);
-    if (npc.bastalite > 0) matsParts.push(`Bastalite: ${npc.bastalite}`);
-    if (npc.crystalPristine > 0) matsParts.push(`Pristine: ${npc.crystalPristine}`);
-    if (npc.crystalNormal > 0) matsParts.push(`Crystal: ${npc.crystalNormal}`);
-    if (npc.crystalPoor > 0) matsParts.push(`Cracked: ${npc.crystalPoor}`);
+    const totalCrystals = (npc.crystalPristine ?? 0) + (npc.crystalNormal ?? 0) + (npc.crystalPoor ?? 0);
+    if (totalCrystals > 0) matsParts.push(`Crystals: ${totalCrystals}`);
     let matsEl = this._el.querySelector('.ndp-materials');
     if (!matsEl) {
       matsEl = document.createElement('div');
@@ -385,6 +355,9 @@ export class NPCDetailPanel {
     const relColor = REL_COLORS[relLabel] || '#aaa';
     this._el.querySelector('.ndp-rel-label').innerHTML = `<span style="color:${relColor};font-weight:bold">${relLabel}</span>`;
 
+    // Drives
+    this._refreshDrives(npc);
+
     // ── Overview tab ──
     this._refreshOverview(npc, scene);
 
@@ -407,6 +380,17 @@ export class NPCDetailPanel {
     // Current status
     html += `<div class="ndp-ov-section">`;
     html += `<div class="ndp-ov-row"><span class="ndp-ov-label">Status</span><span class="ndp-ov-val">${currentTask}</span></div>`;
+    // Dominant drive
+    const drives = npc.soul?.drives;
+    if (drives) {
+      let dominant = null, domVal = 0.15;
+      for (const k of ['aggression','attachment','curiosity','greed','social','survival','ambition']) {
+        if ((drives[k] ?? 0) > domVal) { domVal = drives[k]; dominant = k; }
+      }
+      if (dominant) {
+        html += `<div class="ndp-ov-row"><span class="ndp-ov-label">Drive</span><span class="ndp-ov-val" style="color:#adf">${dominant} (${(domVal * 100).toFixed(0)}%)</span></div>`;
+      }
+    }
     if (decision) {
       html += `<div class="ndp-ov-row"><span class="ndp-ov-label">Intent</span><span class="ndp-ov-val">${decision.primary_intent}</span></div>`;
       if (decision.reason_summary) {
@@ -587,66 +571,37 @@ export class NPCDetailPanel {
     </div>`;
   }
 
-  _handleChange(event) {
-    const input = event.target.closest('input[data-action="aura-color"]');
-    if (input && this._npc) {
-      const color = String(input.value || '').trim();
-      if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
-      this._refreshSuspendUntil = Date.now() + 300;
-      const tint = parseInt(color.slice(1), 16);
-      this._npc.auraTint = tint;
-      if (this._scene?._conn?.connected) {
-        this._scene._conn.send({
-          type: 'admin',
-          field: 'aura_tint',
-          value: color,
-          target_npc_id: this._npc.id,
-        });
-      }
-      this._scene?._saveNPC?.(this._npc);
-      this._refresh();
-      return;
-    }
-    const slider = event.target.closest('input[data-action="aura-alpha"]');
-    if (!slider || !this._npc) return;
-    const percent = Math.max(0, Math.min(100, Number(slider.value || 0)));
-    const alpha = percent / 100;
-    this._refreshSuspendUntil = Date.now() + 300;
-    this._npc.auraAlpha = alpha;
-    if (this._scene?._conn?.connected) {
-      this._scene._conn.send({
-        type: 'admin',
-        field: 'aura_alpha',
-        value: alpha,
-        target_npc_id: this._npc.id,
-      });
-    }
-    this._scene?._saveNPC?.(this._npc);
-    this._refresh();
+  _refreshDrives(npc) {
+    const drivesEl = this._el?.querySelector('.ndp-drive-bars');
+    if (!drivesEl) return;
+    const drives = npc.soul?.drives;
+    if (!drives) { drivesEl.innerHTML = '<div style="color:#556;font-size:11px">No drives</div>'; return; }
+
+    const DRIVE_COLORS = {
+      aggression: '#ff3333',
+      attachment: '#33ddff',
+      curiosity:  '#ffdd00',
+      greed:      '#ff8800',
+      social:     '#44ff88',
+      survival:   '#ff44cc',
+      ambition:   '#4488ff',
+    };
+    const ORDER = ['survival','attachment','aggression','greed','ambition','social','curiosity'];
+    drivesEl.innerHTML = ORDER.map(k =>
+      this._makeBar(k.charAt(0).toUpperCase() + k.slice(1), drives[k] ?? 0, DRIVE_COLORS[k] || '#aaa')
+    ).join('');
   }
 
-  _handlePointerDown(event) {
-    if (event.target.closest('input[data-action="aura-color"], input[data-action="aura-alpha"]')) {
-      this._refreshSuspendUntil = Date.now() + 10000;
-    }
+  _handleChange(_event) {
+    // No aura controls remain
   }
 
-  _handleInput(event) {
-    const slider = event.target.closest('input[data-action="aura-alpha"]');
-    if (!slider || !this._npc) return;
-    const percent = Math.max(0, Math.min(100, Number(slider.value || 0)));
-    this._npc.auraAlpha = percent / 100;
-    this._refreshSuspendUntil = Date.now() + 10000;
-    const label = this._el?.querySelector('[data-role="aura-alpha-value"]');
-    if (label) label.textContent = `${Math.round(percent)}%`;
+  _handlePointerDown(_event) {
+    // No aura controls remain
   }
 
-  _tintToHex(value) {
-    return `#${(Number(value ?? 0x4fd6ff) >>> 0).toString(16).padStart(6, '0').slice(-6)}`;
-  }
-
-  _alphaToPercent(value) {
-    return Math.round(Math.max(0, Math.min(1, Number(value ?? 0.42))) * 100);
+  _handleInput(_event) {
+    // No aura controls remain
   }
 
   _injectStyles() {

@@ -29,12 +29,16 @@ export const FRAME_BARE     = 6;    // col=6  row=0  — bare ground (rock spawn
 export const RESOURCE_FRAME = {
   Wood: 526,
   Stone: 1251,
-  Bastalite: 554,
-  CrystalPristine: 554,
-  CrystalNormal: 554,
-  CrystalPoor: 554,
-  KiShrine: 554,
+  Crystal: 554,
+  KiTarget: 526,
+  bronze_bar: 795,
+  raw_copper: 554,
+  raw_tin: 554,
+  planks: 526,
 };
+
+// --- Furnace ---
+export const FRAME_FURNACE = 13;   // col=13 row=0
 
 // --- Dropped-log sprites (custom PNGs, 16x16) ---
 export const LOG1_KEY  = 'log1';
@@ -43,31 +47,12 @@ export const LOG2_KEY  = 'log2';
 export const LOG2_PATH = 'assets/log2.png';
 export const LOG3_KEY  = 'log3';
 export const LOG3_PATH = 'assets/log3.png';
-export const FIRE_KEY  = 'fire';
-export const FIRE_PATH = 'assets/fire.png';
-export const CRATER_KEY = 'crater';
-export const CRATER_PATH = 'assets/crater.png';
-export const FIRE_JSON_PATH = 'assets/fire.json';
-export const FIRE_FRAME_W = 32;
-export const FIRE_FRAME_H = 32;
-export const FIRE_TOTAL_FRAMES = 12;
-export const ARMOR_ELITE_KEY = 'armor_elite';
-export const ARMOR_ELITE_PATH = 'assets/overplayer/Armor_Elite.png';
-export const ARMOR_ELITE_META_KEY = 'armor_elite_meta';
-export const ARMOR_ELITE_META_PATH = 'assets/overplayer/Armor_Elite_mapped.json';
-export const ARMOR_ELITE_FRAME_W = 32;
-export const ARMOR_ELITE_FRAME_H = 32;
 
 // --- NRG / Ki blast spritesheet (assets/nrg/7.png — 32x32 frames, 24 total) ---
 export const NRG_KEY      = 'nrg_blast';
 export const NRG_PATH     = 'assets/nrg/7.png';
 export const NRG_FRAME_W  = 32;
 export const NRG_FRAME_H  = 32;
-export const AURA_KEY     = 'charge_aura';
-export const AURA_PATH    = 'assets/Aura.png';
-export const AURA_FRAME_W = 32;
-export const AURA_FRAME_H = 32;
-export const AURA_FRAMES  = 6;
 export const BARRIER_KEY     = 'barrier_fx';
 export const BARRIER_PATH    = 'assets/barrier.png';
 export const BARRIER_FRAME_W = 32;
@@ -81,24 +66,17 @@ export const KI_REGEN_MS       = 5000; // regen 1 Ki every 5s
 export const KI_BLAST_BASE_COST = 8;   // base cost at level 0
 export const KI_BLAST_BASE_DMG  = 2;   // base damage at level 0
 export const KI_BLAST_SCALE     = 0.02; // 2% improvement per blast level
-export const CHARGE_STR_BONUS   = 0.50;
-export const CHARGE_DEF_BONUS   = 0.50;
-export const CHARGE_KI_ATTACK_BONUS = 0.50;
-export const CHARGE_KI_REGEN_BONUS  = 1.00;
-export const KI_SKILL_MEDITATE_UNLOCK_LEVEL = 10;
-export const MEDITATION_POOR_MS = 30000;
-export const MEDITATION_NORMAL_MS = 50000;
-export const MEDITATION_PRISTINE_MS = 70000;
 
 // --- Anvil frame (from roguelike spritesheet) ---
 export const FRAME_ANVIL    = 15;   // col=15 row=0  — placeable anvil
+export const FRAME_CHEST    = 366;  // col=24 row=6  — chest/crate sprite
 export const FRAME_CRYSTAL  = 554;  // col=50 row=9  — ki crystal sprite
+export const FIRE_KEY       = 'fire';
+export const FIRE_PATH      = 'assets/fire.png';
+export const FIRE_FRAME_W   = 32;
+export const FIRE_FRAME_H   = 32;
+export const FIRE_FRAMES    = 12;
 
-// --- Fence / Gate frames (from roguelike spritesheet) ---
-export const FRAME_FENCE_T1  = 493;  // col=37 row=8  — 1-log fence (weakest)
-export const FRAME_FENCE_T2  = 494;  // col=38 row=8  — 2-log fence
-export const FRAME_FENCE_T3  = 495;  // col=39 row=8  — 3-log fence (strongest)
-export const FRAME_GATE      = 40;   // col=40 row=0  — fence gate
 
 // --- Player spritesheet (baseplayer.png — 32x32 frames) ---
 export const PLAYER_KEY      = 'baseplayer';
@@ -122,7 +100,6 @@ export const PFRAME_WALK2_DOWN  = 12;
 export const PFRAME_WALK2_UP    = 13;
 export const PFRAME_WALK2_RIGHT = 14;
 export const PFRAME_WALK2_LEFT  = 15;
-export const PFRAME_MEDITATE    = 16;
 // Punch frames (left/right only)
 export const PFRAME_PUNCH_LEFT  = 25;
 export const PFRAME_PUNCH_RIGHT = 26;
@@ -161,6 +138,86 @@ export const ROCK_LIFESPAN   = 60000; // ms — despawns after 1 minute if not m
 // --- Interaction ---
 export const INTERACT_DIST   = 90;
 export const INTERACT_KEY    = 'E';
+
+// --- Animal spritesheets ---
+export const DINOBIRD_KEY    = 'dinobird';
+export const DINOBIRD_PATH   = 'assets/dinobird.png';
+export const DINOBIRD_FRAME_W = 32;
+export const DINOBIRD_FRAME_H = 32;
+
+// --- Conveyor system ---
+export const DIR_RIGHT = 'right';
+export const DIR_LEFT  = 'left';
+export const DIR_UP    = 'up';
+export const DIR_DOWN  = 'down';
+
+export const DIR_DELTA = {
+  [DIR_RIGHT]: { dc:  1, dr:  0 },
+  [DIR_LEFT]:  { dc: -1, dr:  0 },
+  [DIR_UP]:    { dc:  0, dr: -1 },
+  [DIR_DOWN]:  { dc:  0, dr:  1 },
+};
+
+// Conveyor direction arrows
+export const FRAME_ARROW_RIGHT = 1590;
+export const FRAME_ARROW_LEFT  = 1589;
+export const FRAME_ARROW_DOWN  = 1647;
+export const FRAME_ARROW_UP    = 1646;
+
+export const DIR_ARROW_FRAME = {
+  [DIR_RIGHT]: 1590,
+  [DIR_LEFT]:  1589,
+  [DIR_UP]:    1646,
+  [DIR_DOWN]:  1647,
+};
+
+// Conveyor belt tick interval (ms)
+export const CONVEYOR_TICK_MS           = 1000;
+export const WOOD_PULP_CONVEYOR_TICK_MS = 1400;
+
+// Belt sprite frames
+export const FRAME_CONV_V = 1092; // up→up or down→down
+export const FRAME_CONV_H = 1149; // left→left or right→right
+
+// Frame lookup: "inDir,outDir" → frame index
+// Straights and 90° curves from spritesheet
+export const CONV_FRAME_LOOKUP = {
+  // Straights
+  'right,right': 1149, 'left,left': 1149,
+  'up,up':       1092, 'down,down': 1092,
+  // Curves
+  'right,down':  1091,
+  'up,left':     1091,
+  'left,down':   1090,
+  'up,right':    1090,
+  'down,left':   1148,
+  'right,up':    1148,
+  'down,right':  1147,
+  'left,up':     1147,
+};
+
+// --- Log Cutting Station ---
+export const FRAME_LOG_CUTTER = 1250; // col=53 row=21
+
+// --- Minecart Tracks ---
+export const FRAME_TRACK_H = 1069;  // col=43 row=18 — horizontal track
+export const FRAME_TRACK_V = 1126;  // col=43 row=19 — vertical track
+export const FRAME_CART_H  = 1132;  // col=49 row=19 — horizontal cart
+export const FRAME_CART_V  = 1134;  // col=51 row=19 — vertical cart
+export const FRAME_MINECART_PORTAL = 150; // col=36 row=2 — exit/entrance marker
+export const TRACK_TICK_MS = 800;
+
+// Frame lookup: "inDir,outDir" → track frame index
+export const TRACK_FRAME_LOOKUP = {
+  // Straights
+  'right,right': 1069, 'left,left': 1069,
+  'up,up':       1126, 'down,down': 1126,
+  // Corners (rotated 90° CCW from spritesheet labels)
+  'up,right':    1067, 'left,down': 1067,
+  'right,down':  1068, 'up,left':   1068,
+  'down,left':   1125, 'right,up':  1125,
+  'left,up':     1124, 'down,right': 1124,
+};
 
 // --- Grid helpers ---
 export function tilePos(col, row) {

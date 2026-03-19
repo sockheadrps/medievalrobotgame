@@ -144,6 +144,41 @@ body {
 }
 
 /* Canvas elements */
+/* ── Tile History Bar ─────────────────────────────────────── */
+.tile-history {
+  display: flex;
+  flex-direction: row;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 2px;
+  min-height: 38px;
+  background: #111;
+  border: 1px solid #2e2e2e;
+  border-radius: 3px;
+  margin-bottom: 6px;
+}
+
+.tile-history::-webkit-scrollbar {
+  height: 4px;
+}
+.tile-history::-webkit-scrollbar-track { background: #111; }
+.tile-history::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 2px; }
+
+.tile-history-item {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #3a3a3a;
+  border-radius: 2px;
+  background: #111;
+  cursor: pointer;
+  image-rendering: pixelated;
+  display: block;
+}
+.tile-history-item:hover { border-color: #888; }
+.tile-history-item.active { border-color: #0f0; box-shadow: 0 0 4px rgba(0,255,0,0.4); }
+
 #sheetCanvas {
   display: block;
   width: 100%;
@@ -154,25 +189,174 @@ body {
   cursor: crosshair;
 }
 
+/* ── Zoom + Items two-column row ─────────────────────────── */
+.zoom-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  /* stretch to fill sidebar vertically — min height keeps it reasonable */
+  min-height: 220px;
+  height: 38vh;
+  max-height: 480px;
+}
+
+.zoom-col {
+  flex: 0 0 66%;
+  display: flex;
+  flex-direction: column;
+}
+
+.items-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+}
+
 #zoom {
   display: block;
-  width: 320px;
-  max-width: 100%;
-  height: 320px;
-  margin: 20px auto 8px;
+  width: 100%;
+  height: 100%;
   border: 2px solid #0f0;
   background: #000;
   image-rendering: pixelated;
   box-shadow: 0 0 10px rgba(0, 255, 0, 0.2);
+  box-sizing: border-box;
 }
 
-#info {
-  margin: 0 auto 10px;
-  max-width: 100%;
+/* Info label — sits at the bottom of the right column */
+.info-label {
+  flex-shrink: 0;
   color: #9fd89f;
   font-family: monospace;
-  font-size: 12px;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 0;
 }
+
+/* ── Map Items Registry ───────────────────────────────────── */
+.items-registry {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #3a3a3a;
+  background: #161616;
+  border-radius: 3px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.items-registry-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 7px 4px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #333;
+  font-size: 11px;
+  color: #ccc;
+  flex-shrink: 0;
+}
+
+.small-tool-btn {
+  background: #2a2a2a;
+  border: 1px solid #555;
+  color: #aaa;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 1px 5px;
+}
+.small-tool-btn:hover { background: #3a3a3a; color: #fff; }
+
+/* Scrollable list of item entries */
+.items-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Single item entry row */
+.item-entry {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #1a1a1a;
+  border: 1px solid #2e2e2e;
+  border-radius: 3px;
+  padding: 3px 4px;
+}
+
+/* Tile preview drop-zone inside an entry */
+.item-tile-slot {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1px dashed #444;
+  border-radius: 2px;
+  background: #111;
+  cursor: pointer;
+  image-rendering: pixelated;
+  position: relative;
+  overflow: hidden;
+}
+.item-tile-slot.has-tile { border-style: solid; border-color: #555; }
+.item-tile-slot.drop-target { border-color: #0f0; box-shadow: 0 0 5px rgba(0,255,0,0.5); }
+.item-tile-slot canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+/* Label input */
+.item-label-input {
+  flex: 1;
+  min-width: 0;
+  background: #222;
+  border: 1px solid #383838;
+  border-radius: 2px;
+  color: #ddd;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+.item-label-input:focus { outline: none; border-color: #555; }
+
+/* Collision checkbox wrapper */
+.item-col-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+.item-col-wrap span {
+  font-size: 8px;
+  color: #888;
+  white-space: nowrap;
+}
+.item-col-cb { cursor: pointer; accent-color: #ff4444; }
+
+/* Remove button */
+.item-remove-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.item-remove-btn:hover { color: #f66; }
 
 #mapCanvas {
   display: block;
@@ -250,4 +434,137 @@ body.sprite-mode #mapToolsSection,
 body.sprite-mode #gridSection,
 body.sprite-mode #clearBtn {
   display: none;
+}
+
+#btnCollision.active {
+  border-color: #ff4444;
+  background: #2a1111;
+  color: #ff8888;
+}
+
+#btnCollision:not(.active):hover {
+  border-color: #ff4444;
+}
+
+/* ── Mix Palette ─────────────────────────────────────────── */
+#mixPalettePanel {
+  margin: 14px 0 8px;
+  padding: 10px;
+  border: 1px solid #3b3b3b;
+  background: #161616;
+}
+
+.mix-palette-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.mix-size-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #aaa;
+}
+
+.mix-size-row input {
+  width: 40px;
+  background: #222;
+  border: 1px solid #444;
+  color: #fff;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-size: 12px;
+}
+
+.mix-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+
+.mix-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 2px solid #3a3a3a;
+  border-radius: 3px;
+  background: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  min-width: 36px;
+}
+
+.mix-slot:hover {
+  border-color: #666;
+  background: #222;
+}
+
+.mix-slot.filled {
+  border-color: #555;
+}
+
+.mix-slot.active-slot {
+  border-color: #0f0;
+  background: #0a1a0a;
+  box-shadow: 0 0 6px rgba(0, 255, 0, 0.4);
+}
+
+.mix-slot-canvas {
+  display: block;
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+  background: #111;
+  border: 1px solid #333;
+}
+
+.mix-slot-label {
+  font-family: monospace;
+  font-size: 9px;
+  color: #777;
+  white-space: nowrap;
+}
+
+.mix-slot.filled .mix-slot-label {
+  color: #9fd89f;
+}
+
+.mix-slot.active-slot .mix-slot-label {
+  color: #0f0;
+}
+
+.mix-hint {
+  font-size: 11px;
+  color: #666;
+  font-family: monospace;
+  margin-bottom: 8px;
+  min-height: 14px;
+}
+
+.mix-fill-btn {
+  display: block;
+  width: 100%;
+  padding: 7px;
+  background: #1a2a1a;
+  border: 1px solid #3a5a3a;
+  border-radius: 3px;
+  color: #6dff6d;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  letter-spacing: 0.03em;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.mix-fill-btn:hover {
+  background: #223322;
+  border-color: #0f0;
 }

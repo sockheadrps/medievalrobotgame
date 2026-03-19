@@ -4,8 +4,6 @@ import {
   NPC_KEY,
   SHEET_KEY,
   TILE_SIZE,
-  CHARGE_STR_BONUS,
-  CHARGE_DEF_BONUS,
 } from '../constants.js';
 
 const RIGHT_HUD_MARGIN = 360;
@@ -96,16 +94,21 @@ export class HudController {
 
     const kiPct = p.maxKi > 0 ? p.ki / p.maxKi : 0;
     scene._pf_kiBar.setDisplaySize(scene._pf_barW * Phaser.Math.Clamp(kiPct, 0, 1), Math.round(18 * PLAYER_FRAME_SCALE));
-    const chargeActive = p.charging || (p.chargePower ?? 0) > 0.01;
-    const kiColor = chargeActive ? 0x67d8ff : kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa;
+    const kiColor = kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa;
     scene._pf_kiBar.setFillStyle(kiColor);
-    const chargePct = Math.round(Math.max(0, Math.min(1, Number(p.chargePower || 0))) * 100);
-    scene._pf_kiText.setText(`${scene._formatKiValue(p.ki)} / ${scene._formatKiValue(p.maxKi)}${chargeActive ? ` CHARGE ${chargePct}%` : ''}`);
+    scene._pf_kiText.setText(`${scene._formatKiValue(p.ki)} / ${scene._formatKiValue(p.maxKi)}`);
 
-    const effectiveStr = Math.max(1, Math.round((p.str || 1) * (1 + (p.chargePower || 0) * CHARGE_STR_BONUS)));
-    const effectiveDef = Math.max(1, Math.round((p.def || 1) * (1 + (p.chargePower || 0) * CHARGE_DEF_BONUS)));
-    scene._pf_stats.setText(`STR: ${effectiveStr}${effectiveStr !== p.str ? ` (${p.str})` : ''}   DEF: ${effectiveDef}${effectiveDef !== p.def ? ` (${p.def})` : ''}   Ki Skill: ${p.kiSkillLevel ?? 1}   Logs: ${p.logs}   Stone: ${p.stones ?? 0}`);
-    scene._pf_xp.setText(`XP: ${p.xp} / ${p.level * 20}   Ki XP: ${p.kiSkillXp ?? 0} / ${(p.kiSkillLevel ?? 1) * 20}`);
+    const crystals = Number(p.crystals ?? 0);
+    const copper = Number(p.copper ?? 0);
+    let statsLine = `STR: ${p.str}   DEF: ${p.def}   Logs: ${p.logs}   Stone: ${p.stones ?? 0}   Cu: ${copper}   Crystals: ${crystals}`;
+    const inv = p.inventory ?? {};
+    for (const [itemId, qty] of Object.entries(inv)) {
+      if (qty > 0) statsLine += `   ${itemId}: ${qty}`;
+    }
+    scene._pf_stats.setText(statsLine);
+    const kiLv = p.kiSkillLevel ?? 1;
+    const kiXpNeeded = kiLv * 20;
+    scene._pf_xp.setText(`XP: ${p.xp} / ${p.level * 20}   Ki Lv: ${kiLv} (${p.kiSkillXp ?? 0}/${kiXpNeeded})`);
   }
 
   buildSensePanel() {
@@ -337,39 +340,8 @@ export class HudController {
   }
 
   showSenseEntryActions(entry, x, y) {
-    const scene = this.scene;
     this.clearSensePanelActions();
     if (!entry?.label) return;
-    const canUseClairvoyance = scene.player?.getEquippedKiAugment?.('sense_ki') === 'clairvoyance'
-      && scene.player?.hasKiMove?.('sense_ki')
-      && !!entry.targetType
-      && !!entry.targetId
-      && scene._conn?.connected;
-    if (!canUseClairvoyance) return;
-    scene._sensePanelActionPinnedUntil = Date.now() + 2500;
-    const addAction = (obj) => { scene.addHud(obj); scene._sensePanelActionEls.push(obj); return obj; };
-    const bg = addAction(scene.add.rectangle(x + 48, y + 14, 96, 28, 0x11243b, 0.98)
-      .setStrokeStyle(1, 0x67d8ff, 0.95).setDepth(56).setInteractive({ useHandCursor: true }));
-    const txt = addAction(scene.add.text(x + 48, y + 14, 'Clairvoyance', {
-      fontSize: '12px', color: '#dff3ff', fontStyle: 'bold',
-    }).setOrigin(0.5).setDepth(57).setInteractive({ useHandCursor: true }));
-    const trigger = () => {
-      this.clearSensePanelActions();
-      scene._conn.send({
-        type: 'toggle_clairvoyance',
-        target_type: entry.targetType,
-        target_owner: entry.targetOwner,
-        target_id: entry.targetId,
-      });
-    };
-    bg.on('pointerdown', (pointer) => {
-      pointer.event?.stopPropagation?.();
-      trigger();
-    });
-    txt.on('pointerdown', (pointer) => {
-      pointer.event?.stopPropagation?.();
-      trigger();
-    });
   }
 
   updateTargetFrame() {
@@ -391,29 +363,23 @@ export class HudController {
     let spriteKey = '';
     let frame = 0;
     let extra = '';
-    const canSense = scene._canSenseTargetDetails(scene.player, target);
-    const canRevealName = scene._canRevealTargetName(scene.player, target);
 
     if (target.playerId) {
-      name = canRevealName ? target.playerId : 'Unknown Presence';
+      name = target.playerId;
       hp = target._hp ?? 0;
       maxHp = target._maxHp ?? 1;
       ki = target._ki ?? 0;
       maxKi = target._maxKi ?? 1;
       spriteKey = PLAYER_KEY;
-      extra = canSense
-        ? `Level: ${target.level ?? target._level ?? '?'}  Ki Skill: ${target.kiSkillLevel ?? target._kiSkillLevel ?? '?'}`
-        : 'Sense Ki is too weak to read this target.';
+      extra = `Level: ${target.level ?? target._level ?? '?'}`;
     } else if (target.ownerPid) {
-      name = canRevealName ? `${target.getName?.()} [${target.ownerPid}]` : 'Unknown Presence';
+      name = `${target.getName?.()} [${target.ownerPid}]`;
       hp = target.hp ?? 0;
       maxHp = target.maxHp ?? 1;
       ki = target.ki ?? 0;
       maxKi = target.maxKi ?? 1;
       spriteKey = NPC_KEY;
-      extra = canSense
-        ? `STR: ${target.str ?? '?'}  DEF: ${target.def ?? '?'}  Ki Skill: ${target.kiSkillLevel ?? 1}  Realm: ${target.realmTier ?? 0}  Logs: ${target.logs ?? 0}`
-        : 'Sense Ki is too weak to read this target.';
+      extra = `STR: ${target.str ?? '?'}  DEF: ${target.def ?? '?'}  Logs: ${target.logs ?? 0}`;
     } else if (target.getName) {
       name = target.getName();
       hp = target.hp ?? 0;
@@ -421,9 +387,7 @@ export class HudController {
       ki = target.ki ?? 0;
       maxKi = target.maxKi ?? 1;
       spriteKey = NPC_KEY;
-      extra = canSense
-        ? `STR: ${target.str ?? '?'}  DEF: ${target.def ?? '?'}  Ki Skill: ${target.kiSkillLevel ?? 1}  Realm: ${target.realmTier ?? 0}  Logs: ${target.logs ?? 0}`
-        : 'Sense Ki is too weak to read this target.';
+      extra = `STR: ${target.str ?? '?'}  DEF: ${target.def ?? '?'}  Logs: ${target.logs ?? 0}`;
     }
 
     scene._tf_name.setText(name);
@@ -436,11 +400,9 @@ export class HudController {
 
     const kiPctT = maxKi > 0 ? ki / maxKi : 0;
     scene._tf_kiBar.setDisplaySize(scene._tf_barW * Phaser.Math.Clamp(kiPctT, 0, 1), scene._tf_kiBarH);
-    const targetChargeActive = !!target && (target.charging || (target.chargePower ?? 0) > 0.01);
-    const kiColorT = targetChargeActive ? 0x67d8ff : kiPctT > 0.5 ? 0x4488ff : kiPctT > 0.25 ? 0x6644cc : 0x8822aa;
+    const kiColorT = kiPctT > 0.5 ? 0x4488ff : kiPctT > 0.25 ? 0x6644cc : 0x8822aa;
     scene._tf_kiBar.setFillStyle(kiColorT);
-    const targetChargePct = Math.round(Math.max(0, Math.min(1, Number(target?.chargePower || 0))) * 100);
-    scene._tf_kiText.setText(`${scene._formatKiValue(ki)} / ${scene._formatKiValue(maxKi)}${targetChargeActive ? ` CHARGE ${targetChargePct}%` : ''}`);
+    scene._tf_kiText.setText(`${scene._formatKiValue(ki)} / ${scene._formatKiValue(maxKi)}`);
 
     scene._tf_extra.setText(extra);
 
@@ -612,7 +574,11 @@ export class HudController {
         .setStrokeStyle(1, 0x334466).setDepth(50).setInteractive({ useHandCursor: true }));
       slotBg.on('pointerdown', (ptr) => {
         ptr._fgHandled = true;
-        scene._openHotbarPicker(i, x + slotSize / 2, y);
+        if (ptr.rightButtonDown()) {
+          scene._openHotbarPicker(i, x + slotSize / 2, y);
+        } else {
+          scene._useHotbarSlot(i);
+        }
       });
 
       add(scene.add.image(x + slotSize / 2, y + slotSize / 2, SHEET_KEY, item.frame)
@@ -644,9 +610,7 @@ export class HudController {
       if (!item?._countText) continue;
       if (item.id === 'drop_log') item._countText.setText(logs > 0 ? `${logs}` : '');
       else if (item.id === 'drop_stone') item._countText.setText(stones > 0 ? `${stones}` : '');
-      else if (item.id === 'place_gate') item._countText.setText(logs >= 10 ? '1' : '');
       else if (item.id === 'place_anvil') item._countText.setText(stones >= 5 ? '1' : '');
-      else if (item.id === 'place_ki_shrine') item._countText.setText('1');
       else item._countText.setText('');
     }
   }

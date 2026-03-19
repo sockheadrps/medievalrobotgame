@@ -1,35 +1,40 @@
 import Phaser from 'phaser';
 import {
-  ARMOR_ELITE_KEY,
   FRAME_ANVIL,
   FRAME_CRYSTAL,
-  FRAME_GATE,
   FRAME_ROCK,
-  KI_SKILL_MEDITATE_UNLOCK_LEVEL,
-  MEDITATION_NORMAL_MS,
-  MEDITATION_POOR_MS,
-  MEDITATION_PRISTINE_MS,
+  FRAME_CONV_H,
+  FRAME_CHEST,
+  FRAME_FURNACE,
+  FRAME_LOG_CUTTER,
+  FRAME_TRACK_H,
 } from '../constants.js';
 
 const TOP_HUD_MARGIN = 133;
 const HOTBAR_SLOT_COUNT = 6;
 const HOTBAR_STORAGE_KEY = 'futuregame.hotbarAssignments.v1';
 
+const FRAME_SEED = 1355; // tileX=44 tileY=23 — veg sprout
+
 const HOTBAR_ACTIONS = {
   drop_log: { id: 'drop_log', label: 'Log', frame: 526 },
   drop_stone: { id: 'drop_stone', label: 'Stone', frame: FRAME_ROCK },
-  place_gate: { id: 'place_gate', label: 'Gate', frame: FRAME_GATE },
   place_anvil: { id: 'place_anvil', label: 'Anvil', frame: FRAME_ANVIL },
-  place_ki_shrine: { id: 'place_ki_shrine', label: 'Shrine', frame: FRAME_CRYSTAL },
+  use_crystal: { id: 'use_crystal', label: 'Crystal', frame: FRAME_CRYSTAL },
   ki_shot: { id: 'ki_shot', label: 'Ki Shot', frame: FRAME_CRYSTAL },
-  charge: { id: 'charge', label: 'Charge', frame: FRAME_CRYSTAL },
-  sense_ki: { id: 'sense_ki', label: 'Sense', frame: FRAME_CRYSTAL },
   barrier: { id: 'barrier', label: 'Barrier', frame: FRAME_CRYSTAL },
+  build_ki_target: { id: 'build_ki_target', label: 'Ki Target', frame: 526 },
+  plant_seed: { id: 'plant_seed', label: 'Veg Seed', frame: FRAME_SEED },
+  place_conveyor: { id: 'place_conveyor', label: 'Conveyor', frame: FRAME_CONV_H },
+  place_crate: { id: 'place_crate', label: 'Crate', frame: FRAME_CHEST },
+  place_furnace: { id: 'place_furnace', label: 'Furnace', frame: FRAME_FURNACE },
+  place_log_cutter: { id: 'place_log_cutter', label: 'Log Cutter', frame: FRAME_LOG_CUTTER },
+  place_track: { id: 'place_track', label: 'Track', frame: FRAME_TRACK_H },
   empty: { id: 'empty', label: 'Empty', frame: 6 },
 };
 
-const HOTBAR_DEFAULT_ASSIGNMENTS = ['drop_log', 'drop_stone', 'place_gate', 'place_anvil', 'place_ki_shrine', 'ki_shot'];
-const IMPLEMENTED_HOTBAR_MOVES = ['ki_shot', 'charge', 'sense_ki', 'barrier'];
+const HOTBAR_DEFAULT_ASSIGNMENTS = ['drop_log', 'drop_stone', 'place_anvil', 'use_crystal', 'ki_shot', 'barrier'];
+const IMPLEMENTED_HOTBAR_MOVES = ['ki_shot', 'barrier'];
 
 export class InventoryController {
   constructor(scene) {
@@ -121,22 +126,22 @@ export class InventoryController {
   }
 
   getAvailableHotbarActions() {
-    const scene = this.scene;
     const actions = [
       HOTBAR_ACTIONS.drop_log,
       HOTBAR_ACTIONS.drop_stone,
-      HOTBAR_ACTIONS.place_gate,
       HOTBAR_ACTIONS.place_anvil,
-      HOTBAR_ACTIONS.place_ki_shrine,
+      HOTBAR_ACTIONS.use_crystal,
+      HOTBAR_ACTIONS.ki_shot,
+      HOTBAR_ACTIONS.barrier,
+      HOTBAR_ACTIONS.build_ki_target,
+      HOTBAR_ACTIONS.plant_seed,
+      HOTBAR_ACTIONS.place_conveyor,
+      HOTBAR_ACTIONS.place_crate,
+      HOTBAR_ACTIONS.place_furnace,
+      HOTBAR_ACTIONS.place_log_cutter,
+      HOTBAR_ACTIONS.place_track,
       HOTBAR_ACTIONS.empty,
     ];
-    const learned = new Set(scene.player?.kiMoves || []);
-    learned.add('ki_shot');
-    for (const moveId of IMPLEMENTED_HOTBAR_MOVES) {
-      if (!learned.has(moveId)) continue;
-      const action = HOTBAR_ACTIONS[moveId];
-      if (action && !actions.includes(action)) actions.push(action);
-    }
     return actions;
   }
 
@@ -201,25 +206,104 @@ export class InventoryController {
     if (!item) return;
     if (item.id === 'drop_log') this.dropLog();
     else if (item.id === 'drop_stone') this.dropStone();
-    else if (item.id === 'place_gate') this.placeGate();
     else if (item.id === 'place_anvil') this.placeAnvil();
-    else if (item.id === 'place_ki_shrine') this.placeKiShrine();
+    else if (item.id === 'use_crystal') this.useCrystal();
     else if (item.id === 'ki_shot') scene._fireKiBlast();
-    else if (item.id === 'charge') this.toggleCharge();
-    else if (item.id === 'sense_ki' || item.id === 'barrier') scene.chatBox?._addLog(`${item.label} is passive or contextual.`, '#88bbff');
+    else if (item.id === 'barrier') scene.chatBox?._addLog(`${item.label} is passive or contextual.`, '#88bbff');
+    else if (item.id === 'build_ki_target') this.buildKiTarget();
+    else if (item.id === 'plant_seed') this.armPlantSeed();
+    else if (item.id === 'place_conveyor') this.toggleConveyorPlacement();
+    else if (item.id === 'place_crate') this.toggleCratePlacement();
+    else if (item.id === 'place_furnace') this.toggleFurnacePlacement();
+    else if (item.id === 'place_log_cutter') this.toggleLogCutterPlacement();
+    else if (item.id === 'place_track') this.toggleTrackPlacement();
   }
 
-  toggleCharge() {
+  toggleConveyorPlacement() {
+    const scene = this.scene;
+    if (!scene._placement) return;
+    if (scene._placement.isActive()) {
+      scene._placement.cancel();
+    } else {
+      scene._placement.startPlacing('conveyor');
+    }
+  }
+
+  toggleCratePlacement() {
+    const scene = this.scene;
+    if (!scene._placement) return;
+    if (scene._placement.isActive()) {
+      scene._placement.cancel();
+    } else {
+      scene._placement.startPlacing('crate');
+    }
+  }
+
+  toggleFurnacePlacement() {
+    const scene = this.scene;
+    if (!scene._placement) return;
+    if (scene._placement.isActive()) {
+      scene._placement.cancel();
+    } else {
+      scene._placement.startPlacing('furnace');
+    }
+  }
+
+  toggleLogCutterPlacement() {
+    const scene = this.scene;
+    if (!scene._placement) return;
+    if (scene._placement.isActive()) {
+      scene._placement.cancel();
+    } else {
+      scene._placement.startPlacing('log_cutter');
+    }
+  }
+
+  toggleTrackPlacement() {
+    const scene = this.scene;
+    if (!scene._placement) return;
+    if (scene._placement.isActive()) {
+      scene._placement.cancel();
+    } else {
+      scene._placement.startPlacing('track');
+    }
+  }
+
+  armPlantSeed() {
     const scene = this.scene;
     const p = scene.player;
-    const conn = scene._conn;
-    if (!p || scene._playerDead || p._knockedOut || p.meditating || !conn?.connected) return;
-    if (!(p.kiMoves || []).includes('charge')) {
-      scene.chatBox?._addLog('Charge is not unlocked yet.', '#88bbff');
+    if (!p || scene._playerDead) return;
+    if ((p.seeds ?? 0) < 1) {
+      scene.chatBox?._addLog('No seeds. Use /give seeds or harvest crops.', '#ff4444');
       return;
     }
-    conn.send({ type: 'toggle_charge' });
-    scene.chatBox?._addLog(p.charging ? 'Charge released.' : 'Charging aura...', '#88ddff');
+    scene._armActionMode('plant_seed');
+    scene._armedStatus?.setText('Plant Mode — click a fertile soil tile, Esc to cancel').setVisible(true);
+  }
+
+  buildKiTarget() {
+    const scene = this.scene;
+    const p = scene.player;
+    if (!p || scene._playerDead) return;
+    if ((p.logs ?? 0) < 5) {
+      scene.chatBox?._addLog('Need 5 logs to build a Ki Target.', '#ff4444');
+      return;
+    }
+    scene._conn?.send({ type: 'build_ki_target' });
+    scene.chatBox?._addLog('Building Ki Target... (5 logs)', '#66bbff');
+  }
+
+  useCrystal() {
+    const scene = this.scene;
+    const p = scene.player;
+    if (!p || scene._playerDead) return;
+    const crystals = Number(p.crystals ?? 0);
+    if (crystals < 1) {
+      scene.chatBox?._addLog('No crystals to use.', '#ff4444');
+      return;
+    }
+    scene._conn?.send({ type: 'consume_crystal' });
+    scene.chatBox?._addLog('Using crystal...', '#44eeff');
   }
 
   dropLog() {
@@ -244,20 +328,6 @@ export class InventoryController {
     scene._conn?.send({ type: 'drop_item', item: 'stone', amount: 1 });
   }
 
-  placeGate() {
-    const scene = this.scene;
-    const p = scene.player;
-    if (!p || scene._playerDead) return;
-    if ((p.logs ?? 0) < 10) {
-      scene.chatBox?._addLog('Need 10 logs to build a gate.', '#ff4444');
-      return;
-    }
-    if (scene._conn?.connected) {
-      scene._conn.send({ type: 'build_gate' });
-      scene.chatBox?._addLog('Building fence gate...', '#88bbff');
-    }
-  }
-
   placeAnvil() {
     const scene = this.scene;
     const p = scene.player;
@@ -270,13 +340,6 @@ export class InventoryController {
       scene._conn.send({ type: 'build_anvil' });
       scene.chatBox?._addLog('Placing anvil...', '#88bbff');
     }
-  }
-
-  placeKiShrine() {
-    const scene = this.scene;
-    if (!scene._conn?.connected || scene._playerDead) return;
-    scene._conn.send({ type: 'build_ki_shrine' });
-    scene.chatBox?._addLog('Placing ki shrine...', '#88ddff');
   }
 
   toggleInventory() {
@@ -303,94 +366,26 @@ export class InventoryController {
 
     const logs = scene.player?.logs ?? 0;
     const stones = scene.player?.stones ?? 0;
-    add(scene.add.text(x + 24, y + 52, `Logs: ${logs}     Stone: ${stones}`, { fontSize: '17px', color: '#ccaa77' }).setDepth(61));
+    const crystals = Number(scene.player?.crystals ?? 0);
+    const meat = scene.player?.meat ?? 0;
+    const feathers = scene.player?.feathers ?? 0;
+    const vegetables = scene.player?.vegetables ?? 0;
+    const seeds = scene.player?.seeds ?? 0;
+    add(scene.add.text(x + 24, y + 52, `Logs: ${logs}     Stone: ${stones}     Crystals: ${crystals}`, { fontSize: '17px', color: '#ccaa77' }).setDepth(61));
+    add(scene.add.text(x + 24, y + 74, `Meat: ${meat}     Feathers: ${feathers}     Veg: ${vegetables}     Seeds: ${seeds}`, { fontSize: '17px', color: '#ffaa88' }).setDepth(61));
 
-    const bastalite = scene.player?.bastalite ?? 0;
-    const cPristine = scene.player?.crystalPristine ?? 0;
-    const cNormal = scene.player?.crystalNormal ?? 0;
-    const cPoor = scene.player?.crystalPoor ?? 0;
-    const realmCrystalT1 = scene.player?.realmCrystalT1 ?? 0;
-    const canMeditate = scene.player?.canMeditate?.();
-    const hasMats = bastalite > 0 || cPristine > 0 || cNormal > 0 || cPoor > 0 || realmCrystalT1 > 0;
-    if (hasMats) {
-      const parts = [];
-      if (bastalite > 0) parts.push(`Bastalite: ${bastalite}`);
-      if (cPristine > 0) parts.push(`Pristine Crystal: ${cPristine}`);
-      if (cNormal > 0) parts.push(`Ki Crystal: ${cNormal}`);
-      if (cPoor > 0) parts.push(`Cracked Crystal: ${cPoor}`);
-      if (realmCrystalT1 > 0) parts.push(`Realm Crystal T1: ${realmCrystalT1}`);
-      add(scene.add.text(x + 24, y + 74, parts.join('  '), {
-        fontSize: '15px', color: '#44eeff', wordWrap: { width: panelW - 48 },
-      }).setDepth(61));
+    // Data-driven inventory items
+    const inv = scene.player?.inventory ?? {};
+    const invLine = Object.entries(inv).filter(([, q]) => q > 0).map(([id, q]) => `${id}: ${q}`).join('     ');
+    if (invLine) {
+      add(scene.add.text(x + 24, y + 96, invLine, { fontSize: '17px', color: '#aaccee' }).setDepth(61));
     }
 
-    const matOffset = hasMats ? 16 : 0;
-    add(scene.add.text(x + 24, y + 84 + matOffset, 'Equipment:', {
-      fontSize: '17px', color: '#aabbcc', fontStyle: 'bold',
-    }).setDepth(61));
-
-    const p = scene.player;
-    const hasArmorEquipped = !!p?.armorElite;
-    const hasArmorInv = !!p?.armorEliteInv;
-    const hasArmor = hasArmorEquipped || hasArmorInv;
-    if (hasArmor) {
-      const rowY = y + 112 + matOffset;
-      const itemBg = add(scene.add.rectangle(W / 2, rowY + 16, panelW - 48, 36, 0x1a1a33, 0.9)
-        .setStrokeStyle(1, hasArmorEquipped ? 0x44eeff : 0x334466).setDepth(61));
-      add(scene.add.sprite(x + 42, rowY + 16, ARMOR_ELITE_KEY, 0).setScale(0.9).setDepth(62));
-      add(scene.add.text(x + 66, rowY + 6, `Elite Armor  ${hasArmorEquipped ? '[Equipped]' : '[In Bag]'}`, {
-        fontSize: '15px', color: hasArmorEquipped ? '#44eeff' : '#888899',
-      }).setDepth(62));
-
-      const actionBtn = add(scene.add.text(x + panelW - 48, rowY + 6, hasArmorEquipped ? 'Click: Unequip' : 'Click: Equip', {
-        fontSize: '13px', color: '#88bbff', backgroundColor: '#22334488', padding: { x: 6, y: 4 },
-      }).setOrigin(1, 0).setDepth(62));
-      actionBtn.setInteractive({ useHandCursor: true });
-      actionBtn.on('pointerdown', (ptr) => {
-        if (ptr.rightButtonDown()) return;
-        conn?.send({ type: hasArmorEquipped ? 'unequip_armor' : 'equip_armor' });
-        this.closeInventory();
-        scene.time.delayedCall(100, () => { if (!scene._inventoryOpen) this.openInventory(); });
-      });
-
-      itemBg.setInteractive({ useHandCursor: true });
-      itemBg.on('pointerdown', (ptr) => {
-        if (!ptr.rightButtonDown()) return;
-        this.closeInvContextMenu();
-        const mx = ptr.x;
-        const my = ptr.y;
-        const cmBg = scene.add.rectangle(mx + 60, my + 15, 120, 30, 0x1a1a2e, 0.95)
-          .setStrokeStyle(1, 0xff5555).setDepth(72).setScrollFactor(0);
-        scene.addHud(cmBg);
-        const dropBtn = scene.add.text(mx + 8, my + 5, 'Drop Armor', {
-          fontSize: '14px', color: '#ff6666',
-        }).setDepth(73).setScrollFactor(0);
-        scene.addHud(dropBtn);
-        dropBtn.setInteractive({ useHandCursor: true });
-        dropBtn.on('pointerdown', () => {
-          conn?.send({ type: 'drop_armor' });
-          this.closeInvContextMenu();
-          this.closeInventory();
-        });
-        scene._invContextEls = [cmBg, dropBtn];
-      });
-    } else {
-      add(scene.add.text(x + 42, y + 118 + matOffset, '(no equipment)', { fontSize: '15px', color: '#556677' }).setDepth(61));
-    }
-
-    const craftY = y + 165 + matOffset;
+    const craftY = y + (invLine ? 106 : 84);
     add(scene.add.text(x + 24, craftY, 'Crafting:', { fontSize: '17px', color: '#aabbcc', fontStyle: 'bold' }).setDepth(61));
-    const canGate = logs >= 10;
-    const gateBtn = add(scene.add.text(x + 42, craftY + 30, `[Gate] - 10 logs ${canGate ? '' : '(need more)'}`, {
-      fontSize: '16px', color: canGate ? '#88bbff' : '#666666', backgroundColor: canGate ? '#22334488' : '#11111188', padding: { x: 8, y: 5 },
-    }).setDepth(61));
-    if (canGate) {
-      gateBtn.setInteractive({ useHandCursor: true });
-      gateBtn.on('pointerdown', () => { this.placeGate(); this.closeInventory(); });
-    }
 
     const canAnvil = stones >= 5;
-    const anvilBtn = add(scene.add.text(x + 42, craftY + 62, `[Anvil] - 5 stone ${canAnvil ? '' : '(need more)'}`, {
+    const anvilBtn = add(scene.add.text(x + 42, craftY + 30, `[Anvil] - 5 stone ${canAnvil ? '' : '(need more)'}`, {
       fontSize: '16px', color: canAnvil ? '#88bbff' : '#666666', backgroundColor: canAnvil ? '#22334488' : '#11111188', padding: { x: 8, y: 5 },
     }).setDepth(61));
     if (canAnvil) {
@@ -398,32 +393,16 @@ export class InventoryController {
       anvilBtn.on('pointerdown', () => { this.placeAnvil(); this.closeInventory(); });
     }
 
-    const meditateY = craftY + 102;
-    add(scene.add.text(x + 24, meditateY, 'Meditation:', { fontSize: '17px', color: '#aabbcc', fontStyle: 'bold' }).setDepth(61));
-    add(scene.add.text(x + 42, meditateY + 22,
-      canMeditate
-        ? `Unlocks realm insight. Poor ${Math.round(MEDITATION_POOR_MS / 1000)}s, Ki ${Math.round(MEDITATION_NORMAL_MS / 1000)}s, Pristine ${Math.round(MEDITATION_PRISTINE_MS / 1000)}s.`
-        : `Locked until Ki Skill ${KI_SKILL_MEDITATE_UNLOCK_LEVEL}.`, {
-        fontSize: '13px', color: canMeditate ? '#7799aa' : '#666666', wordWrap: { width: panelW - 80 },
-      }).setDepth(61));
-    [
-      { label: '[Meditate - Cracked Crystal]', quality: 'poor', count: cPoor, color: '#88bbff', y: meditateY + 52 },
-      { label: '[Meditate - Ki Crystal]', quality: 'normal', count: cNormal, color: '#66ddff', y: meditateY + 84 },
-      { label: '[Meditate - Pristine Crystal]', quality: 'pristine', count: cPristine, color: '#99ffff', y: meditateY + 116 },
-    ].forEach((entry) => {
-      const enabled = canMeditate && entry.count > 0 && !scene.player?.meditating;
-      const btn = add(scene.add.text(x + 42, entry.y, `${entry.label} ${enabled ? '' : `(x${entry.count})`}`, {
-        fontSize: '14px', color: enabled ? entry.color : '#666666',
-        backgroundColor: enabled ? '#112233cc' : '#111111aa', padding: { x: 8, y: 4 },
-      }).setDepth(62));
-      if (!enabled) return;
-      btn.setInteractive({ useHandCursor: true });
-      btn.on('pointerdown', () => {
-        conn?.send({ type: 'start_meditation', crystal_quality: entry.quality });
-        this.closeInventory();
-      });
-    });
-    add(scene.add.text(x + 24, craftY + 252, 'Click anvil to refine stone.\nDrop logs for fences, gates.', {
+    const useCrystalEnabled = crystals > 0;
+    const crystalBtn = add(scene.add.text(x + 42, craftY + 62, `[Use Crystal] ${useCrystalEnabled ? '' : '(none)'}`, {
+      fontSize: '16px', color: useCrystalEnabled ? '#44eeff' : '#666666', backgroundColor: useCrystalEnabled ? '#112233cc' : '#11111188', padding: { x: 8, y: 5 },
+    }).setDepth(61));
+    if (useCrystalEnabled) {
+      crystalBtn.setInteractive({ useHandCursor: true });
+      crystalBtn.on('pointerdown', () => { this.useCrystal(); this.closeInventory(); });
+    }
+
+    add(scene.add.text(x + 24, craftY + 110, 'Click anvil to refine stone.', {
       fontSize: '14px', color: '#667788', wordWrap: { width: panelW - 60 },
     }).setDepth(61));
     add(scene.add.text(W / 2, y + panelH - 16, 'Press I to close', {

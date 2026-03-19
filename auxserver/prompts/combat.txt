@@ -4,13 +4,15 @@ Convert the player's instruction into a JSON task list. Output ONLY a JSON array
 Available combat tasks:
 - {"task": "attack_nearest_enemy"}   — find and attack the nearest enemy
 - {"task": "defend_player"}          — follow player, attack enemies that come close
-- {"task": "train"}                  — go train on the training dummy for XP
+- {"task": "train"}                  — go train on the training dummy for melee XP
+- {"task": "practice_ki"}            — practice ki blasts on a ki target for ki XP (or watch and learn ki if NPC doesn't have it yet)
 - {"task": "idle"}                   — stop fighting
 
 Rules:
 - "Attack", "fight", "kill" → attack_nearest_enemy.
 - "Guard me", "defend me", "protect me" → defend_player.
-- "Train", "practice", "spar", "hit the dummy", "train on dummy" → train.
+- "Train", "spar", "hit the dummy", "train on dummy", "practice melee", "practice fighting" → train.
+- "Practice ki", "train ki", "learn ki", "ki blast practice", "practice energy" → practice_ki.
 - "Stop fighting", "stop", "stand down" → idle.
 - If unsure, emit [{"task": "idle"}].
 
@@ -26,6 +28,12 @@ User: go train on the dummy
 
 User: practice fighting
 [{"task": "train"}]
+
+User: practice ki
+[{"task": "practice_ki"}]
+
+User: train ki blasts
+[{"task": "practice_ki"}]
 
 User: stop fighting
 [{"task": "idle"}]

@@ -1,75 +1,44 @@
 import Phaser from 'phaser';
-import {
-  CHARGE_STR_BONUS,
-  CHARGE_DEF_BONUS,
-  CHARGE_KI_ATTACK_BONUS,
-  CHARGE_KI_REGEN_BONUS,
-} from '../constants.js';
-import { KI_DENOMINATIONS } from '../data/kiDenominations.js';
-
-const KI_TIER_MOVES = [
-  { tier: 1, moves: [{ id: 'ki_shot', label: 'Ki Shot' }, { id: 'charge', label: 'Charge' }, { id: 'sense_ki', label: 'Sense Ki' }] },
-  { tier: 2, moves: [{ id: 'barrier', label: 'Barrier' }] },
-];
-
-const UPGRADE_LABELS = {
-  ki_shot: {
-    range: 'Range',
-    cooldown: 'Cooldown',
-    speed: 'Projectile Speed',
-    damage: 'Damage',
-  },
-  charge: {
-    ceiling: 'Charge Ceiling',
-    decay: 'Decay Reduction',
-    speed: 'Charge Speed',
-  },
-  barrier: {
-    physical_block: 'Physical Block',
-    ki_block: 'Ki Block',
-  },
-  sense_ki: {
-    range_pct: 'Sense Range',
-    level_delta: 'Level Gap Read',
-  },
-};
 
 export class PlayerDetailPanel {
   constructor(scene) {
     this._scene = scene;
     this._el = null;
     this._timer = null;
-    this._refreshSuspendUntil = 0;
   }
 
   isOpen() { return !!this._el; }
 
-  open() {
-    if (this._el) this.close();
+  open(tab = null) {
+    if (this._el) {
+      if (tab) this.switchTab(tab);
+      return;
+    }
     this._build();
     this._refresh();
+    if (tab) this.switchTab(tab);
     this._timer = setInterval(() => this._refresh(), 400);
+  }
+
+  switchTab(tab) {
+    if (!this._el) return;
+    this._el.querySelectorAll('.pdp-tab').forEach(t => t.classList.remove('active'));
+    this._el.querySelectorAll('.pdp-pane').forEach(p => p.classList.remove('active'));
+    this._el.querySelector(`.pdp-tab[data-tab="${tab}"]`)?.classList.add('active');
+    this._el.querySelector(`.pdp-pane[data-pane="${tab}"]`)?.classList.add('active');
   }
 
   close() {
     if (this._scene) this._scene._charMenuOpen = false;
-    if (this._timer) {
-      clearInterval(this._timer);
-      this._timer = null;
-    }
-    if (this._el) {
-      this._el.remove();
-      this._el = null;
-    }
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    if (this._el) { this._el.remove(); this._el = null; }
+  }
+
+  _send(field, value = 0, extra = {}) {
+    this._scene._conn?.send({ type: 'admin', field, value, target_npc_id: null, ...extra });
   }
 
   _build() {
-    const denominationTabs = Object.values(KI_DENOMINATIONS).map((denomination) => (
-      `<button class="pdp-tab" data-tab="${this._getDenominationPaneKey(denomination.id)}">${denomination.label}</button>`
-    )).join('');
-    const denominationPanes = Object.values(KI_DENOMINATIONS).map((denomination) => (
-      `<div class="pdp-pane" data-pane="${this._getDenominationPaneKey(denomination.id)}"></div>`
-    )).join('');
     const el = document.createElement('div');
     el.id = 'player-detail-panel';
     el.innerHTML = `
@@ -80,33 +49,94 @@ export class PlayerDetailPanel {
             <div class="pdp-title">Character</div>
             <div class="pdp-subtitle"></div>
           </div>
-          <button class="pdp-close">X</button>
+          <button class="pdp-close">✕</button>
+        </div>
+        <div class="pdp-tabs">
+          <button class="pdp-tab active" data-tab="stats">Stats</button>
+          <button class="pdp-tab" data-tab="inventory">Inventory</button>
+          <button class="pdp-tab" data-tab="ki">Ki</button>
         </div>
         <div class="pdp-body">
-          <div class="pdp-left">
-            <div class="pdp-section">
-              <h3>Stats</h3>
-              <div class="pdp-stats"></div>
-            </div>
-            <div class="pdp-section">
-              <h3>Resources</h3>
-              <div class="pdp-resources"></div>
-            </div>
-            <div class="pdp-section">
-              <h3>Equipment</h3>
-              <div class="pdp-equipment"></div>
+          <div class="pdp-pane active" data-pane="stats">
+            <div class="pdp-two-col">
+              <div class="pdp-col-left">
+                <div class="pdp-section">
+                  <h3>Vitals</h3>
+                  <div class="pdp-vitals"></div>
+                </div>
+                <div class="pdp-section">
+                  <h3>Combat</h3>
+                  <div class="pdp-combat-stats"></div>
+                </div>
+                <div class="pdp-section">
+                  <h3>Level</h3>
+                  <div class="pdp-level-stats"></div>
+                </div>
+              </div>
+              <div class="pdp-col-right">
+                <div class="pdp-section">
+                  <h3>Adjustments</h3>
+                  <div class="pdp-adj"></div>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="pdp-right">
-            <div class="pdp-tabs">
-              <button class="pdp-tab active" data-tab="overview">Overview</button>
-              <button class="pdp-tab" data-tab="ki">Ki Skills</button>
-              ${denominationTabs}
+
+          <div class="pdp-pane" data-pane="inventory">
+            <div class="pdp-two-col">
+              <div class="pdp-col-left">
+                <div class="pdp-section">
+                  <h3>Resources</h3>
+                  <div class="pdp-res"></div>
+                </div>
+                <div class="pdp-section">
+                  <h3>Drops</h3>
+                  <div class="pdp-drops"></div>
+                </div>
+                <div class="pdp-section">
+                  <h3>Farming</h3>
+                  <div class="pdp-farming"></div>
+                </div>
+                <div class="pdp-section">
+                  <h3>Items</h3>
+                  <div class="pdp-inventory-dynamic"></div>
+                </div>
+              </div>
+              <div class="pdp-col-right">
+                <div class="pdp-section">
+                  <h3>Give Items</h3>
+                  <div class="pdp-give"></div>
+                </div>
+                <div class="pdp-section">
+                  <h3>Crafting</h3>
+                  <div class="pdp-craft"></div>
+                </div>
+              </div>
             </div>
-            <div class="pdp-content">
-              <div class="pdp-pane active" data-pane="overview"></div>
-              <div class="pdp-pane" data-pane="ki"></div>
-              ${denominationPanes}
+          </div>
+
+          <div class="pdp-pane" data-pane="ki">
+            <div class="pdp-two-col">
+              <div class="pdp-col-left">
+                <div class="pdp-section">
+                  <h3>Ki Pool</h3>
+                  <div class="pdp-ki-pool"></div>
+                </div>
+                <div class="pdp-section">
+                  <h3>Ki Blast</h3>
+                  <div class="pdp-ki-blast"></div>
+                </div>
+                <div class="pdp-section">
+                  <h3>Barrier</h3>
+                  <div class="pdp-ki-barrier"></div>
+                </div>
+              </div>
+              <div class="pdp-col-right">
+                <div class="pdp-section">
+                  <h3>Ki Adjustments</h3>
+                  <div class="pdp-ki-adj"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -115,18 +145,16 @@ export class PlayerDetailPanel {
     document.body.appendChild(el);
     this._el = el;
     this._injectStyles();
-    el.querySelector('.pdp-close')?.addEventListener('click', () => this.close());
-    el.querySelector('.pdp-backdrop')?.addEventListener('click', () => this.close());
-    el.querySelector('.pdp-shell')?.addEventListener('click', (event) => event.stopPropagation());
-    el.querySelector('.pdp-shell')?.addEventListener('pointerdown', (event) => event.stopPropagation());
-    el.querySelector('.pdp-content')?.addEventListener('pointerdown', (event) => this._handleContentPointerDown(event));
-    el.querySelector('.pdp-content')?.addEventListener('input', (event) => this._handleContentInput(event));
-    el.querySelector('.pdp-content')?.addEventListener('click', (event) => this._handleContentClick(event));
-    el.querySelector('.pdp-content')?.addEventListener('change', (event) => this._handleContentChange(event));
+
+    el.querySelector('.pdp-close').addEventListener('click', () => this.close());
+    el.querySelector('.pdp-backdrop').addEventListener('click', () => this.close());
+    el.querySelector('.pdp-shell').addEventListener('click', (e) => e.stopPropagation());
+    el.querySelector('.pdp-shell').addEventListener('pointerdown', (e) => e.stopPropagation());
+
     for (const tab of el.querySelectorAll('.pdp-tab')) {
       tab.addEventListener('click', () => {
-        el.querySelectorAll('.pdp-tab').forEach((node) => node.classList.remove('active'));
-        el.querySelectorAll('.pdp-pane').forEach((node) => node.classList.remove('active'));
+        el.querySelectorAll('.pdp-tab').forEach(t => t.classList.remove('active'));
+        el.querySelectorAll('.pdp-pane').forEach(p => p.classList.remove('active'));
         tab.classList.add('active');
         el.querySelector(`.pdp-pane[data-pane="${tab.dataset.tab}"]`)?.classList.add('active');
       });
@@ -135,438 +163,320 @@ export class PlayerDetailPanel {
 
   _refresh() {
     if (!this._el) return;
-    if (Date.now() < this._refreshSuspendUntil) return;
     const scene = this._scene;
     const p = scene.player;
     if (!p) return;
 
-    this._el.querySelector('.pdp-subtitle').textContent = `${scene.playerId || 'Player'}  Level ${p.level}`;
+    this._el.querySelector('.pdp-subtitle').textContent = `${scene.playerId || 'Player'}  ·  Level ${p.level}`;
 
+    this._refreshStats(p);
+    this._refreshInventory(p);
+    this._refreshKi(p);
+  }
+
+  _refreshStats(p) {
     const hpPct = p.maxHp > 0 ? (p.hp / p.maxHp) * 100 : 0;
-    const kiPct = p.maxKi > 0 ? (p.ki / p.maxKi) * 100 : 0;
-    const chargePower = this._getChargePower(p);
-    const chargePct = Math.round(chargePower * 100);
-    const effectiveStr = this._getChargedStat(p.str, chargePower, CHARGE_STR_BONUS);
-    const effectiveDef = this._getChargedStat(p.def, chargePower, CHARGE_DEF_BONUS);
-    const attackMult = this._getChargeMultiplier(chargePower, CHARGE_KI_ATTACK_BONUS);
-    const regenMult = this._getChargeMultiplier(chargePower, CHARGE_KI_REGEN_BONUS);
-    const senseRangeLevel = this._getSenseRangeLevel(p);
-    const senseRangePct = Number(p.kiUpgrades?.sense_ki?.range_pct || 0);
-    const senseTiles = [8, 16, 24, 32][senseRangeLevel] || 8;
-    this._el.querySelector('.pdp-stats').innerHTML = `
-      ${this._barStat('HP', p.hp, p.maxHp, hpPct, hpPct > 50 ? '#59d66f' : hpPct > 25 ? '#d6aa44' : '#d65c5c')}
-      ${this._barStat(`Ki${chargePct > 0 ? ` (Charge ${chargePct}%)` : ''}`, p.ki, p.maxKi, kiPct, kiPct > 50 ? '#4f98ff' : kiPct > 25 ? '#6c63ff' : '#9557ff')}
+
+    // Vitals
+    this._el.querySelector('.pdp-vitals').innerHTML = `
+      ${this._barRow('HP', p.hp, p.maxHp, hpPct, hpPct > 50 ? '#59d66f' : hpPct > 25 ? '#d6aa44' : '#d65c5c')}
+    `;
+
+    // Combat stats
+    this._el.querySelector('.pdp-combat-stats').innerHTML = `
       <div class="pdp-stat-grid">
-        ${this._bigStat('STR', chargePct > 0 ? `${effectiveStr} (${p.str})` : p.str)}
-        ${this._bigStat('DEF', chargePct > 0 ? `${effectiveDef} (${p.def})` : p.def)}
-        ${this._bigStat('Lv', p.level)}
-        ${this._bigStat('XP', `${p.xp}/${p.level * 20}`)}
-        ${this._bigStat('Ki Skill', p.kiSkillLevel ?? 1)}
-        ${this._bigStat('Ki XP', `${p.kiSkillXp ?? 0}/${(p.kiSkillLevel ?? 1) * 20}`)}
-        ${this._bigStat('Realm', p.realmTier ?? 0)}
-        ${this._bigStat('Inf Ki', p.infKi ? 'On' : 'Off')}
-        ${this._bigStat('Ki Dmg', `${attackMult.toFixed(2)}x`)}
-        ${this._bigStat('Ki Regen', `${regenMult.toFixed(2)}x`)}
+        ${this._statCell('STR', p.str)}
+        ${this._statCell('DEF', p.def)}
       </div>
     `;
 
-    this._el.querySelector('.pdp-resources').innerHTML = `
-      <div class="pdp-lines">
-        <div>Logs: ${p.logs ?? 0}</div>
-        <div>Stone: ${p.stones ?? 0}</div>
-        <div>Bastalite: ${p.bastalite ?? 0}</div>
-        <div>Pristine Crystal: ${p.crystalPristine ?? 0}</div>
-        <div>Ki Crystal: ${p.crystalNormal ?? 0}</div>
-        <div>Cracked Crystal: ${p.crystalPoor ?? 0}</div>
-        <div>Realm Crystal T1: ${p.realmCrystalT1 ?? 0}</div>
-      </div>
+    // Level stats
+    const xpNeeded = p.level * 20;
+    const xpPct = xpNeeded > 0 ? Math.min(100, (p.xp / xpNeeded) * 100) : 0;
+    this._el.querySelector('.pdp-level-stats').innerHTML = `
+      ${this._statCell('Level', p.level, true)}
+      ${this._barRow('XP', p.xp, xpNeeded, xpPct, '#f6cf61')}
     `;
 
-    this._el.querySelector('.pdp-equipment').innerHTML = `
-      <div class="pdp-lines">
-        <div>Armor: ${p.armorElite ? 'Elite Armor [Equipped]' : p.armorEliteInv ? 'Elite Armor [In Bag]' : 'None'}</div>
-      </div>
-    `;
-
-    const learnedMoves = Array.isArray(p.kiMoves) ? p.kiMoves : [];
-    const overview = this._el.querySelector('.pdp-pane[data-pane="overview"]');
-    overview.innerHTML = `
-      <div class="pdp-card-grid">
-        <div class="pdp-card">
-          <div class="pdp-card-title">Meditation</div>
-          <div class="pdp-card-body">${(p.kiSkillLevel ?? 1) >= 10 ? 'Unlocked' : 'Locked until Ki Skill 10'}</div>
-        </div>
-        <div class="pdp-card">
-          <div class="pdp-card-title">Blast</div>
-          <div class="pdp-card-body">Level ${p.blastLevel ?? 0}<br>Damage ${p.getBlastDmg?.() ?? '?'}<br>Cost ${p.getBlastCost?.() ?? '?'} Ki</div>
-        </div>
-        <div class="pdp-card">
-          <div class="pdp-card-title">Charge</div>
-          <div class="pdp-card-body">${p.charging ? 'Charging now' : chargePct > 0 ? 'Stored charge' : 'Inactive'}<br>Power ${chargePct}%<br>STR ${effectiveStr} / DEF ${effectiveDef}</div>
-        </div>
-        <div class="pdp-card">
-          <div class="pdp-card-title">Aura Color</div>
-          <div class="pdp-card-body">
-            <label class="pdp-color-row">
-              <input type="color" value="${this._tintToHex(p.auraTint)}" data-action="aura-color">
-              <span>${this._tintToHex(p.auraTint)}</span>
-            </label>
-            <label class="pdp-range-row">
-              <span>Opacity</span>
-              <input type="range" min="0" max="100" step="1" value="${this._alphaToPercent(p.auraAlpha)}" data-action="aura-alpha">
-              <strong data-role="aura-alpha-value">${this._alphaToPercent(p.auraAlpha)}%</strong>
-            </label>
-          </div>
-        </div>
-        <div class="pdp-card">
-          <div class="pdp-card-title">Learned Moves</div>
-          <div class="pdp-card-body">${learnedMoves.length ? learnedMoves.map((m) => this._formatMove(m)).join(', ') : 'None yet'}</div>
-        </div>
-        <div class="pdp-card">
-          <div class="pdp-card-title">Sense Ki</div>
-          <div class="pdp-card-body">Sense ${senseRangeLevel} / 3 (${senseTiles} tiles base, +${senseRangePct}% range)<br>Gap Read +${Number(p.kiUpgrades?.sense_ki?.level_delta || 0)}</div>
-        </div>
-      </div>
-    `;
-
-    const kiPane = this._el.querySelector('.pdp-pane[data-pane="ki"]');
-    kiPane.innerHTML = `
-      <div class="pdp-ki-summary">
-        <div class="pdp-ki-row"><span>Ki Skill</span><span>${p.kiSkillLevel ?? 1}</span></div>
-        <div class="pdp-ki-row"><span>Ki XP</span><span>${p.kiSkillXp ?? 0}/${(p.kiSkillLevel ?? 1) * 20}</span></div>
-        <div class="pdp-ki-row"><span>Blast Level</span><span>${p.blastLevel ?? 0}</span></div>
-        <div class="pdp-ki-row"><span>Charge Power</span><span>${chargePct}%</span></div>
-        <div class="pdp-ki-row"><span>Effective STR / DEF</span><span>${effectiveStr} / ${effectiveDef}</span></div>
-        <div class="pdp-ki-row"><span>Realm Tier</span><span>${p.realmTier ?? 0}</span></div>
-        <div class="pdp-ki-row"><span>Learned Moves</span><span>${learnedMoves.length ? learnedMoves.map((m) => this._formatMove(m)).join(', ') : 'None'}</span></div>
-      </div>
-      <div class="pdp-upgrade-block">
-        <div class="pdp-upgrade-title">Current Shrine Upgrades</div>
-        ${this._renderKnownUpgradeSummary(p)}
-      </div>
-    `;
-
-    for (const denomination of Object.values(KI_DENOMINATIONS)) {
-      const pane = this._el.querySelector(`.pdp-pane[data-pane="${this._getDenominationPaneKey(denomination.id)}"]`);
-      if (!pane) continue;
-      pane.innerHTML = this._renderDenominationPane(p, denomination);
+    // Adjustments panel — +/- buttons
+    const adj = this._el.querySelector('.pdp-adj');
+    if (!adj._built) {
+      adj._built = true;
+      adj.innerHTML = `
+        ${this._adjRow('Max HP', 'maxHp', 5, '#59d66f')}
+        ${this._adjRow('Full HP', 'full_hp', 0, '#59d66f', 'Restore', true)}
+        ${this._adjRow('STR', 'str', 1, '#ff9944')}
+        ${this._adjRow('DEF', 'def', 1, '#44bbff')}
+        ${this._adjRow('Spawn NPC', '_spawn_npc', 0, '#cc88ff', 'Spawn', true)}
+        ${this._adjRow('Spawn Dummy', '_spawn_dummy', 0, '#888', 'Spawn', true)}
+        ${this._adjRow('Heal All NPCs', '_heal_npcs', 0, '#59d66f', 'Heal', true)}
+      `;
+      this._bindAdjButtons(adj);
     }
   }
 
-  _renderKnownUpgradeSummary(player) {
-    const blocks = [];
-    for (const tier of KI_TIER_MOVES) {
-      for (const move of tier.moves) {
-        if (!(player.kiMoves || []).includes(move.id)) continue;
-        const rows = this._upgradeRows(player, move.id);
-        if (!rows.length) continue;
-        blocks.push(`
-          <div class="pdp-upgrade-summary-card">
-            <div class="pdp-upgrade-summary-title">${move.label}</div>
-            ${rows.map((row) => `<div class="pdp-upgrade-row"><span>${row.label}</span><span>${row.value}</span></div>`).join('')}
-          </div>
-        `);
+  _refreshInventory(p) {
+    const crystals = Number(p.crystals ?? 0);
+
+    this._el.querySelector('.pdp-res').innerHTML = `
+      <div class="pdp-inv-grid">
+        ${this._invCell('Logs', p.logs ?? 0, '#d4aa66')}
+        ${this._invCell('Stone', p.stones ?? 0, '#aabbcc')}
+        ${this._invCell('Copper', p.copper ?? 0, '#cc8844')}
+        ${this._invCell('Crystals', crystals, '#44eeff')}
+      </div>
+    `;
+
+    this._el.querySelector('.pdp-drops').innerHTML = `
+      <div class="pdp-inv-grid">
+        ${this._invCell('Meat', p.meat ?? 0, '#ff8866')}
+        ${this._invCell('Feathers', p.feathers ?? 0, '#ffffaa')}
+        ${this._invCell('Veg', p.vegetables ?? 0, '#88ff66')}
+      </div>
+    `;
+
+    this._el.querySelector('.pdp-farming').innerHTML = `
+      <div class="pdp-inv-grid">
+        ${this._invCell('Seeds', p.seeds ?? 0, '#ccff88')}
+      </div>
+    `;
+
+    // Data-driven inventory items
+    const inv = p.inventory ?? {};
+    const invEntries = Object.entries(inv).filter(([, qty]) => qty > 0);
+    const invEl = this._el.querySelector('.pdp-inventory-dynamic');
+    if (invEl) {
+      invEl.innerHTML = invEntries.length > 0
+        ? `<div class="pdp-inv-grid">${invEntries.map(([id, qty]) => this._invCell(id, qty, '#aaccee')).join('')}</div>`
+        : '';
+    }
+
+    // Give items — rebuild only once
+    const give = this._el.querySelector('.pdp-give');
+    if (!give._built) {
+      give._built = true;
+      give.innerHTML = `
+        ${this._adjRow('Logs', 'logs', 10, '#d4aa66')}
+        ${this._adjRow('Stone', 'stones', 10, '#aabbcc')}
+        ${this._adjRow('Copper', 'copper', 10, '#cc8844')}
+        ${this._adjRow('Crystals', 'crystals', 10, '#44eeff')}
+        ${this._adjRow('Meat', 'meat', 10, '#ff8866')}
+        ${this._adjRow('Feathers', 'feathers', 10, '#ffffaa')}
+        ${this._adjRow('Veg', 'vegetables', 10, '#88ff66')}
+        ${this._adjRow('Seeds', 'seeds', 10, '#ccff88')}
+        ${this._adjRow('Raw Copper', 'inv:raw_copper', 10, '#cc8844')}
+        ${this._adjRow('Raw Tin', 'inv:raw_tin', 10, '#bbbbcc')}
+        ${this._adjRow('Bronze Bar', 'inv:bronze_bar', 10, '#ddaa55')}
+      `;
+      this._bindAdjButtons(give);
+    }
+
+    // Crafting
+    const craft = this._el.querySelector('.pdp-craft');
+    if (!craft._built) {
+      craft._built = true;
+    }
+    const canAnvil = (p.stones ?? 0) >= 5;
+    const canCrystal = Number(p.crystals ?? 0) > 0;
+    // Build equipment craft buttons from manifest
+    const eqManifest = this._scene._assetManifest?.equipment || {};
+    let eqBtns = '';
+    for (const [eqId, eqDef] of Object.entries(eqManifest)) {
+      const equipped = Object.values(p.equipment || {}).includes(eqId);
+      const recipe = eqDef.recipe || {};
+      const ingredients = recipe.ingredients || {};
+      const costParts = Object.entries(ingredients).map(([res, amt]) => `${amt} ${res}`).join(', ');
+      const canCraft = !equipped && Object.entries(ingredients).every(([res, amt]) => (p[res] ?? 0) >= amt);
+      eqBtns += `
+        <button class="pdp-craft-btn" data-equip="${eqId}" ${canCraft ? '' : 'disabled'}>
+          ${equipped ? '(Equipped) ' : ''}${eqDef.label}<br><span class="pdp-craft-cost">${costParts}</span>
+        </button>`;
+    }
+    craft.innerHTML = `
+      <div class="pdp-craft-btns">
+        <button class="pdp-craft-btn" data-action="anvil" ${canAnvil ? '' : 'disabled'}>
+          Anvil<br><span class="pdp-craft-cost">5 stone</span>
+        </button>
+        <button class="pdp-craft-btn" data-action="crystal" ${canCrystal ? '' : 'disabled'}>
+          Use Crystal<br><span class="pdp-craft-cost">${Number(p.crystals ?? 0)} avail</span>
+        </button>
+        ${eqBtns}
+      </div>
+    `;
+    craft.querySelector('[data-action="anvil"]')?.addEventListener('click', () => {
+      if ((this._scene.player?.stones ?? 0) >= 5) {
+        this._scene._conn?.send({ type: 'build_anvil' });
+        this._scene.chatBox?._addLog('Placing anvil...', '#88bbff');
       }
-    }
-    return blocks.length ? blocks.join('') : '<div class="pdp-empty">No shrine upgrades yet.</div>';
-  }
-
-  _renderTierMoveCard(player, move) {
-    const unlocked = (player.kiMoves || []).includes(move.id);
-    const rows = this._upgradeRows(player, move.id);
-    return `
-      <div class="pdp-move-card ${unlocked ? 'unlocked' : 'locked'}">
-        <div class="pdp-move-header">
-          <div>
-            <span class="pdp-move-name">${move.label}</span>
-            <span class="pdp-move-state">${unlocked ? 'Learned' : 'Unlearned'}</span>
-          </div>
-          <div class="pdp-move-actions">
-            <button class="pdp-test-btn" data-action="move-toggle" data-move="${move.id}">
-              ${unlocked ? 'Unlearn' : 'Learn'}
-            </button>
-          </div>
-        </div>
-        <div class="pdp-move-body">
-          ${rows.length
-            ? rows.map((row) => `
-              <div class="pdp-upgrade-row">
-                <span>${row.label}</span>
-                <div class="pdp-upgrade-controls">
-                  <button class="pdp-stepper-btn" data-action="upgrade-adjust" data-move="${move.id}" data-stat="${row.statId}" data-delta="-1">-</button>
-                  <span>${row.value}</span>
-                  <button class="pdp-stepper-btn" data-action="upgrade-adjust" data-move="${move.id}" data-stat="${row.statId}" data-delta="1">+</button>
-                </div>
-              </div>
-            `).join('')
-            : '<div class="pdp-empty">No shrine modifiers for this move.</div>'}
-        </div>
-      </div>
-    `;
-  }
-
-  _upgradeRows(player, moveId) {
-    const upgrades = player.kiUpgrades?.[moveId] || {};
-    const labels = UPGRADE_LABELS[moveId] || {};
-    return Object.keys(labels).map((key) => {
-      const raw = Number(upgrades[key] || 0);
-      let value = `+${raw}%`;
-      if (key === 'level_delta') value = `+${raw}`;
-      if (moveId === 'barrier' && (key === 'physical_block' || key === 'ki_block')) value = `+${raw}%`;
-      return { label: labels[key], value, statId: key };
+    });
+    craft.querySelector('[data-action="crystal"]')?.addEventListener('click', () => {
+      if (Number(this._scene.player?.crystals ?? 0) > 0) {
+        this._scene._conn?.send({ type: 'consume_crystal' });
+        this._scene.chatBox?._addLog('Using crystal...', '#44eeff');
+      }
+    });
+    craft.querySelectorAll('[data-equip]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const eqId = btn.getAttribute('data-equip');
+        this._scene._conn?.send({ type: 'craft_equipment', equipment_id: eqId });
+      });
     });
   }
 
-  _getSenseRangeLevel(player) {
-    const known = new Set(player?.kiKnownAugments?.sense_ki || []);
-    let level = 0;
-    if (known.has('sense_1')) level += 1;
-    if (known.has('sense_2')) level += 1;
-    if (known.has('sense_3')) level += 1;
-    if (level <= 0) {
-      level = Phaser.Math.Clamp(Number(player?.kiUpgrades?.sense_ki?.range || 0), 0, 3);
+  _refreshKi(p) {
+    const kiPct = p.maxKi > 0 ? (p.ki / p.maxKi) * 100 : 0;
+    const bonuses = (p.kiBlastBonuses && typeof p.kiBlastBonuses === 'object') ? p.kiBlastBonuses : {};
+    const blastCooldownBonus = Number(bonuses.blast_cooldown ?? 0);
+    const barrierDurationBonus = Number(bonuses.barrier_duration ?? 0);
+    const barrierCooldownBonus = Number(bonuses.barrier_cooldown ?? 0);
+    const blastCooldownSec = Math.max(0.15, 1.2 - blastCooldownBonus * 0.05).toFixed(2);
+    const barrierDurationMult = (1 + barrierDurationBonus * 0.01).toFixed(2);
+    const barrierCooldownMult = Math.max(0.1, 1 - barrierCooldownBonus * 0.01).toFixed(2);
+
+    this._el.querySelector('.pdp-ki-pool').innerHTML = `
+      ${this._barRow('Ki', p.ki, p.maxKi, kiPct, '#4f98ff')}
+      <div class="pdp-inv-grid" style="margin-top:8px">
+        ${this._statCell('Max Ki', p.maxKi ?? 0)}
+        ${this._statCell('Ki Lv', p.kiSkillLevel ?? 1)}
+      </div>
+    `;
+
+    const KI_SHOT_MODES = [
+      { id: 'ki_shot', label: 'Ki Shot', desc: 'Single blast' },
+      { id: 'scatter_shot', label: 'Scatter Shot', desc: '3-way spread, 2× cost' },
+      { id: 'explosive_shot', label: 'Explosive Shot', desc: 'AoE blast, 3× cost' },
+    ];
+    const activeMode = p.activeKiMode || 'ki_shot';
+    const learnedMoves = p.kiMoves || [];
+    const modeButtons = KI_SHOT_MODES.map(m => {
+      const learned = m.id === 'ki_shot' || learnedMoves.includes(m.id);
+      if (!learned) return `<div class="pdp-ki-mode locked" title="Not learned">${m.label} 🔒</div>`;
+      const active = m.id === activeMode ? ' active' : '';
+      return `<div class="pdp-ki-mode selectable${active}" data-mode="${m.id}" title="${m.desc}">${m.label}</div>`;
+    }).join('');
+
+    this._el.querySelector('.pdp-ki-blast').innerHTML = `
+      <div class="pdp-kv-list">
+        ${this._kv('Blast Level', p.blastLevel ?? 0)}
+        ${this._kv('Damage', p.getBlastDmg?.() ?? '?')}
+        ${this._kv('Cost', `${p.getBlastCost?.() ?? '?'} Ki`)}
+        ${this._kv('Cooldown', `${blastCooldownSec}s`)}
+        ${this._kv('Crystal Haste', this._signedPct(blastCooldownBonus))}
+      </div>
+      <h4 style="margin:8px 0 4px;color:#88bbff;font-size:12px">Shot Type</h4>
+      <div class="pdp-ki-modes">${modeButtons}</div>
+    `;
+
+    for (const btn of this._el.querySelectorAll('.pdp-ki-mode.selectable')) {
+      btn.addEventListener('click', () => {
+        p.activeKiMode = btn.dataset.mode;
+        this._refreshKi(p);
+      });
     }
-    return level;
+
+    this._el.querySelector('.pdp-ki-barrier').innerHTML = `
+      <div class="pdp-kv-list">
+        ${this._kv('Punch Block', '10%')}
+        ${this._kv('Ki Block', '10%')}
+        ${this._kv('Proc Cost', '3 Ki')}
+        ${this._kv('Duration Mult', `×${barrierDurationMult}`)}
+        ${this._kv('Cooldown Mult', `×${barrierCooldownMult}`)}
+      </div>
+    `;
+
+    const kiAdj = this._el.querySelector('.pdp-ki-adj');
+    if (!kiAdj._built) {
+      kiAdj._built = true;
+      kiAdj.innerHTML = `
+        ${this._adjRow('Max Ki', 'maxKi', 5, '#4f98ff')}
+        ${this._adjRow('Full Ki', 'full_ki', 0, '#4f98ff', 'Restore', true)}
+        ${this._adjRow('∞ Ki', 'inf_ki', 0, '#9557ff', 'Toggle', true)}
+        ${this._adjRow('Ki Level', 'ki_level', 1, '#9f8fff')}
+        ${this._adjRow('Blast Level', 'blastLevel', 1, '#66ddff')}
+      `;
+      this._bindAdjButtons(kiAdj);
+    }
   }
 
-  _handleContentClick(event) {
-    const btn = event.target.closest('button[data-action]');
-    if (!btn || !this._scene?._conn) return;
-    const action = btn.dataset.action;
-    if (action === 'progression-unlock') {
-      this._scene._conn.send({
-        type: 'ki_progress_unlock',
-        kind: btn.dataset.kind,
-        denomination_id: btn.dataset.denomination || null,
-        move_id: btn.dataset.move || null,
-        augment_id: btn.dataset.augment || null,
-      });
-      this._refreshSoon();
-      return;
+  // Build an adjustment row with +/- buttons or a single action button
+  _adjRow(label, field, step, color, btnLabel = null, single = false) {
+    if (single) {
+      return `<div class="pdp-adj-row">
+        <span class="pdp-adj-label" style="color:${color}">${label}</span>
+        <button class="pdp-adj-btn pdp-adj-action" data-field="${field}" data-step="${step}" style="border-color:${color}">${btnLabel || label}</button>
+      </div>`;
     }
-    if (action === 'progression-equip') {
-      this._scene._conn.send({
-        type: 'ki_progress_equip',
-        move_id: btn.dataset.move || null,
-        augment_id: btn.dataset.augment || null,
-      });
-      this._refreshSoon();
-      return;
-    }
-    if (action === 'move-toggle') {
-      const moveId = btn.dataset.move;
-      if (!moveId) return;
-      this._scene._conn.send({
-        type: 'admin',
-        field: 'ki_move_toggle',
-        value: 0,
-        target_npc_id: null,
-        move_id: moveId,
-      });
-      this._refreshSoon();
-      return;
-    }
-    if (action === 'upgrade-adjust') {
-      const moveId = btn.dataset.move;
-      const statId = btn.dataset.stat;
-      const delta = Number(btn.dataset.delta || 0);
-      if (!moveId || !statId || !delta) return;
-      this._scene._conn.send({
-        type: 'admin',
-        field: 'ki_upgrade_adjust',
-        value: delta,
-        delta,
-        target_npc_id: null,
-        move_id: moveId,
-        stat_id: statId,
-      });
-      this._refreshSoon();
-    }
+    return `<div class="pdp-adj-row">
+      <span class="pdp-adj-label" style="color:${color}">${label}</span>
+      <div class="pdp-adj-btns">
+        <button class="pdp-adj-btn pdp-adj-minus" data-field="${field}" data-step="${step}" style="border-color:${color}">−</button>
+        <button class="pdp-adj-btn pdp-adj-plus" data-field="${field}" data-step="${step}" style="border-color:${color}">+${step}</button>
+      </div>
+    </div>`;
   }
 
-  _handleContentPointerDown(event) {
-    if (event.target.closest('input[data-action="aura-color"], input[data-action="aura-alpha"]')) {
-      this._refreshSuspendUntil = Date.now() + 10000;
-    }
-  }
-
-  _handleContentInput(event) {
-    const slider = event.target.closest('input[data-action="aura-alpha"]');
-    if (!slider || !this._scene?.player) return;
-    const percent = Phaser.Math.Clamp(Number(slider.value || 0), 0, 100);
-    this._scene.player.auraAlpha = percent / 100;
-    this._refreshSuspendUntil = Date.now() + 10000;
-    const label = this._el?.querySelector('[data-role="aura-alpha-value"]');
-    if (label) label.textContent = `${Math.round(percent)}%`;
-  }
-
-  _handleContentChange(event) {
-    const input = event.target.closest('input[data-action="aura-color"]');
-    if (input && this._scene?._conn) {
-      const color = String(input.value || '').trim();
-      if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
-      this._refreshSuspendUntil = Date.now() + 300;
-      this._scene.player.auraTint = parseInt(color.slice(1), 16);
-      this._scene._conn.send({
-        type: 'admin',
-        field: 'aura_tint',
-        value: color,
-        target_npc_id: null,
+  _bindAdjButtons(container) {
+    container.querySelectorAll('.pdp-adj-plus').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const field = btn.dataset.field;
+        const step = Number(btn.dataset.step) || 1;
+        this._send(field, step);
       });
-      this._refreshSoon();
-      return;
-    }
-    const slider = event.target.closest('input[data-action="aura-alpha"]');
-    if (!slider || !this._scene?._conn) return;
-    const percent = Phaser.Math.Clamp(Number(slider.value || 0), 0, 100);
-    const alpha = percent / 100;
-    this._refreshSuspendUntil = Date.now() + 300;
-    this._scene.player.auraAlpha = alpha;
-    this._scene._conn.send({
-      type: 'admin',
-      field: 'aura_alpha',
-      value: alpha,
-      target_npc_id: null,
     });
-    this._refreshSoon();
+    container.querySelectorAll('.pdp-adj-minus').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const field = btn.dataset.field;
+        const step = Number(btn.dataset.step) || 1;
+        this._send(field, -step);
+      });
+    });
+    container.querySelectorAll('.pdp-adj-action').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const field = btn.dataset.field;
+        const step = Number(btn.dataset.step) || 0;
+        if (field === '_spawn_npc') {
+          this._scene._adminUi?.adminSpawnNPC?.();
+        } else if (field === '_spawn_dummy') {
+          this._scene._conn?.send({ type: 'build_dummy', logs: 20 });
+        } else if (field === '_heal_npcs') {
+          for (const npc of (this._scene.npcs || [])) {
+            if (!npc.isDead?.()) this._scene._conn?.send({ type: 'admin', field: 'full_hp', value: 0, target_npc_id: npc.id });
+          }
+        } else {
+          this._send(field, step);
+        }
+      });
+    });
   }
 
-  _refreshSoon() {
-    if (!this._el) return;
-    window.setTimeout(() => this._refresh(), 60);
+  _barRow(label, current, max, pct, color) {
+    return `<div class="pdp-bar-stat">
+      <div class="pdp-bar-top"><span>${label}</span><span>${current}/${max}</span></div>
+      <div class="pdp-bar-wrap"><div class="pdp-bar" style="width:${pct}%;background:${color}"></div></div>
+    </div>`;
   }
 
-  _formatMove(moveId) {
-    return String(moveId || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+  _statCell(label, value, wide = false) {
+    return `<div class="pdp-stat-cell ${wide ? 'pdp-stat-wide' : ''}">
+      <span class="pdp-stat-lbl">${label}</span>
+      <strong class="pdp-stat-val">${value}</strong>
+    </div>`;
   }
 
-  _barStat(label, current, max, pct, color) {
-    return `
-      <div class="pdp-stat">
-        <div class="pdp-stat-top"><span>${label}</span><span>${current}/${max}</span></div>
-        <div class="pdp-bar-wrap"><div class="pdp-bar" style="width:${pct}%;background:${color}"></div></div>
-      </div>
-    `;
+  _invCell(label, value, color = '#ccc') {
+    return `<div class="pdp-inv-cell">
+      <span class="pdp-inv-lbl">${label}</span>
+      <strong class="pdp-inv-val" style="color:${color}">${value}</strong>
+    </div>`;
   }
 
-  _bigStat(label, value) {
-    return `<div class="pdp-big-stat"><span>${label}</span><strong>${value}</strong></div>`;
+  _kv(label, value) {
+    return `<div class="pdp-kv-row"><span>${label}</span><span>${value}</span></div>`;
   }
 
-  _renderDenominationPane(player, denomination) {
-    return `
-      <div class="pdp-path-currency">Realm Crystals: <strong>${Number(player.realmCrystalT1 ?? 0)}</strong></div>
-      ${this._renderDenominationCard(player, denomination)}
-    `;
-  }
-
-  _renderDenominationCard(player, denomination) {
-    const knownDenomination = player.hasKiDenomination?.(denomination.id);
-    const unlockBtn = knownDenomination
-      ? '<span class="pdp-path-owned">Unlocked</span>'
-      : `<button class="pdp-test-btn" data-action="progression-unlock" data-kind="denomination" data-denomination="${denomination.id}">Unlock (${denomination.cost ?? 0})</button>`;
-    return `
-      <div class="pdp-path-card">
-        <div class="pdp-path-header">
-          <div>
-            <div class="pdp-path-title">${denomination.label}</div>
-            <div class="pdp-path-theme">${denomination.theme}</div>
-          </div>
-          <div class="pdp-path-actions">${unlockBtn}</div>
-        </div>
-        ${Object.values(denomination.moves || {}).map((move) => this._renderProgressionMove(player, denomination, move)).join('')}
-      </div>
-    `;
-  }
-
-  _renderProgressionMove(player, denomination, move) {
-    const knownDenomination = player.hasKiDenomination?.(denomination.id);
-    const knownMove = player.hasKiMove?.(move.id);
-    const moveState = knownMove
-      ? '<span class="pdp-path-owned">Learned</span>'
-      : knownDenomination
-        ? `<button class="pdp-test-btn" data-action="progression-unlock" data-kind="move" data-denomination="${denomination.id}" data-move="${move.id}">Learn (${move.cost ?? 0})</button>`
-        : '<span class="pdp-empty">Unlock the denomination first</span>';
-    const augments = Object.values(move.augments || {});
-    return `
-      <div class="pdp-path-move">
-        <div class="pdp-path-move-header">
-          <span class="pdp-path-move-name">${move.label}</span>
-          <span>${moveState}</span>
-        </div>
-        ${knownMove ? this._renderProgressionUpgradeControls(player, move.id) : ''}
-        ${augments.length ? augments.map((augment) => this._renderProgressionAugment(player, move, augment)).join('') : '<div class="pdp-empty">No augments yet.</div>'}
-      </div>
-    `;
-  }
-
-  _renderProgressionUpgradeControls(player, moveId) {
-    const rows = this._upgradeRows(player, moveId);
-    if (!rows.length) return '';
-    return `
-      <div class="pdp-upgrade-summary-card">
-        <div class="pdp-upgrade-summary-title">Dev Upgrades</div>
-        ${rows.map((row) => `
-          <div class="pdp-upgrade-row">
-            <span>${row.label}</span>
-            <div class="pdp-upgrade-controls">
-              <button class="pdp-stepper-btn" data-action="upgrade-adjust" data-move="${moveId}" data-stat="${row.statId}" data-delta="-1">-</button>
-              <span>${row.value}</span>
-              <button class="pdp-stepper-btn" data-action="upgrade-adjust" data-move="${moveId}" data-stat="${row.statId}" data-delta="1">+</button>
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    `;
-  }
-
-  _renderProgressionAugment(player, move, augment) {
-    const knownMove = player.hasKiMove?.(move.id);
-    const knownAugment = player.hasKiAugment?.(move.id, augment.id);
-    const equippedAugment = player.getEquippedKiAugment?.(move.id);
-    let actionHtml = '<span class="pdp-empty">Learn the move first</span>';
-    if (knownMove && !knownAugment) {
-      actionHtml = `<button class="pdp-test-btn" data-action="progression-unlock" data-kind="augment" data-move="${move.id}" data-augment="${augment.id}">Unlock (${augment.cost ?? 0})</button>`;
-    } else if (knownAugment && augment.kind === 'slottable') {
-      actionHtml = equippedAugment === augment.id
-        ? `<button class="pdp-test-btn" data-action="progression-equip" data-move="${move.id}" data-augment="">Unequip</button>`
-        : `<button class="pdp-test-btn" data-action="progression-equip" data-move="${move.id}" data-augment="${augment.id}">Equip</button>`;
-    } else if (knownAugment) {
-      actionHtml = '<span class="pdp-path-owned">Passive</span>';
-    }
-    return `
-      <div class="pdp-path-augment">
-        <div>
-          <div class="pdp-path-augment-name">${augment.label}</div>
-          <div class="pdp-path-augment-meta">${augment.kind === 'slottable' ? 'Slottable' : 'Passive'}</div>
-        </div>
-        <div class="pdp-path-actions">${actionHtml}</div>
-      </div>
-    `;
-  }
-
-  _getDenominationPaneKey(denominationId) {
-    return `denomination-${String(denominationId || '').trim()}`;
-  }
-
-  _getChargePower(player) {
-    return Math.max(0, Math.min(1, Number(player?.chargePower || 0)));
-  }
-
-  _getChargeMultiplier(chargePower, fullBonus) {
-    return 1 + this._getChargePower({ chargePower }) * Number(fullBonus || 0);
-  }
-
-  _getChargedStat(base, chargePower, fullBonus) {
-    return Math.max(1, Math.round(Number(base || 1) * this._getChargeMultiplier(chargePower, fullBonus)));
-  }
-
-  _tintToHex(value) {
-    return `#${(Number(value ?? 0x4fd6ff) >>> 0).toString(16).padStart(6, '0').slice(-6)}`;
-  }
-
-  _alphaToPercent(value) {
-    return Math.round(Phaser.Math.Clamp(Number(value ?? 0.42), 0, 1) * 100);
+  _signedPct(v) {
+    const n = Number(v ?? 0);
+    return `${n >= 0 ? '+' : ''}${n}%`;
   }
 
   _injectStyles() {
@@ -575,74 +485,88 @@ export class PlayerDetailPanel {
     style.id = 'player-detail-panel-styles';
     style.textContent = `
       #player-detail-panel { position: fixed; inset: 0; z-index: 4000; font-family: Georgia, serif; }
-      #player-detail-panel .pdp-backdrop { position: absolute; inset: 0; background: rgba(4,8,18,0.72); backdrop-filter: blur(3px); }
-      #player-detail-panel .pdp-shell { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(1080px, calc(100vw - 40px)); height: min(760px, calc(100vh - 40px)); background: linear-gradient(180deg, #111a2c 0%, #0a1020 100%); border: 1px solid #33506d; box-shadow: 0 18px 60px rgba(0,0,0,0.45); color: #dce7f2; display: flex; flex-direction: column; }
-      #player-detail-panel .pdp-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; border-bottom: 1px solid #23354b; }
-      #player-detail-panel .pdp-title { font-size: 28px; color: #f6cf61; font-weight: 700; }
-      #player-detail-panel .pdp-subtitle { font-size: 14px; color: #8ca2b8; margin-top: 3px; }
-      #player-detail-panel .pdp-close { border: 1px solid #46627f; background: #122034; color: #dce7f2; width: 34px; height: 34px; cursor: pointer; }
-      #player-detail-panel .pdp-body { display: flex; gap: 16px; padding: 16px; min-height: 0; flex: 1; }
-      #player-detail-panel .pdp-left { width: 320px; display: flex; flex-direction: column; gap: 12px; }
-      #player-detail-panel .pdp-right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-      #player-detail-panel .pdp-section { background: rgba(20,30,46,0.88); border: 1px solid #263b55; padding: 14px; }
-      #player-detail-panel .pdp-section h3 { margin: 0 0 12px; font-size: 16px; color: #a8d3ff; }
-      #player-detail-panel .pdp-stat { margin-bottom: 10px; }
-      #player-detail-panel .pdp-stat-top { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
-      #player-detail-panel .pdp-bar-wrap { height: 11px; background: #0b1220; border: 1px solid #1e3249; }
-      #player-detail-panel .pdp-bar { height: 100%; }
-      #player-detail-panel .pdp-stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
-      #player-detail-panel .pdp-big-stat { background: #0d1625; border: 1px solid #21354d; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
-      #player-detail-panel .pdp-big-stat span { font-size: 11px; color: #8ca2b8; text-transform: uppercase; letter-spacing: 0.08em; }
-      #player-detail-panel .pdp-big-stat strong { font-size: 18px; color: #f3f7fb; }
-      #player-detail-panel .pdp-lines { display: grid; gap: 8px; font-size: 14px; color: #d1e0ee; }
-      #player-detail-panel .pdp-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-      #player-detail-panel .pdp-tab { background: #111a28; border: 1px solid #29415c; color: #9fb9d3; padding: 8px 12px; cursor: pointer; }
-      #player-detail-panel .pdp-tab.active { color: #e7f5ff; border-color: #60cfff; background: #153149; }
-      #player-detail-panel .pdp-content { flex: 1; min-height: 0; background: rgba(20,30,46,0.88); border: 1px solid #263b55; padding: 14px; overflow: hidden; }
-      #player-detail-panel .pdp-pane { display: none; height: 100%; overflow-y: auto; }
+      #player-detail-panel .pdp-backdrop { position: absolute; inset: 0; background: rgba(4,8,18,0.75); backdrop-filter: blur(3px); }
+      #player-detail-panel .pdp-shell { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        width: min(860px, calc(100vw - 32px)); height: min(620px, calc(100vh - 32px));
+        background: linear-gradient(180deg,#111a2c 0%,#0a1020 100%); border: 1px solid #33506d;
+        box-shadow: 0 18px 60px rgba(0,0,0,0.5); color: #dce7f2; display: flex; flex-direction: column; }
+      #player-detail-panel .pdp-header { display: flex; justify-content: space-between; align-items: center;
+        padding: 14px 18px 10px; border-bottom: 1px solid #23354b; flex-shrink: 0; }
+      #player-detail-panel .pdp-title { font-size: 26px; color: #f6cf61; font-weight: 700; }
+      #player-detail-panel .pdp-subtitle { font-size: 13px; color: #8ca2b8; margin-top: 2px; }
+      #player-detail-panel .pdp-close { border: 1px solid #46627f; background: #122034; color: #dce7f2;
+        width: 32px; height: 32px; cursor: pointer; font-size: 16px; }
+      #player-detail-panel .pdp-tabs { display: flex; gap: 0; border-bottom: 1px solid #23354b; flex-shrink: 0; }
+      #player-detail-panel .pdp-tab { background: #0c1524; border: none; border-right: 1px solid #23354b;
+        color: #7a99b8; padding: 9px 20px; cursor: pointer; font-size: 14px; font-family: inherit; }
+      #player-detail-panel .pdp-tab.active { color: #e7f5ff; background: #132540; border-bottom: 2px solid #60cfff; }
+      #player-detail-panel .pdp-body { flex: 1; min-height: 0; overflow: hidden; }
+      #player-detail-panel .pdp-pane { display: none; height: 100%; overflow-y: auto; padding: 14px; box-sizing: border-box; }
       #player-detail-panel .pdp-pane.active { display: block; }
-      #player-detail-panel .pdp-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
-      #player-detail-panel .pdp-card { background: #0d1625; border: 1px solid #22354c; padding: 12px; }
-      #player-detail-panel .pdp-card-title { font-size: 12px; color: #8fb6da; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
-      #player-detail-panel .pdp-card-body { font-size: 14px; line-height: 1.45; color: #edf5fb; }
-      #player-detail-panel .pdp-color-row { display: flex; align-items: center; gap: 10px; }
-      #player-detail-panel .pdp-color-row input { width: 42px; height: 28px; border: 1px solid #355979; background: #12243a; padding: 0; cursor: pointer; }
-      #player-detail-panel .pdp-color-row span { font-family: Consolas, monospace; color: #9fd8ff; }
-      #player-detail-panel .pdp-range-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin-top: 10px; }
-      #player-detail-panel .pdp-range-row span { color: #9fb9d3; font-size: 13px; }
-      #player-detail-panel .pdp-range-row input { width: 100%; }
-      #player-detail-panel .pdp-range-row strong { color: #9fd8ff; font-family: Consolas, monospace; }
-      #player-detail-panel .pdp-ki-summary, #player-detail-panel .pdp-upgrade-summary-card, #player-detail-panel .pdp-move-card { background: #0d1625; border: 1px solid #22354c; padding: 12px; margin-bottom: 12px; }
-      #player-detail-panel .pdp-path-currency { margin-bottom: 12px; font-size: 14px; color: #9fd8ff; }
-      #player-detail-panel .pdp-path-card { background: #0d1625; border: 1px solid #22354c; padding: 12px; margin-bottom: 12px; }
-      #player-detail-panel .pdp-path-header, #player-detail-panel .pdp-path-move-header, #player-detail-panel .pdp-path-augment { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-      #player-detail-panel .pdp-path-title { font-size: 18px; color: #eef6fc; }
-      #player-detail-panel .pdp-path-theme { margin-top: 4px; font-size: 13px; color: #7fa0ba; }
-      #player-detail-panel .pdp-path-move { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(75,107,139,0.18); }
-      #player-detail-panel .pdp-path-move-name { font-size: 15px; color: #dce7f2; }
-      #player-detail-panel .pdp-path-augment { margin-top: 8px; padding: 8px 10px; background: rgba(18,36,58,0.55); border: 1px solid #203549; }
-      #player-detail-panel .pdp-path-augment-name { color: #e7f5ff; font-size: 14px; }
-      #player-detail-panel .pdp-path-augment-meta { color: #7fa0ba; font-size: 12px; }
-      #player-detail-panel .pdp-path-owned { color: #79f0ad; font-size: 13px; font-weight: 700; }
-      #player-detail-panel .pdp-ki-row, #player-detail-panel .pdp-upgrade-row { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 6px 0; border-bottom: 1px solid rgba(75,107,139,0.18); }
-      #player-detail-panel .pdp-ki-row:last-child, #player-detail-panel .pdp-upgrade-row:last-child { border-bottom: 0; }
-      #player-detail-panel .pdp-upgrade-title, #player-detail-panel .pdp-upgrade-summary-title { font-size: 13px; color: #89e1ff; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
-      #player-detail-panel .pdp-move-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
-      #player-detail-panel .pdp-move-name { font-size: 18px; color: #eef6fc; }
-      #player-detail-panel .pdp-move-state { display: block; margin-top: 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #8ca2b8; }
-      #player-detail-panel .pdp-move-card.unlocked .pdp-move-state { color: #79f0ad; }
-      #player-detail-panel .pdp-move-card.locked .pdp-move-state { color: #cc8f8f; }
-      #player-detail-panel .pdp-move-actions, #player-detail-panel .pdp-upgrade-controls { display: flex; align-items: center; gap: 8px; }
-      #player-detail-panel .pdp-test-btn, #player-detail-panel .pdp-stepper-btn { border: 1px solid #355979; background: #12243a; color: #dce7f2; cursor: pointer; }
-      #player-detail-panel .pdp-test-btn { min-width: 72px; padding: 6px 10px; }
-      #player-detail-panel .pdp-stepper-btn { width: 28px; height: 24px; padding: 0; font-size: 16px; line-height: 1; }
-      #player-detail-panel .pdp-test-btn:hover, #player-detail-panel .pdp-stepper-btn:hover { background: #173554; border-color: #60cfff; }
-      #player-detail-panel .pdp-empty { font-size: 13px; color: #73879b; }
-      @media (max-width: 900px) {
-        #player-detail-panel .pdp-shell { width: calc(100vw - 18px); height: calc(100vh - 18px); }
-        #player-detail-panel .pdp-body { flex-direction: column; }
-        #player-detail-panel .pdp-left { width: auto; }
-        #player-detail-panel .pdp-card-grid { grid-template-columns: 1fr; }
+      #player-detail-panel .pdp-two-col { display: grid; grid-template-columns: 280px 1fr; gap: 14px; }
+      #player-detail-panel .pdp-col-left, #player-detail-panel .pdp-col-right { display: flex; flex-direction: column; gap: 12px; }
+      #player-detail-panel .pdp-section { background: rgba(20,30,46,0.9); border: 1px solid #263b55; padding: 12px; }
+      #player-detail-panel .pdp-section h3 { margin: 0 0 10px; font-size: 13px; color: #7ab0d8;
+        text-transform: uppercase; letter-spacing: 0.08em; }
+
+      /* Bars */
+      #player-detail-panel .pdp-bar-stat { margin-bottom: 8px; }
+      #player-detail-panel .pdp-bar-top { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 3px; }
+      #player-detail-panel .pdp-bar-wrap { height: 10px; background: #0b1220; border: 1px solid #1e3249; }
+      #player-detail-panel .pdp-bar { height: 100%; transition: width 0.2s; }
+
+      /* Stat cells */
+      #player-detail-panel .pdp-stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
+      #player-detail-panel .pdp-stat-cell { background: #0d1625; border: 1px solid #21354d; padding: 8px 10px;
+        display: flex; justify-content: space-between; align-items: center; }
+      #player-detail-panel .pdp-stat-wide { grid-column: 1 / -1; }
+      #player-detail-panel .pdp-stat-lbl { font-size: 11px; color: #8ca2b8; text-transform: uppercase; }
+      #player-detail-panel .pdp-stat-val { font-size: 17px; color: #f3f7fb; }
+
+      /* Inventory cells */
+      #player-detail-panel .pdp-inv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      #player-detail-panel .pdp-inv-cell { background: #0d1625; border: 1px solid #21354d; padding: 8px 10px;
+        display: flex; flex-direction: column; gap: 4px; }
+      #player-detail-panel .pdp-inv-lbl { font-size: 11px; color: #8ca2b8; text-transform: uppercase; }
+      #player-detail-panel .pdp-inv-val { font-size: 20px; }
+
+      /* Adj rows */
+      #player-detail-panel .pdp-adj-row { display: flex; align-items: center; justify-content: space-between;
+        padding: 5px 0; border-bottom: 1px solid rgba(75,107,139,0.12); }
+      #player-detail-panel .pdp-adj-row:last-child { border-bottom: 0; }
+      #player-detail-panel .pdp-adj-label { font-size: 13px; min-width: 80px; }
+      #player-detail-panel .pdp-adj-btns { display: flex; gap: 4px; }
+      #player-detail-panel .pdp-adj-btn { background: #0d1625; color: #cde; border: 1px solid #335;
+        padding: 3px 10px; cursor: pointer; font-size: 13px; font-family: inherit; min-width: 36px; }
+      #player-detail-panel .pdp-adj-btn:hover { background: #152540; color: #fff; }
+      #player-detail-panel .pdp-adj-action { min-width: 72px; }
+
+      /* Craft buttons */
+      #player-detail-panel .pdp-craft-btns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      #player-detail-panel .pdp-craft-btn { background: #0d1625; border: 1px solid #335566; color: #c8e0f4;
+        padding: 10px 6px; cursor: pointer; font-size: 13px; font-family: inherit; text-align: center; line-height: 1.4; }
+      #player-detail-panel .pdp-craft-btn:hover:not([disabled]) { background: #152540; color: #fff; }
+      #player-detail-panel .pdp-craft-btn[disabled] { opacity: 0.4; cursor: default; }
+      #player-detail-panel .pdp-craft-cost { font-size: 11px; color: #7a99b8; }
+
+      /* KV rows */
+      #player-detail-panel .pdp-kv-list { display: flex; flex-direction: column; gap: 0; }
+      #player-detail-panel .pdp-kv-row { display: flex; justify-content: space-between; gap: 8px;
+        font-size: 13px; padding: 5px 0; border-bottom: 1px solid rgba(75,107,139,0.12); }
+      #player-detail-panel .pdp-kv-row:last-child { border-bottom: 0; }
+
+      #player-detail-panel .pdp-ki-modes { display: flex; gap: 6px; flex-wrap: wrap; }
+      #player-detail-panel .pdp-ki-mode { font-size: 12px; padding: 4px 10px; border-radius: 4px;
+        border: 1px solid rgba(75,107,139,0.3); background: rgba(20,30,50,0.6); color: #8899aa; }
+      #player-detail-panel .pdp-ki-mode.locked { opacity: 0.4; cursor: default; }
+      #player-detail-panel .pdp-ki-mode.selectable { cursor: pointer; color: #aaccee; }
+      #player-detail-panel .pdp-ki-mode.selectable:hover { background: rgba(40,60,100,0.6); border-color: #4488cc; }
+      #player-detail-panel .pdp-ki-mode.selectable.active { background: rgba(40,80,150,0.5);
+        border-color: #44aaff; color: #ffffff; box-shadow: 0 0 6px rgba(68,170,255,0.3); }
+
+      @media (max-width: 860px) {
+        #player-detail-panel .pdp-shell { width: calc(100vw - 16px); height: calc(100vh - 16px); }
+        #player-detail-panel .pdp-two-col { grid-template-columns: 1fr; }
       }
     `;
     document.head.appendChild(style);

@@ -1,0 +1,50 @@
+{
+  "id": "armor_elite",
+  "label": "Elite Armor",
+  "spriteSheet": "Armor_Elite.png",
+  "slot": "chest",
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "totalFrames": 55,
+  "namedFrames": {
+    "0": "face_down",
+    "1": "face_up",
+    "2": "face_right",
+    "3": "face_left",
+    "4": "walk_1_down",
+    "5": "walk_1_up",
+    "6": "walk_1_right",
+    "7": "walk_1_left",
+    "8": "stand_directional_down",
+    "9": "stand_directional_up",
+    "10": "stand_directional_right",
+    "11": "stand_directional_left",
+    "12": "walk_2_down",
+    "13": "walk_2_up",
+    "14": "walk_2_right",
+    "15": "walk_2_left",
+    "16": "meditate",
+    "18": "punch_sequence_2_right",
+    "19": "punch_sequence_2_left",
+    "20": "knocked_out_directional_down",
+    "50": "knocked_out_final",
+    "52": "knocked_out_directional_up",
+    "53": "knocked_out_directional_right"
+  },
+  "sourceTemplate": "baseplayer",
+  "recipe": {
+    "station": "anvil",
+    "ingredients": {
+      "bronze_bar": 25
+    },
+    "required_level": 5
+  },
+  "stats": {
+    "str_bonus": 10,
+    "def_bonus": 20,
+    "hp_bonus": 20,
+    "dmg_reduction_pct": 10
+  }
+}

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { MAP_COLS, MAP_ROWS, NRG_KEY, TILE_SIZE, worldToTile, CRATER_KEY } from '../constants.js';
+import { NRG_KEY, TILE_SIZE } from '../constants.js';
 
 export class CombatFxController {
   constructor(scene) {
@@ -7,19 +7,19 @@ export class CombatFxController {
   }
 
   getKiShotUpgrade(actor, stat) {
-    return Number(actor?.kiUpgrades?.ki_shot?.[stat] || 0);
+    return Number(actor?.kiBlastBonuses?.[stat] || 0);
   }
 
   getKiBlastRange(actor) {
-    return TILE_SIZE * 4 * (1 + this.getKiShotUpgrade(actor, 'range') * 0.01);
+    return TILE_SIZE * 4 * (1 + this.getKiShotUpgrade(actor, 'blast_range') * 0.01);
   }
 
   getKiBlastCooldownMs(actor) {
-    return Math.max(150, 1200 * (1 - this.getKiShotUpgrade(actor, 'cooldown') * 0.01));
+    return Math.max(150, 1200 * (1 - this.getKiShotUpgrade(actor, 'blast_cooldown') * 0.01));
   }
 
   getKiBlastProjectileSpeed(actor) {
-    return 400 * (1 + this.getKiShotUpgrade(actor, 'speed') * 0.01);
+    return 400 * (1 + this.getKiShotUpgrade(actor, 'blast_speed') * 0.01);
   }
 
   getKiBlastAimInfo(actor) {
@@ -39,17 +39,27 @@ export class CombatFxController {
     };
   }
 
+  getKiModeCostMult(mode) {
+    if (mode === 'scatter_shot') return 2;
+    if (mode === 'explosive_shot') return 3;
+    return 1;
+  }
+
   firePlayerKiBlast() {
     const scene = this.scene;
     const p = scene.player;
-    if (!p || scene._playerDead || p._knockedOut || p.meditating) return;
-    const shotMode = p.getEquippedKiAugment?.('ki_shot');
+    if (!p || scene._playerDead || p._knockedOut) return;
+
+    const mode = p.activeKiMode || 'ki_shot';
+    const costMult = this.getKiModeCostMult(mode);
 
     const now = Date.now();
-    const blastCooldown = this.getKiBlastCooldownMs(p);
+    const blastCooldown = this.getKiBlastCooldownMs(p) * (mode === 'explosive_shot' ? 1.5 : 1);
     if (scene._lastBlastTime && now - scene._lastBlastTime < blastCooldown) return;
 
-    if (!p.canBlast()) {
+    // Check ki cost (estimated — server is authoritative)
+    const estCost = (p.getBlastCost?.() ?? 3) * costMult;
+    if (!p.infKi && p.ki < estCost) {
       if (scene._pf_kiBar) {
         scene.tweens.add({
           targets: scene._pf_kiBar,
@@ -73,15 +83,6 @@ export class CombatFxController {
 
     const considerTarget = (candidate, type) => {
       if (!candidate) return;
-      if (shotMode === 'homing') {
-        const distance = Phaser.Math.Distance.Between(p.x, p.y, candidate.x, candidate.y);
-        if (distance > range || distance >= bestForward) return;
-        bestForward = distance;
-        target = candidate;
-        targetType = type;
-        targetSideOffset = 0;
-        return;
-      }
       const dx = candidate.x - p.x;
       const dy = candidate.y - p.y;
       const forward = dx * aim.dir.x + dy * aim.dir.y;
@@ -111,6 +112,12 @@ export class CombatFxController {
     for (const ktSprite of Object.values(scene._kiTargetSprites || {})) {
       considerTarget(ktSprite, 'ki_target');
     }
+    // Ground log piles can be ignited into campfires
+    for (const gi of Object.values(scene._groundItemSprites || {})) {
+      if (!gi._placed) continue;
+      if (gi.resource !== 'Wood' && gi.resource !== 'log') continue;
+      considerTarget(gi, 'ground_item');
+    }
 
     const dirFrames = { down: 0, up: 1, right: 2, left: 3 };
     const blastFrame = dirFrames[aim.facing] ?? 0;
@@ -124,12 +131,13 @@ export class CombatFxController {
 
     const conn = scene._conn;
     if (conn?.connected) {
+      const modeExtra = mode !== 'ki_shot' ? { blast_mode: mode } : {};
       if (target && targetType === 'player') {
-        conn.send({ type: 'ki_blast_player', target_id: target.playerId });
+        conn.send({ type: 'ki_blast_player', target_id: target.playerId, ...modeExtra });
       } else if (target && targetType === 'npc') {
-        conn.send({ type: 'ki_blast_npc', owner_id: target.ownerPid, npc_id: target.npcId });
+        conn.send({ type: 'ki_blast_npc', owner_id: target.ownerPid, npc_id: target.npcId, ...modeExtra });
       } else if (target && targetType === 'dummy') {
-        conn.send({ type: 'ki_blast_dummy', dummy_id: target._serverId });
+        conn.send({ type: 'ki_blast_dummy', dummy_id: target._serverId, ...modeExtra });
       } else if (target && targetType === 'ki_target') {
         let watchingNpcId = null;
         for (const npc of scene.npcs) {
@@ -138,44 +146,59 @@ export class CombatFxController {
             break;
           }
         }
-        conn.send({ type: 'ki_blast_ki_target', target_id: target._serverId, npc_id: watchingNpcId });
+        conn.send({ type: 'ki_blast_ki_target', target_id: target._serverId, npc_id: watchingNpcId, ...modeExtra });
+      } else if (target && targetType === 'ground_item') {
+        conn.send({ type: 'ki_blast_ground_item', item_id: target._serverId, ...modeExtra });
       } else {
-        conn.send({ type: 'ki_blast_miss' });
+        conn.send({ type: 'ki_blast_miss', ...modeExtra });
       }
     }
+
+    const isExplosive = mode === 'explosive_shot';
+    const impactRadius = isExplosive ? 40 : 18;
+    const tint = Number(p.auraTint ?? 0x4fd6ff);
+    if (isExplosive) proj.setScale(2.2);
+
+    // Helper: animate a single projectile to an end point
+    const animateProj = (sprite, endX, endY, miss = false) => {
+      const dist = Phaser.Math.Distance.Between(projX, projY, endX, endY);
+      scene.tweens.add({
+        targets: sprite,
+        x: endX, y: endY,
+        alpha: miss ? 0 : 1,
+        duration: Math.max(120, (dist / projectileSpeed) * 1000),
+        onComplete: () => {
+          this.showKiBlastImpact(endX, endY, tint, impactRadius, false);
+          sprite.destroy();
+        },
+      });
+    };
 
     if (target) {
       const variance = Phaser.Math.Clamp(targetSideOffset + Phaser.Math.FloatBetween(-TILE_SIZE * 0.2, TILE_SIZE * 0.2), -aim.spread, aim.spread);
       const targetProjX = target.x + aim.perp.x * variance;
       const targetProjY = target.y - (target.displayHeight || TILE_SIZE) * 0.4 + aim.perp.y * variance;
-      const impactPoint = this.getKiBlastImpactPoint(projX, projY, targetProjX, targetProjY, shotMode === 'explosive');
-      const travelDist = Phaser.Math.Distance.Between(projX, projY, impactPoint.x, impactPoint.y);
-      scene.tweens.add({
-        targets: proj,
-        x: impactPoint.x,
-        y: impactPoint.y,
-        duration: Math.max(120, (travelDist / projectileSpeed) * 1000),
-        onComplete: () => {
-          this.showKiBlastImpact(impactPoint.x, impactPoint.y, p.auraTint, shotMode === 'explosive' ? 28 : 18, shotMode === 'explosive');
-          proj.destroy();
-        },
-      });
+      const impactPoint = this.getKiBlastImpactPoint(projX, projY, targetProjX, targetProjY, false);
+      animateProj(proj, impactPoint.x, impactPoint.y);
     } else {
       const sideOffset = Phaser.Math.FloatBetween(-aim.spread, aim.spread);
       const intendedEndX = projX + aim.dir.x * range + aim.perp.x * sideOffset;
       const intendedEndY = projY + aim.dir.y * range + aim.perp.y * sideOffset;
-      const impactPoint = this.getKiBlastImpactPoint(projX, projY, intendedEndX, intendedEndY, shotMode === 'explosive');
-      scene.tweens.add({
-        targets: proj,
-        x: impactPoint.x,
-        y: impactPoint.y,
-        alpha: 0,
-        duration: Math.max(140, (range / projectileSpeed) * 1000),
-        onComplete: () => {
-          this.showKiBlastImpact(impactPoint.x, impactPoint.y, p.auraTint, shotMode === 'explosive' ? 28 : 18, shotMode === 'explosive');
-          proj.destroy();
-        },
-      });
+      const impactPoint = this.getKiBlastImpactPoint(projX, projY, intendedEndX, intendedEndY, false);
+      animateProj(proj, impactPoint.x, impactPoint.y, true);
+    }
+
+    // Scatter: fire two additional side projectiles
+    if (mode === 'scatter_shot') {
+      for (const sign of [-1, 1]) {
+        const sideProj = scene.add.sprite(projX, projY, NRG_KEY, blastFrame);
+        sideProj.setScale(1.2).setDepth(15).setTint(tint).setAlpha(0.8);
+        const spreadAngle = sign * TILE_SIZE * 1.8;
+        const endX = projX + aim.dir.x * range + aim.perp.x * spreadAngle;
+        const endY = projY + aim.dir.y * range + aim.perp.y * spreadAngle;
+        const ip = this.getKiBlastImpactPoint(projX, projY, endX, endY, false);
+        animateProj(sideProj, ip.x, ip.y, !target);
+      }
     }
   }
 
@@ -201,7 +224,7 @@ export class CombatFxController {
     return { x: startX + dx * scale, y: startY + dy * scale };
   }
 
-  showKiBlastImpact(worldX, worldY, tint = 0x44aaff, radius = 18, placeCrater = false) {
+  showKiBlastImpact(worldX, worldY, tint = 0x44aaff, radius = 18, _placeCrater = false) {
     const scene = this.scene;
     const flash = scene.add.circle(worldX, worldY, radius, Number(tint ?? 0x44aaff), 0.7).setDepth(16);
     scene.tweens.add({
@@ -212,7 +235,6 @@ export class CombatFxController {
       duration: 250,
       onComplete: () => flash.destroy(),
     });
-    if (placeCrater) this.placeTemporaryCrater(worldX, worldY);
   }
 
   handleReplicatedFxEvents(events) {
@@ -248,7 +270,7 @@ export class CombatFxController {
     const proj = scene.add.sprite(startX, startY, NRG_KEY, blastFrame);
     proj.setScale(1.5);
     proj.setDepth(15);
-    proj.setTint(Number(event.aura_tint ?? 0x4fd6ff));
+    proj.setTint(0x4fd6ff);
     const dist = Phaser.Math.Distance.Between(startX, startY, impactX, impactY);
     scene.tweens.add({
       targets: proj,
@@ -256,31 +278,10 @@ export class CombatFxController {
       y: impactY,
       duration: Math.max(120, (dist / 400) * 1000),
       onComplete: () => {
-        this.showKiBlastImpact(impactX, impactY, event.aura_tint, event.explosive ? 28 : 18, !!event.explosive);
+        this.showKiBlastImpact(impactX, impactY, 0x4fd6ff, 18, false);
         proj.destroy();
       },
     });
   }
 
-  placeTemporaryCrater(worldX, worldY) {
-    const scene = this.scene;
-    const { col, row } = worldToTile(worldX, worldY);
-    if (col < 0 || row < 0 || col >= MAP_COLS || row >= MAP_ROWS) return;
-    const tileKey = `${col},${row}`;
-    if (scene._kiBlastCraters.has(tileKey)) return;
-    const craterX = col * TILE_SIZE + TILE_SIZE / 2;
-    const craterY = row * TILE_SIZE + TILE_SIZE / 2;
-    const crater = scene.add.image(craterX, craterY, CRATER_KEY);
-    crater.setDisplaySize(TILE_SIZE, TILE_SIZE);
-    crater.setDepth(1.5);
-    crater.setAlpha(0.95);
-    scene._kiBlastCraters.set(tileKey, crater);
-    const lifetime = Phaser.Math.Between(30000, 60000);
-    scene.time.delayedCall(lifetime, () => {
-      const activeCrater = scene._kiBlastCraters.get(tileKey);
-      if (activeCrater !== crater) return;
-      scene._kiBlastCraters.delete(tileKey);
-      if (crater.active) crater.destroy();
-    });
-  }
 }

@@ -5,9 +5,10 @@ import { TILE_SIZE, tilePos } from '../constants.js';
 
 const IMPLEMENTED_KI_MOVES = [
   { id: 'ki_shot', label: 'Ki Shot' },
-  { id: 'charge', label: 'Charge' },
-  { id: 'sense_ki', label: 'Sense Ki' },
+  { id: 'scatter_shot', label: 'Scatter Shot' },
+  { id: 'explosive_shot', label: 'Explosive Shot' },
   { id: 'barrier', label: 'Barrier' },
+  { id: 'sense_ki', label: 'Sense Ki' },
 ];
 
 export class AdminPanelController {
@@ -62,26 +63,21 @@ export class AdminPanelController {
     const page = scene._adminPage || 1;
     const targetNpc = this.getAdminTargetNpc();
     const actor = this.getAdminTargetActor();
-    const infKiActive = !!actor?.infKi;
     const targetName = targetNpc ? targetNpc.getName() : 'Player';
     const items = [
       { label: '+10 Logs', action: () => this.sendAdmin('logs', 10) },
       { label: '+50 Logs', action: () => this.sendAdmin('logs', 50) },
       { label: '+10 Stone', action: () => this.sendAdmin('stones', 10) },
-      { label: '+10 Realm Crystals', action: () => this.sendAdmin('realm_crystal_t1', 10) },
+      { label: '+10 Copper', action: () => this.sendAdmin('copper', 10) },
+      { label: '+10 Crystals', action: () => this.sendAdmin('crystals', 10) },
+      { label: '+10 Seeds', action: () => this.sendAdmin('seeds', 10) },
       { label: 'Full HP', action: () => this.sendAdmin('full_hp', 0) },
       { label: '+5 Max HP', action: () => this.sendAdmin('maxHp', 5) },
       { label: 'Full Ki', action: () => this.sendAdmin('full_ki', 0) },
-      {
-        label: `${infKiActive ? 'Disable' : 'Enable'} Inf Ki (${targetName})`,
-        action: () => {
-          this.sendAdmin('inf_ki', 0);
-          this.renderAdminPanel();
-        },
-      },
       { label: '+5 Max Ki', action: () => this.sendAdmin('maxKi', 5) },
       { label: '+1 STR', action: () => this.sendAdmin('str', 1) },
       { label: '+1 DEF', action: () => this.sendAdmin('def', 1) },
+      { label: '+1 Ki Level', action: () => this.sendAdmin('ki_level', 1) },
       { label: 'Spawn NPC', action: () => this.adminSpawnNPC() },
       {
         label: targetNpc ? `Heal ${targetName}` : 'Heal NPCs',
@@ -98,10 +94,9 @@ export class AdminPanelController {
       },
       { label: 'Spawn Dummy', action: () => scene._conn.send({ type: 'build_dummy', logs: 20 }) },
       { label: 'Place Anvil', action: () => scene._placeAnvil() },
-      { label: 'Spawn Armor', action: () => scene._conn.send({ type: 'spawn_armor_elite' }) },
     ];
     const panelW = 240;
-    const page2Rows = 4 + IMPLEMENTED_KI_MOVES.length;
+    const page2Rows = 2 + IMPLEMENTED_KI_MOVES.length;
     const panelH = 38 + (page === 1 ? items.length : page2Rows) * 32 + 8;
     const px = W / 2 - panelW / 2;
     const py = H / 2 - panelH / 2;
@@ -155,14 +150,6 @@ export class AdminPanelController {
       };
 
       addLabel(`${targetName} Ki Admin`, '#ffffff');
-      const levelY = py + 38 + row * (btnH + 4);
-      const lvl = scene.addHud(scene.add.text(px + 14, levelY + btnH / 2, `Ki Lv ${actor?.kiSkillLevel ?? 1}   Realm ${actor?.realmTier ?? 0}`, {
-        fontSize: '13px', color: '#88ddff',
-      }).setDepth(62).setOrigin(0, 0.5));
-      els.push(lvl);
-      addMiniButton(px + panelW - 84, levelY + 2, '-', () => { this.sendAdmin('ki_skill_level', -1); this.renderAdminPanel(); });
-      addMiniButton(px + panelW - 48, levelY + 2, '+', () => { this.sendAdmin('ki_skill_level', 1); this.renderAdminPanel(); });
-      row += 1;
       addLabel(`Learned Moves: ${(actor?.kiMoves || []).length}`, '#7799aa');
       for (const move of IMPLEMENTED_KI_MOVES) {
         const by = py + 38 + row * (btnH + 4);
@@ -172,6 +159,13 @@ export class AdminPanelController {
         }).setDepth(62).setOrigin(0, 0.5));
         els.push(lbl);
         addMiniButton(px + panelW - 86, by + 2, learned ? 'Unlearn' : 'Learn', () => {
+          // Optimistic local update so UI reflects immediately
+          if (!actor.kiMoves) actor.kiMoves = [];
+          if (actor.kiMoves.includes(move.id)) {
+            actor.kiMoves = actor.kiMoves.filter(m => m !== move.id);
+          } else {
+            actor.kiMoves.push(move.id);
+          }
           this.sendAdmin('ki_move_toggle', 0, { move_id: move.id });
           this.renderAdminPanel();
         }, 72);

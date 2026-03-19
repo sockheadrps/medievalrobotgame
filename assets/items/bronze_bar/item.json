@@ -1,0 +1,14 @@
+{
+  "id": "bronze_bar",
+  "label": "Bronze bar",
+  "category": "resource",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 45,
+    "tileRow": 17
+  },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#cccccc",
+  "description": ""
+}

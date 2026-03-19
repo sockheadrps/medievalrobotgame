@@ -25,6 +25,8 @@ go fight him → combat
 defend me → combat
 train on the dummy → combat
 practice fighting → combat
+practice ki → combat
+train ki blasts → combat
 follow me → follow
 come here → follow
 just stand there → idle

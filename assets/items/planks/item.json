@@ -1,0 +1,14 @@
+{
+  "id": "planks",
+  "label": "Planks",
+  "category": "resource",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 52,
+    "tileRow": 23
+  },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#cccccc",
+  "description": ""
+}

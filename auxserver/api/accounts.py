@@ -7,7 +7,7 @@ from core.config import DEV_MODE, MODEL, NUM_CTX
 from services.accounts import (
     player_exists, load_player, create_player, list_players,
     register_player, authenticate_player, update_llm_model,
-    get_setting,
+    get_setting, reset_game,
 )
 
 router = APIRouter()
@@ -90,6 +90,21 @@ async def game_config():
         "forced_model": MODEL if DEV_MODE else None,
         "num_ctx": NUM_CTX if DEV_MODE else None,
     }
+
+
+@router.post("/reset_game")
+async def do_reset_game():
+    """Wipe all world state and player stats. Keeps accounts."""
+    from services.game_state import game
+    from services.ai_player import ai_player
+
+    # Reset DB
+    reset_game()
+    # Reset in-memory game state
+    game.reset()
+    # Re-spawn AI rival fresh
+    ai_player.reset()
+    return {"ok": True}
 
 
 @router.get("/players")

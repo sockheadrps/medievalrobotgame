@@ -1,0 +1,14 @@
+{
+  "id": "wood",
+  "label": "Wood",
+  "category": "resource",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 53,
+    "tileRow": 22
+  },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#cccccc",
+  "description": ""
+}

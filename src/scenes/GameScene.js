@@ -17,13 +17,18 @@ import { WorldSyncController } from '../systems/WorldSyncController.js';
 import { DialogueController } from '../systems/DialogueController.js';
 import { TrainingDummy } from '../entities/TrainingDummy.js';
 import { RemoteNPC }    from '../entities/RemoteNPC.js';
-import { Fence }        from '../entities/Fence.js';
 import { Connection }   from '../net/Connection.js';
 import { NPCDetailPanel } from '../ui/NPCDetailPanel.js';
 import { PlayerDetailPanel } from '../ui/PlayerDetailPanel.js';
 import { HudController } from '../ui/HudController.js';
 import { AdminPanelController } from '../ui/AdminPanelController.js';
 import { InventoryController } from '../ui/InventoryController.js';
+import { InspectPanel } from '../ui/InspectPanel.js';
+import { DriveIndicator } from '../ui/DriveIndicator.js';
+import { PlacementSystem } from '../systems/PlacementSystem.js';
+import { TaskRecorder } from '../systems/TaskRecorder.js';
+import { Crate } from '../entities/Crate.js';
+import { Furnace } from '../entities/Furnace.js';
 import {
   TILE_SIZE, MAP_COLS, MAP_ROWS,
   SHEET_KEY, SHEET_PATH, SHEET_TILE, SHEET_SPACING,
@@ -31,16 +36,12 @@ import {
   NPC_KEY, NPC_PATH, NPC_FRAME_W, NPC_FRAME_H,
   INTERACT_DIST, tilePos,
   LOG1_KEY, LOG1_PATH, LOG2_KEY, LOG2_PATH, LOG3_KEY, LOG3_PATH,
-  FIRE_KEY, FIRE_PATH, FIRE_JSON_PATH, FIRE_FRAME_W, FIRE_FRAME_H, CRATER_KEY, CRATER_PATH,
-  ARMOR_ELITE_KEY, ARMOR_ELITE_PATH, ARMOR_ELITE_META_KEY, ARMOR_ELITE_META_PATH,
-  ARMOR_ELITE_FRAME_W, ARMOR_ELITE_FRAME_H,
-  AURA_KEY, AURA_PATH, AURA_FRAME_W, AURA_FRAME_H, BARRIER_KEY, BARRIER_PATH, BARRIER_FRAME_W, BARRIER_FRAME_H,
-  FRAME_FENCE_T1, FRAME_FENCE_T2, FRAME_FENCE_T3, FRAME_GATE,
+  BARRIER_KEY, BARRIER_PATH, BARRIER_FRAME_W, BARRIER_FRAME_H,
   FRAME_ROCK, FRAME_ANVIL, FRAME_CRYSTAL,
   NRG_KEY, NRG_PATH, NRG_FRAME_W, NRG_FRAME_H,
+  FIRE_KEY, FIRE_PATH, FIRE_FRAME_W, FIRE_FRAME_H,
   KI_MAX_BASE, KI_REGEN_MS, KI_BLAST_BASE_COST, KI_BLAST_BASE_DMG, KI_BLAST_SCALE,
-  CHARGE_STR_BONUS, CHARGE_DEF_BONUS,
-  KI_SKILL_MEDITATE_UNLOCK_LEVEL, MEDITATION_POOR_MS, MEDITATION_NORMAL_MS, MEDITATION_PRISTINE_MS,
+  DINOBIRD_KEY, DINOBIRD_PATH, DINOBIRD_FRAME_W, DINOBIRD_FRAME_H,
   worldToTile,
 } from '../constants.js';
 
@@ -54,10 +55,6 @@ const TARGET_FRAME_RELATIVE_TO_PLAYER = 1.2;
 const TOP_HUD_MARGIN = Math.round(190 * HUD_SCALE);
 const RIGHT_HUD_MARGIN = 360;
 const HOTBAR_SLOT_COUNT = 6;
-const KI_TIER_MOVES = [
-  { tier: 1, moves: [{ id: 'ki_shot', label: 'Ki Shot' }, { id: 'charge', label: 'Charge' }, { id: 'sense_ki', label: 'Sense Ki' }] },
-  { tier: 2, moves: [{ id: 'barrier', label: 'Barrier' }] },
-];
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -86,28 +83,26 @@ export default class GameScene extends Phaser.Scene {
     this.load.image(LOG1_KEY, LOG1_PATH);
     this.load.image(LOG2_KEY, LOG2_PATH);
     this.load.image(LOG3_KEY, LOG3_PATH);
-    this.load.image(CRATER_KEY, CRATER_PATH);
-    this.load.json(`${FIRE_KEY}_meta`, FIRE_JSON_PATH);
-    this.load.spritesheet(FIRE_KEY, FIRE_PATH, {
-      frameWidth: FIRE_FRAME_W,
-      frameHeight: FIRE_FRAME_H,
-    });
-    this.load.json(ARMOR_ELITE_META_KEY, ARMOR_ELITE_META_PATH);
-    this.load.spritesheet(ARMOR_ELITE_KEY, ARMOR_ELITE_PATH, {
-      frameWidth: ARMOR_ELITE_FRAME_W,
-      frameHeight: ARMOR_ELITE_FRAME_H,
-    });
     this.load.spritesheet(NRG_KEY, NRG_PATH, {
       frameWidth: NRG_FRAME_W,
       frameHeight: NRG_FRAME_H,
     });
-    this.load.spritesheet(AURA_KEY, AURA_PATH, {
-      frameWidth: AURA_FRAME_W,
-      frameHeight: AURA_FRAME_H,
-    });
     this.load.spritesheet(BARRIER_KEY, BARRIER_PATH, {
       frameWidth: BARRIER_FRAME_W,
       frameHeight: BARRIER_FRAME_H,
+    });
+    this.load.spritesheet(FIRE_KEY, FIRE_PATH, {
+      frameWidth: FIRE_FRAME_W,
+      frameHeight: FIRE_FRAME_H,
+    });
+    this.load.spritesheet(DINOBIRD_KEY, DINOBIRD_PATH, {
+      frameWidth:  DINOBIRD_FRAME_W,
+      frameHeight: DINOBIRD_FRAME_H,
+    });
+    // Equipment spritesheets (loaded from assets/overplayer/)
+    this.load.spritesheet('equip_armor_elite', 'assets/overplayer/Armor_Elite.png', {
+      frameWidth: 32,
+      frameHeight: 32,
     });
   }
 
@@ -122,18 +117,17 @@ export default class GameScene extends Phaser.Scene {
     this.groundItems = [];
     this.npcs        = [];
     this.dummies     = [];
-    this._rockSprites = {}; // rock_id -> Rock entity
-    this._kiBlastCraters = new Map(); // "col,row" -> crater sprite
+    this._rockSprites   = {}; // rock_id -> Rock entity
+    this._animalSprites = {}; // animal_id -> AnimalSprite
     this.selectedNPC = null;
     this._focusedRemote = null;  // selected remote entity for chat/inspect
     this._armedAction = null;    // explicit click-to-act mode, e.g. attack
     this._playerKnockedOut = false;
     this._contextMenuEls = null;
     this._contextMenuBounds = null;
+    this._buildingContextBounds = null;
     this._overhearInterjectCooldowns = {};
     this._remotePlayers = {};
-    this._activeMeditationRealmActorKey = null;
-    this._suppressMeditationRealmActorKey = null;
     this._sensePanelTab = 'others';
     this._sensePanelElements = [];
     this._sensePanelRows = [];
@@ -159,6 +153,25 @@ export default class GameScene extends Phaser.Scene {
 
     // Tilemap — load from server, fallback to procedural
     this.grid = new GridSystem();
+    this._conveyors = [];
+    this._crates = [];
+    this._furnaces = [];
+    this._logCutters = [];
+    this._tracks = [];
+    this._minecartExitTiles = [];
+    this._buildingSprites = {};
+    this._placement = new PlacementSystem(this, this.grid, this._conveyors);
+    this._taskRecorder = new TaskRecorder(this);
+
+    // Right-click on buildings → context menu to remove
+    this.events.on('object-right-clicked', ({ type, obj, ptr }) => {
+      if (type === 'conveyor' || type === 'crate' || type === 'furnace' || type === 'log_cutter' || type === 'track') {
+        const bid = obj._serverId;
+        if (!bid) return;
+        ptr._fgHandled = true;
+        this._openBuildingContextMenu(bid, type, ptr, obj);
+      }
+    });
     this._loadMap();
 
     // Player — will be repositioned by server
@@ -171,9 +184,6 @@ export default class GameScene extends Phaser.Scene {
     // Track dummy visuals by server ID
     this._dummySprites = {};
 
-    // Track fence/gate visuals by server ID
-    this._fenceSprites = {};
-
     // Recent threats — entities that attacked our player or NPCs (key → timestamp)
     // key format: 'player:id' or 'npc:ownerPid_npcId'
     this._recentThreats = {};
@@ -183,6 +193,16 @@ export default class GameScene extends Phaser.Scene {
 
     // Track anvil visuals by server ID
     this._anvilSprites = {};
+
+    // Track campfire visuals by server ID
+    this._campfireSprites = {};
+
+    // Track world object visuals by server ID
+    this._worldObjSprites = {};
+
+    // Asset manifest (fetched once at startup)
+    this._assetManifest = null;
+    this._fetchAssetManifest();
 
     // Camera
     const cam = this.cameras.main;
@@ -286,19 +306,19 @@ export default class GameScene extends Phaser.Scene {
       }
       if (this._hotbarPickerSlot != null) this._closeHotbarPicker();
       if (this._isPointerOverContextMenu(ptr)) return;
+      // Check if click is inside building context menu
+      if (this._buildingContextBounds) {
+        const b = this._buildingContextBounds;
+        if (ptr.x >= b.x && ptr.x <= b.x + b.width && ptr.y >= b.y && ptr.y <= b.y + b.height) return;
+        this._closeBuildingContextMenu();
+      }
       if (!this._isPointerInWorldViewport(ptr)) {
         if (ptr.rightButtonDown() || ptr.button === 2) this._closeContextMenu();
         return;
       }
       const isRightClick = ptr.rightButtonDown() || ptr.button === 2;
-      if (!isRightClick && this._isCarryingSomeone()) {
-        this._closeContextMenu();
-        this._conn?.send({ type: 'drop_carried' });
-        return;
-      }
       const npc = this._findNpcAtPointer(ptr);
       const remoteEntity = !npc ? this._findRemoteEntityAtPointer(ptr) : null;
-      const carriedEntity = !npc && !remoteEntity && isRightClick ? this._getCarriedEntityByPlayer() : null;
 
       if (npc) {
         this._handleOwnNPCPointerDown(npc, ptr);
@@ -311,17 +331,18 @@ export default class GameScene extends Phaser.Scene {
         return;
       }
 
-      if (carriedEntity && isRightClick) {
-        if (carriedEntity.soul) this._selectNPC(carriedEntity);
-        else this._selectRemote(carriedEntity);
-        this._openContextMenu(carriedEntity, ptr);
-        return;
-      }
-
       if (remoteEntity && this._armedAction === 'attack' && !isRightClick) {
         ptr._fgHandled = true;
         if (this._isAttackableEntity(remoteEntity)) this._executeAttack(remoteEntity);
-        this._disarmActionMode();
+        // Stay in attack mode so player can keep clicking to attack
+        return;
+      }
+
+      if (this._armedAction === 'plant_seed' && !isRightClick) {
+        const worldX = ptr.worldX;
+        const worldY = ptr.worldY;
+        this._conn?.send({ type: 'plant_seed', x: worldX, y: worldY });
+        // Keep armed so player can keep clicking multiple soil tiles
         return;
       }
 
@@ -366,9 +387,13 @@ export default class GameScene extends Phaser.Scene {
     this._taskRunners = new Map();
     this._npcBrains   = new Map();
 
+    // Drive indicator (world-space bars above selected NPC)
+    this._driveIndicator = new DriveIndicator(this);
+
     // Detail panel overlay
     this._npcDetailPanel = new NPCDetailPanel(this);
     this._playerDetailPanel = new PlayerDetailPanel(this);
+    this._inspectPanel = new InspectPanel(this);
 
     // Player ID — set by server on connect
     this.playerId = 'default';
@@ -481,12 +506,48 @@ export default class GameScene extends Phaser.Scene {
     this._escMenuEls = null;
     this.input.keyboard.on('keydown-ESC', () => {
       if (this.chatBox?.isOpen() || this._namingNPC) return;
+      if (this._storageOpen) { this._closeStorageUI(); return; }
       if (this._charMenuOpen) { this._closeCharMenu(); return; }
       if (this._inventoryOpen) { this._closeInventory(); return; }
       if (this._contextMenuEls) { this._closeContextMenu(); return; }
+      if (this._buildingContextEls) { this._closeBuildingContextMenu(); return; }
       if (this._armedAction) { this._disarmActionMode(); return; }
       if (this.selectedNPC || this._focusedRemote) { this._clearSelection(); return; }
       this._toggleEscMenu();
+    });
+
+    // E key — interact with nearby crate / furnace
+    this.input.keyboard.on('keydown-E', () => {
+      if (this.chatBox?.isOpen() || this._namingNPC || this._playerDead) return;
+
+      // If storage panel is open, close it
+      if (this._storageOpen) { this._closeStorageUI(); return; }
+
+      const px = this.player.x, py = this.player.y;
+
+      // Check crates
+      for (const crate of this._crates) {
+        if (crate.updateProximity(px, py)) {
+          this._openCrateUI(crate);
+          return;
+        }
+      }
+
+      // Check furnaces
+      for (const furnace of this._furnaces) {
+        if (furnace.updateProximity(px, py)) {
+          this._openFurnaceUI(furnace);
+          return;
+        }
+      }
+
+      // Check log cutters
+      for (const lc of this._logCutters) {
+        if (lc.updateProximity(px, py)) {
+          this._openLogCutterUI(lc);
+          return;
+        }
+      }
     });
 
     // Auto-save NPCs
@@ -501,6 +562,13 @@ export default class GameScene extends Phaser.Scene {
       delay: 100,
       loop: true,
       callback: () => this._syncNPCsToServer(),
+    });
+
+    // Sync building stored contents to server every 5s
+    this.time.addEvent({
+      delay: 5000,
+      loop: true,
+      callback: () => this._syncBuildingStored(),
     });
 
     // Remote NPCs (other players' NPCs) — keyed by "ownerPid_npcId"
@@ -521,35 +589,22 @@ export default class GameScene extends Phaser.Scene {
         this.player.y = me.y;
         this.player.logs = me.logs ?? 0;
         this.player.stones = me.stones ?? 0;
-        this.player.bastalite = me.bastalite ?? 0;
-        this.player.crystalPristine = me.crystal_pristine ?? 0;
-        this.player.crystalNormal = me.crystal_normal ?? 0;
-        this.player.crystalPoor = me.crystal_poor ?? 0;
-        this.player.setArmorElite?.(!!me.armor_elite);
-        this.player.armorEliteInv = !!me.armor_elite_inv;
+        this.player.crystals = me.crystals ?? this.player.crystals ?? 0;
+        this.player.meat = me.meat ?? 0;
+        this.player.feathers = me.feathers ?? 0;
+        this.player.vegetables = me.vegetables ?? 0;
+        this.player.seeds = me.seeds ?? 0;
         this.player.hp = me.hp ?? this.player.hp;
         this.player.maxHp = me.maxHp ?? this.player.maxHp;
         this.player.ki = me.ki ?? this.player.ki;
         this.player.maxKi = me.maxKi ?? this.player.maxKi;
         this.player.infKi = !!me.inf_ki;
         this.player.blastLevel = me.blastLevel ?? this.player.blastLevel;
-        this.player.auraTint = me.aura_tint ?? this.player.auraTint;
-        this.player.auraAlpha = me.aura_alpha ?? this.player.auraAlpha;
-        this.player.kiSkillLevel = me.kiSkillLevel ?? this.player.kiSkillLevel;
-        this.player.kiSkillXp = me.kiSkillXp ?? this.player.kiSkillXp;
-        this.player.realmTier = me.realm_tier ?? me.realmTier ?? this.player.realmTier;
-        this.player.realmCrystalT1 = me.realm_crystal_t1 ?? this.player.realmCrystalT1 ?? 0;
-        this.player.kiUpgrades = (me.ki_upgrades && typeof me.ki_upgrades === 'object') ? { ...me.ki_upgrades } : (this.player.kiUpgrades || {});
-        this.player.kiMoves = Array.isArray(me.ki_moves) ? [...me.ki_moves] : (this.player.kiMoves || []);
-        this.player.kiDenominations = Array.isArray(me.ki_denominations) ? [...me.ki_denominations] : (this.player.kiDenominations || []);
-        this.player.kiKnownAugments = (me.ki_known_augments && typeof me.ki_known_augments === 'object') ? { ...me.ki_known_augments } : (this.player.kiKnownAugments || {});
-        this.player.kiEquippedAugments = (me.ki_equipped_augments && typeof me.ki_equipped_augments === 'object') ? { ...me.ki_equipped_augments } : (this.player.kiEquippedAugments || {});
+        this.player.kiBlastBonuses = (me.ki_blast_bonuses && typeof me.ki_blast_bonuses === 'object') ? { ...me.ki_blast_bonuses } : (this.player.kiBlastBonuses || {});
         this.player.str = me.str ?? this.player.str;
         this.player.def = me.def ?? this.player.def;
         this.player.level = me.level ?? this.player.level;
         this.player.xp = me.xp ?? this.player.xp;
-        this.player.setMeditationState?.(me);
-        this.player.setChargeState?.(me);
         this.player.barrierProcUntil = Number(me.barrier_proc_until || 0);
         this.player.barrierProcFacing = me.barrier_proc_facing || this.player.barrierProcFacing || 'down';
         this.player._knockedOut = !!me.knocked_out;
@@ -567,6 +622,10 @@ export default class GameScene extends Phaser.Scene {
 
       // Sync rocks from server snapshot
       this._syncRocks(data.rocks || []);
+
+      // Sync animals from server snapshot
+      this._syncAnimals(data.animals || []);
+      this._syncCrops(data.crops || []);
 
       // Load saved NPCs
       const savedNpcIds = data.npc_ids || [];
@@ -593,14 +652,12 @@ export default class GameScene extends Phaser.Scene {
       this._handleChatReply(data);
     };
 
-    this.input.keyboard?.on('keydown-V', () => this._toggleClairvoyance());
-
     this._conn.connect();
   }
 
   update(time, delta) {
     // ── Send input to server + client-side prediction ─────────────────────────
-    if (this._conn.connected && !this.chatBox?.isOpen() && !this.player._punching && !this.player.meditating && !this._namingNPC && !this._playerDead && !this._playerKnockedOut && !this._escMenuOpen && !this._inventoryOpen && !this._charMenuOpen) {
+    if (this._conn.connected && !this.chatBox?.isOpen() && !this.player._punching && !this._namingNPC && !this._playerDead && !this._playerKnockedOut && !this._escMenuOpen && !this._inventoryOpen && !this._charMenuOpen) {
       const keys = this.player._keys;
       let dx = 0, dy = 0;
       if (keys.left.isDown)  dx -= 1;
@@ -619,8 +676,8 @@ export default class GameScene extends Phaser.Scene {
         this.player.x += mx * speed * dt;
         this.player.y += my * speed * dt;
         // Clamp to world bounds
-        const worldW = MAP_COLS * TILE_SIZE;
-        const worldH = MAP_ROWS * TILE_SIZE;
+        const worldW = this._mapCols * TILE_SIZE;
+        const worldH = this._mapRows * TILE_SIZE;
         this.player.x = Math.max(0, Math.min(worldW, this.player.x));
         this.player.y = Math.max(0, Math.min(worldH, this.player.y));
       }
@@ -633,6 +690,8 @@ export default class GameScene extends Phaser.Scene {
 
     // Update NPCs + task runners + brains (client-side)
     for (const npc of this.npcs) {
+      // Skip NPCs on a different map (they're running as background workers)
+      if (npc._map && npc._map !== this._currentMap) continue;
       npc.update(delta);
       if (npc.isKnockedOut?.()) continue;
       const runner = this._taskRunners.get(npc.id);
@@ -640,6 +699,9 @@ export default class GameScene extends Phaser.Scene {
       const brain = this._npcBrains.get(npc.id);
       if (brain) brain.update(delta);
     }
+
+    // Update drive indicator for selected NPC
+    this._driveIndicator?.update();
 
     // Check emotion-driven reactions for each NPC
     for (const npc of this.npcs) {
@@ -689,7 +751,6 @@ export default class GameScene extends Phaser.Scene {
 
     // Update player unit frame
     this._updatePlayerFrame();
-    this._updateClairvoyanceCamera();
 
     // Update target unit frame
     this._updateTargetFrame();
@@ -699,6 +760,23 @@ export default class GameScene extends Phaser.Scene {
 
     // Update hotbar counts
     this._updateHotbar();
+
+    // Update crate proximity labels
+    for (const crate of this._crates) {
+      crate.updateProximity(this.player.x, this.player.y);
+    }
+
+    // Update furnace proximity + push bars to conveyors
+    for (const furnace of this._furnaces) {
+      furnace.updateProximity(this.player.x, this.player.y);
+      furnace.tick();
+    }
+
+    // Update log cutter proximity + push planks to tracks
+    for (const lc of this._logCutters) {
+      lc.updateProximity(this.player.x, this.player.y);
+      lc.tick();
+    }
 
     const npcCost = this._npcBuildCost();
     const canBuild = this.player.logs >= npcCost;
@@ -731,56 +809,98 @@ export default class GameScene extends Phaser.Scene {
     return this._worldSync.syncGroundItems(serverItems);
   }
 
-  _isCampfireLog(item) {
-    return this._worldSync.isCampfireLog(item);
-  }
-
-  _isCampfireStone(item) {
-    return this._worldSync.isCampfireStone(item);
-  }
-
-  _groundItemTile(item) {
-    return this._worldSync.groundItemTile(item);
-  }
-
-  _canLightCampfire(item) {
-    return this._worldSync.canLightCampfire(item);
-  }
-
-  _tryLightCampfire(item, npc = null) {
-    return this._worldSync.tryLightCampfire(item, npc);
-  }
-
-  _tryUseKiShrine(item, npc = null) {
-    return this._worldSync.tryUseKiShrine(item, npc);
-  }
-
-  _getLitCampfires() {
-    return this._worldSync.getLitCampfires();
-  }
-
-  _findNearestLitCampfire(x, y, maxTiles = Infinity) {
-    return this._worldSync.findNearestLitCampfire(x, y, maxTiles);
-  }
-
   _syncDummies(serverDummies) {
     return this._worldSync.syncDummies(serverDummies);
-  }
-
-  _syncFences(serverFences) {
-    return this._worldSync.syncFences(serverFences);
-  }
-
-  // ── Ki Target sync ──────────────────────────────────────────────────────────
-
-  _syncKiTargets(serverKiTargets) {
-    return this._worldSync.syncKiTargets(serverKiTargets);
   }
 
   // ── Anvil sync ────────────────────────────────────────────────────────────
 
   _syncAnvils(serverAnvils) {
     return this._worldSync.syncAnvils(serverAnvils);
+  }
+
+  _syncCampfires(serverCampfires) {
+    return this._worldSync.syncCampfires(serverCampfires);
+  }
+
+  _syncAnimals(serverAnimals) {
+    return this._worldSync.syncAnimals(serverAnimals);
+  }
+
+  _syncCrops(serverCrops) {
+    return this._worldSync.syncCrops(serverCrops);
+  }
+
+  _syncWorldObjects(serverWorldObjects) {
+    return this._worldSync.syncWorldObjects(serverWorldObjects);
+  }
+
+  _syncBuildings(serverBuildings) {
+    return this._worldSync.syncBuildings(serverBuildings);
+  }
+
+  _spawnPendingCarts(carts) {
+    if (!carts || carts.length === 0) return;
+    for (const c of carts) {
+      // Find a track at the entrance position
+      const track = this._tracks.find(t => t.col === c.col && t.row === c.row && !t.hasCart());
+      if (track) {
+        track.spawnCart(c.resource, c.amount);
+      }
+    }
+  }
+
+  _addMinecartMarker(col, row, color) {
+    if (!this._minecartMarkers) this._minecartMarkers = [];
+    const x = col * TILE_SIZE + TILE_SIZE / 2;
+    const y = row * TILE_SIZE + TILE_SIZE / 2;
+    const rect = this.add.rectangle(x, y, TILE_SIZE, TILE_SIZE, color, 0.35).setDepth(0.5);
+    const label = this.add.text(x, y - 6, color === 0x3366ff ? 'ENTRANCE' : 'EXIT', {
+      fontSize: '8px', color: '#ffffff', fontStyle: 'bold',
+      backgroundColor: '#00000088', padding: { x: 2, y: 1 },
+    }).setOrigin(0.5, 0.5).setDepth(0.6);
+    this._minecartMarkers.push(rect, label);
+  }
+
+  _clearMinecartMarkers() {
+    if (this._minecartMarkers) {
+      for (const m of this._minecartMarkers) m.destroy();
+    }
+    this._minecartMarkers = [];
+  }
+
+  _syncBuildingStored() {
+    if (!this._conn?.connected) return;
+    for (const [bid, entity] of Object.entries(this._buildingSprites)) {
+      if (typeof entity.getStored !== 'function') continue;
+      const stored = entity.getStored();
+      const hasItems = Object.values(stored).some(v => v > 0);
+      if (hasItems) {
+        this._conn.send({ type: 'update_building_stored', building_id: bid, stored });
+      }
+    }
+  }
+
+  async _fetchAssetManifest() {
+    try {
+      const resp = await fetch(`${API_BASE}/api/asset-manifest`);
+      this._assetManifest = await resp.json();
+      // Build equipment texture key → remap table lookup
+      this._equipmentTextures = {};
+      for (const [eqId, eqDef] of Object.entries(this._assetManifest?.equipment || {})) {
+        // Convert string keys to numbers in remap table
+        const remap = {};
+        for (const [k, v] of Object.entries(eqDef.frameRemap || {})) {
+          remap[Number(k)] = Number(v);
+        }
+        this._equipmentTextures[eqId] = {
+          textureKey: `equip_${eqId}`,
+          remap,
+        };
+      }
+    } catch (e) {
+      console.warn('[GameScene] Failed to fetch asset manifest:', e);
+    }
   }
 
   _tryRefineAtAnvil(anvilId, ax, ay) {
@@ -791,141 +911,8 @@ export default class GameScene extends Phaser.Scene {
     return this._worldSync.handleRefineResult(result);
   }
 
-  _handleMeditationResult(result) {
-    return this._worldSync.handleMeditationResult(result);
-  }
-
-  _formatKiMoveLabel(moveId) {
-    for (const tier of KI_TIER_MOVES) {
-      const found = tier.moves.find((move) => move.id === moveId);
-      if (found) return found.label;
-    }
-    return String(moveId || '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
-  }
-
-  _formatKiUpgradeStat(moveId, statId) {
-    const labels = {
-      ki_shot: { range: 'range', cooldown: 'cooldown', speed: 'speed', damage: 'damage' },
-      charge: { ceiling: 'charge ceiling', decay: 'decay reduction', speed: 'charge speed' },
-      barrier: { physical_block: 'physical block', ki_block: 'ki block' },
-      sense_ki: { range_pct: 'sense range', level_delta: 'level gap read' },
-    };
-    return labels[moveId]?.[statId] || this._formatKiMoveLabel(statId);
-  }
-
-  _getSenseRangeLevel(actor) {
-    const known = new Set(actor?.kiKnownAugments?.sense_ki || []);
-    let level = 0;
-    if (known.has('sense_1')) level += 1;
-    if (known.has('sense_2')) level += 1;
-    if (known.has('sense_3')) level += 1;
-    if (level <= 0) {
-      level = Phaser.Math.Clamp(Number(actor?.kiUpgrades?.sense_ki?.range || 0), 0, 3);
-    }
-    return level;
-  }
-
-  _getActorSenseInfo(actor) {
-    const upgrades = actor?.kiUpgrades || {};
-    const rangeLevel = this._getSenseRangeLevel(actor);
-    const rangePct = Number(upgrades?.sense_ki?.range_pct || 0);
-    const deltaBonus = Number(upgrades?.sense_ki?.level_delta || 0);
-    const senseTiles = [8, 16, 24, 32][rangeLevel] || 8;
-    return {
-      range: TILE_SIZE * senseTiles * (1 + rangePct * 0.01),
-      maxDelta: 10 + deltaBonus,
-    };
-  }
-
-  _canSenseTargetDetails(observer, target) {
-    if (!observer || !target) return false;
-    const info = this._getActorSenseInfo(observer);
-    const distance = Phaser.Math.Distance.Between(observer.x, observer.y, target.x, target.y);
-    if (distance > info.range) return false;
-    const targetLevel = target.level ?? target._level ?? 1;
-    const observerLevel = observer.level ?? 1;
-    return (targetLevel - observerLevel) <= info.maxDelta;
-  }
-
-  _canRevealTargetName(observer, target) {
-    if (!observer || !target) return false;
-    if (!observer.hasKiMove?.('sense_ki')) return false;
-    if (!observer.hasKiAugment?.('sense_ki', 'reveal_name')) return false;
-    const info = this._getActorSenseInfo(observer);
-    return Phaser.Math.Distance.Between(observer.x, observer.y, target.x, target.y) <= info.range;
-  }
-
-  _toggleClairvoyance() {
-    const p = this.player;
-    const target = this._focusedRemote;
-    if (!p || !this._conn?.connected) return;
-    if (p.getEquippedKiAugment?.('sense_ki') !== 'clairvoyance') return;
-    if (p.clairvoyanceActive) {
-      this._conn.send({
-        type: 'toggle_clairvoyance',
-        target_type: null,
-        target_owner: null,
-        target_id: null,
-      });
-      return;
-    }
-    if (!target || (!target.playerId && !target.ownerPid)) return;
-    this._conn.send({
-      type: 'toggle_clairvoyance',
-      target_type: target.playerId ? 'player' : 'npc',
-      target_owner: target.ownerPid || null,
-      target_id: target.playerId || target.npcId || null,
-    });
-  }
-
-  _resolveClairvoyanceTarget() {
-    const p = this.player;
-    if (!p?.clairvoyanceActive) return null;
-    if (p.clairvoyanceTargetType === 'player') {
-      return this._remotePlayers?.[p.clairvoyanceTargetId] || null;
-    }
-    if (p.clairvoyanceTargetType === 'npc') {
-      return this._remoteNPCSprites?.[`${p.clairvoyanceTargetOwner}_${p.clairvoyanceTargetId}`] || null;
-    }
-    return null;
-  }
-
-  _updateClairvoyanceCamera() {
-    const cam = this.cameras.main;
-    const target = this._resolveClairvoyanceTarget();
-    if (target) {
-      if (cam._clairvoyanceTarget !== target) {
-        cam.startFollow(target, true, 0.12, 0.12);
-        cam._clairvoyanceTarget = target;
-      }
-      return;
-    }
-    if (cam._clairvoyanceTarget) {
-      cam.startFollow(this.player, true, 0.1, 0.1);
-      cam._clairvoyanceTarget = null;
-    }
-  }
-
-  _handleShrineResult(result) {
-    if (!result) return;
-    const who = !result.who || result.who === this.playerId ? 'You' : result.who;
-    if (!result.success) {
-      this.chatBox?._addLog(`${who}: ${result.reason || 'The shrine did nothing.'}`, '#99bbcc');
-      return;
-    }
-    const detail = `${this._formatKiUpgradeStat(result.move, result.stat)} +1 (${result.value} total)`;
-    this.chatBox?._addLog(
-      `${who}: ${this._formatKiMoveLabel(result.move)} ${detail}.`,
-      '#88ffcc'
-    );
-  }
-
-  _syncMeditationRealmScene() {
-    return this._worldSync.syncMeditationRealmScene();
-  }
-
-  _handleKiTargetResult(result) {
-    return this._worldSync.handleKiTargetResult(result);
+  _handleCrystalResult(result) {
+    return this._worldSync.handleCrystalResult(result);
   }
 
   /**
@@ -1051,11 +1038,13 @@ export default class GameScene extends Phaser.Scene {
 
   async _loadMap() {
     try {
-      const res = await fetch(`${API_BASE}/load-map?name=level1`);
+      const res = await fetch(`${API_BASE}/load-map?name=level_01`);
       if (!res.ok) throw new Error(`Map load failed: ${res.status}`);
       const mapData = await res.json();
 
-      const { treePositions, rockSpawnTiles, width, height } = buildTilemapFromData(this, mapData);
+      const { treePositions, rockSpawnTiles, collisionRects, tileImages, width, height } = buildTilemapFromData(this, mapData);
+      this._currentMap = mapData.name || 'level_01';
+      this._tileImages = tileImages;
 
       // Update world bounds to match map
       this._mapCols = width;
@@ -1065,15 +1054,176 @@ export default class GameScene extends Phaser.Scene {
       this.physics.world.setBounds(0, 0, worldW, worldH);
       this.cameras.main.setBounds(0, 0, worldW, worldH);
 
+      // Parse minecart exit tiles from map items
+      this._minecartExitTiles = (mapData.mapItems || [])
+        .filter(it => (it.label || '').startsWith('minecart_exit:'))
+        .map(it => ({ col: it.tileCol, row: it.tileRow, target: it.label.split(':')[1] }));
+
+      // Parse + shade minecart entrance tiles
+      this._clearMinecartMarkers();
+      (mapData.mapItems || [])
+        .filter(it => (it.label || '') === 'minecart_entrance')
+        .forEach(it => this._addMinecartMarker(it.tileCol, it.tileRow, 0x3366ff));
+      (mapData.mapItems || [])
+        .filter(it => (it.label || '').startsWith('minecart_exit:'))
+        .forEach(it => this._addMinecartMarker(it.tileCol, it.tileRow, 0xff6633));
+
       // Spawn trees at positions found in the map
       this._spawnTreesAt(treePositions);
 
-      console.log(`[map] Loaded level1: ${width}x${height}, ${treePositions.length} trees, ${rockSpawnTiles.length} rock spawn tiles`);
+      // Create static physics bodies for collision tiles
+      if (!this._collisionGroup) {
+        this._collisionGroup = this.physics.add.staticGroup();
+      }
+      for (const { x, y, w, h } of collisionRects) {
+        const body = this.add.rectangle(x + w / 2, y + h / 2, w, h);
+        this.physics.add.existing(body, true);
+        this._collisionGroup.add(body);
+      }
+      if (this.player) {
+        this.physics.add.collider(this.player, this._collisionGroup);
+      }
+
+      console.log(`[map] Loaded level_01: ${width}x${height}, ${treePositions.length} trees, ${rockSpawnTiles.length} rock spawn tiles, ${collisionRects.length} collision tiles`);
     } catch (e) {
       console.warn('[map] Failed to load level1, using fallback:', e.message);
       buildTilemap(this, this._mapCols, this._mapRows);
       this._spawnTreesFallback();
     }
+  }
+
+  async _changeMap(newMap) {
+    if (this._changingMap) return;
+    this._changingMap = true;
+
+    // Register background NPCs — NPCs staying on the old map with active tasks
+    this._registerBackgroundNPCs(this._currentMap, newMap);
+
+    // Determine which NPCs stay on old map vs come to new map
+    for (const npc of this.npcs) {
+      if (!npc._map) npc._map = this._currentMap;
+      const runner = this._taskRunners.get(npc.id);
+      const status = runner?.getStatus();
+      const task = status?.tasks?.[0];
+      const staysOnOldMap = npc._map === this._currentMap
+        && task && ['custom_task', 'mine_ore', 'gather'].includes(task.task);
+      if (staysOnOldMap) {
+        // NPC stays behind — hide it
+        npc.setVisible(false);
+        if (npc.body) npc.body.enable = false;
+      } else {
+        // NPC comes with player — update its map
+        npc._map = newMap;
+      }
+    }
+
+    // Fade out
+    this.cameras.main.fadeOut(300, 0, 0, 0);
+    await new Promise(r => setTimeout(r, 320));
+
+    // Destroy old tile images
+    for (const img of (this._tileImages || [])) img?.destroy();
+    this._tileImages = [];
+
+    // Destroy old trees
+    for (const tree of (this.trees || [])) tree?.destroy?.();
+    this.trees = [];
+
+    // Destroy old collision group
+    if (this._collisionGroup) {
+      this._collisionGroup.clear(true, true);
+      this._collisionGroup = null;
+    }
+
+    // Load new map
+    try {
+      const res = await fetch(`${API_BASE}/load-map?name=${newMap}`);
+      if (!res.ok) throw new Error(`Map load failed: ${res.status}`);
+      const mapData = await res.json();
+      const { treePositions, rockSpawnTiles, collisionRects, tileImages, width, height } = buildTilemapFromData(this, mapData);
+      this._currentMap = newMap;
+      this._tileImages = tileImages;
+      this._mapCols = width;
+      this._mapRows = height;
+      const worldW = width * TILE_SIZE;
+      const worldH = height * TILE_SIZE;
+      this.physics.world.setBounds(0, 0, worldW, worldH);
+      this.cameras.main.setBounds(0, 0, worldW, worldH);
+
+      // Parse minecart exit tiles from map items
+      this._minecartExitTiles = (mapData.mapItems || [])
+        .filter(it => (it.label || '').startsWith('minecart_exit:'))
+        .map(it => ({ col: it.tileCol, row: it.tileRow, target: it.label.split(':')[1] }));
+
+      // Shade minecart entrance/exit markers
+      this._clearMinecartMarkers();
+      (mapData.mapItems || [])
+        .filter(it => (it.label || '') === 'minecart_entrance')
+        .forEach(it => this._addMinecartMarker(it.tileCol, it.tileRow, 0x3366ff));
+      (mapData.mapItems || [])
+        .filter(it => (it.label || '').startsWith('minecart_exit:'))
+        .forEach(it => this._addMinecartMarker(it.tileCol, it.tileRow, 0xff6633));
+
+      this._spawnTreesAt(treePositions);
+
+      // Collision group
+      this._collisionGroup = this.physics.add.staticGroup();
+      for (const { x, y, w, h } of collisionRects) {
+        const body = this.add.rectangle(x + w / 2, y + h / 2, w, h);
+        this.physics.add.existing(body, true);
+        this._collisionGroup.add(body);
+      }
+    } catch (e) {
+      console.warn('[map] Failed to change map:', e.message);
+    }
+
+    // Unregister background NPCs that are on the NEW map (player just arrived)
+    this._unregisterBackgroundNPCs(newMap);
+
+    // Show NPCs that are on the new map, keep hiding others
+    for (const npc of this.npcs) {
+      if (npc._map === newMap || !npc._map) {
+        npc.setVisible(true);
+        if (npc.body) npc.body.enable = true;
+      }
+    }
+
+    // Fade back in
+    this.cameras.main.fadeIn(300, 0, 0, 0);
+    this._changingMap = false;
+  }
+
+  /** Register NPCs with active tasks as background workers when leaving their map. */
+  _registerBackgroundNPCs(oldMap, newMap) {
+    const conn = this._conn;
+    if (!conn?.connected) return;
+    for (const npc of this.npcs) {
+      const npcMap = npc._map || oldMap;
+      if (npcMap === newMap) continue; // NPC is coming with us
+      const runner = this._taskRunners.get(npc.id);
+      if (!runner) continue;
+      const status = runner.getStatus();
+      if (!status.running || status.tasks.length === 0) continue;
+      const task = status.tasks[0];
+      if (!['custom_task', 'mine_ore', 'gather'].includes(task.task)) continue;
+      conn.send({
+        type: 'register_background_npc',
+        npc_id: npc.id,
+        map: npcMap,
+        task: task,
+      });
+      console.log(`[bg] Registered background NPC ${npc.id} on ${npcMap} with task ${task.task}`);
+    }
+  }
+
+  /** Unregister background NPCs when player returns to their map. */
+  _unregisterBackgroundNPCs(arrivingMap) {
+    const conn = this._conn;
+    if (!conn?.connected) return;
+    conn.send({
+      type: 'unregister_background_npcs',
+      map: arrivingMap,
+    });
   }
 
   _spawnTreesAt(positions) {
@@ -1122,6 +1272,7 @@ export default class GameScene extends Phaser.Scene {
       Math.floor(this.player.y / TILE_SIZE),
     );
     const npc = new NPC(this, pos.x, pos.y, undefined, this.playerId);
+    npc._map = this._currentMap;
     this.npcs.push(npc);
     const runner = new NPCTaskRunner(this, npc);
     this._taskRunners.set(npc.id, runner);
@@ -1216,11 +1367,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _onNPCCommands(npc, commands) {
-    const normalized = (commands || []).map(cmd => {
-      if (cmd?.task !== 'guard_fire') return cmd;
-      const fire = this._findNearestLitCampfire?.(npc.x, npc.y, 12);
-      return fire ? { ...cmd, fire_item_id: fire._serverId } : { ...cmd };
-    });
+    const normalized = commands || [];
     let runner = this._taskRunners.get(npc.id);
     if (!runner) {
       runner = new NPCTaskRunner(this, npc);
@@ -1232,6 +1379,10 @@ export default class GameScene extends Phaser.Scene {
     const brain = this._npcBrains.get(npc.id);
     if (brain) {
       brain.onPlayerCommand();
+      // Custom tasks run indefinitely — lock the brain for a very long time
+      if (normalized[0]?.task === 'custom_task') {
+        npc._manualCommandUntil = Date.now() + 3600000; // 1 hour
+      }
       brain.pushEvent({
         type: 'command',
         text: `Player commanded: ${normalized[0]?.task || 'unknown'}`,
@@ -1292,6 +1443,15 @@ export default class GameScene extends Phaser.Scene {
   _clearSensePanelActions() {
     return this._hud.clearSensePanelActions();
   }
+  _getActorSenseInfo(_actor) {
+    return { range: TILE_SIZE * 20 };
+  }
+  _canSenseTargetDetails(_observer, _entity) {
+    return true;
+  }
+  _canRevealTargetName(_observer, _entity) {
+    return true;
+  }
   _updateSenseTabVisuals() {
     return this._hud.updateSenseTabVisuals();
   }
@@ -1328,7 +1488,10 @@ export default class GameScene extends Phaser.Scene {
 
   _getChatTarget() {
     if (this.selectedNPC?.isKnockedOut?.()) return null;
-    if (this._focusedRemote?.ownerPid && !this._focusedRemote?.isKnockedOut?.()) return this._focusedRemote;
+    if (this._focusedRemote && !this._focusedRemote?.isKnockedOut?.()) {
+      // Allow chat with remote NPCs (ownerPid) and remote players (playerId)
+      if (this._focusedRemote.ownerPid || this._focusedRemote.playerId) return this._focusedRemote;
+    }
     return this.selectedNPC || null;
   }
   _buildTabCycleList() {
@@ -1475,39 +1638,9 @@ export default class GameScene extends Phaser.Scene {
     rnpc._koOrigin = null;
   }
 
-  _isEntityCarriedByPlayer(entity) {
-    const me = this._lastServerState?.players?.[this.playerId];
-    if (!entity || !me?.carrying) return false;
-    if (entity.playerId && me.carrying.type === 'player') return me.carrying.id === entity.playerId;
-    if (entity.ownerPid && me.carrying.type === 'npc') {
-      return me.carrying.owner === entity.ownerPid && me.carrying.id === entity.npcId;
-    }
-    return false;
-  }
-
-  _isCarryingSomeone() {
-    const me = this._lastServerState?.players?.[this.playerId];
-    return !!me?.carrying;
-  }
-
-  _getCarriedEntityByPlayer() {
-    const me = this._lastServerState?.players?.[this.playerId];
-    const carried = me?.carrying;
-    if (!carried) return null;
-    if (carried.type === 'player') return this._remotePlayers?.[carried.id] ?? null;
-    if (carried.type === 'npc') {
-      if (carried.owner === this.playerId) {
-        return (this.npcs || []).find(n => n.id === carried.id) ?? null;
-      }
-      const key = `${carried.owner}_${carried.id}`;
-      return this._remoteNPCSprites?.[key] ?? null;
-    }
-    return null;
-  }
-
   _entityClickRadius(entity) {
     if (!entity) return TILE_SIZE;
-    if (entity.isKnockedOut?.() || entity._carriedBy) return TILE_SIZE * 1.6;
+    if (entity.isKnockedOut?.()) return TILE_SIZE * 1.6;
     return TILE_SIZE;
   }
 
@@ -1546,19 +1679,15 @@ export default class GameScene extends Phaser.Scene {
     } else if (entity?.isKnockedOut?.()) {
       actions.push({ label: 'Kill', action: () => this._sendKnockoutAction('kill', entity) });
       actions.push({ label: 'Rob', action: () => this._sendKnockoutAction('rob', entity) });
-      if (this._isEntityCarriedByPlayer(entity)) {
-        actions.push({ label: 'Set Down', action: () => this._sendKnockoutAction('drop', entity) });
-      } else if (!entity._carriedBy) {
-        actions.push({ label: 'Carry', action: () => this._sendKnockoutAction('carry', entity) });
-      }
-      actions.push({ label: 'Inspect', action: () => { this._selectRemote(entity); } });
+      actions.push({ label: 'Inspect', action: () => { this._selectRemote(entity); this._inspectPanel.open(entity); } });
     } else if (entity?.ownerPid) {
       actions.push({ label: 'Chat', action: () => { this._selectRemote(entity); if (!this.chatBox?.isOpen()) this.chatBox.open(); } });
       actions.push({ label: 'Attack', action: () => { this._selectRemote(entity); this._armActionMode('attack'); } });
-      actions.push({ label: 'Inspect', action: () => { this._selectRemote(entity); } });
+      actions.push({ label: 'Inspect', action: () => { this._selectRemote(entity); this._inspectPanel.open(entity); } });
     } else if (entity?.playerId) {
+      actions.push({ label: 'Talk', action: () => { this._selectRemote(entity); if (!this.chatBox?.isOpen()) this.chatBox.open(); } });
       actions.push({ label: 'Attack', action: () => { this._selectRemote(entity); this._armActionMode('attack'); } });
-      actions.push({ label: 'Inspect', action: () => { this._selectRemote(entity); } });
+      actions.push({ label: 'Inspect', action: () => { this._selectRemote(entity); this._inspectPanel.open(entity); } });
     }
     return actions;
   }
@@ -1585,11 +1714,17 @@ export default class GameScene extends Phaser.Scene {
 
         const npc = new NPC(this, data.x || 480, data.y || 480);
         npc.loadFrom(data);
+        if (!npc._map) npc._map = this._currentMap;
         this.npcs.push(npc);
         const runner = new NPCTaskRunner(this, npc);
         this._taskRunners.set(npc.id, runner);
         this._npcBrains.set(npc.id, new NPCBrain(this, npc, runner));
-        console.log(`[load] Restored NPC ${npc.id} (${npc.getName()})`);
+        // Hide NPCs that are on a different map
+        if (npc._map !== this._currentMap) {
+          npc.setVisible(false);
+          if (npc.body) npc.body.enable = false;
+        }
+        console.log(`[load] Restored NPC ${npc.id} (${npc.getName()}) on ${npc._map}`);
       } catch (e) {
         console.warn(`[load] Failed to load NPC ${npcId}:`, e.message);
       }
@@ -1745,6 +1880,407 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
+  // ── Crate / Furnace interaction panels ─────────────────────────────────────
+
+  _openCrateUI(crate) {
+    this._closeStorageUI();
+    this._storageTarget = crate;
+    this._storageType = 'crate';
+    this._buildStoragePanel();
+  }
+
+  _openFurnaceUI(furnace) {
+    this._closeStorageUI();
+    this._storageTarget = furnace;
+    this._storageType = 'furnace';
+    this._buildStoragePanel();
+  }
+
+  _openLogCutterUI(station) {
+    this._closeStorageUI();
+    this._storageTarget = station;
+    this._storageType = 'log_cutter';
+    this._buildStoragePanel();
+  }
+
+  _buildStoragePanel() {
+    const target = this._storageTarget;
+    if (!target) return;
+    const isFurnace = this._storageType === 'furnace';
+    const isLogCutter = this._storageType === 'log_cutter';
+    const els = [];
+    const add = (obj) => { this.addHud(obj); els.push(obj); return obj; };
+
+    const W = this._screenWidth();
+    const H = this._screenHeight();
+    const panelW = 420;
+    const panelH = (isFurnace || isLogCutter) ? 300 : 320;
+    const cx = W / 2, cy = H / 2;
+    const left = cx - panelW / 2;
+    const top = cy - panelH / 2;
+
+    const borderColor = isFurnace ? 0xff9944 : isLogCutter ? 0xccaa44 : 0x5566aa;
+    const title = isFurnace ? 'FURNACE' : isLogCutter ? 'LOG CUTTER' : 'STORAGE';
+    const titleColor = isFurnace ? '#ff9944' : isLogCutter ? '#ccaa44' : '#88bbff';
+
+    add(this.add.rectangle(cx, cy, panelW, panelH, 0x111122, 0.96)
+      .setStrokeStyle(2, borderColor).setDepth(70));
+    add(this.add.text(cx, top + 14, title, {
+      fontSize: '18px', color: titleColor, fontStyle: 'bold',
+    }).setOrigin(0.5, 0).setDepth(71));
+
+    // Label picker for crates — clickable Phaser text buttons (no DOM)
+    if (!isFurnace && !isLogCutter && target.setLabel) {
+      const LABEL_OPTIONS = [
+        '(none)', 'raw_copper', 'raw_tin', 'bronze_bar',
+        'logs', 'stones', 'copper', 'crystals',
+        'meat', 'feathers', 'vegetables', 'seeds',
+        'planks',
+      ];
+      const labelRow = top + 36;
+      add(this.add.text(left + 16, labelRow, 'Label:', {
+        fontSize: '11px', color: '#889999',
+      }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(71));
+
+      const currentLabel = target.getLabel?.() || '';
+      // Show current label + click to cycle
+      const labelDisplay = add(this.add.text(left + 70, labelRow, currentLabel || '(none)', {
+        fontSize: '12px', color: '#ffdd66', fontStyle: 'bold',
+        backgroundColor: '#222244', padding: { x: 6, y: 2 },
+      }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(72));
+
+      // < > arrow buttons to cycle through options
+      const curIdx = LABEL_OPTIONS.indexOf(currentLabel || '(none)');
+      let selectedIdx = curIdx >= 0 ? curIdx : 0;
+
+      const updateLabel = () => {
+        const val = LABEL_OPTIONS[selectedIdx];
+        const realVal = val === '(none)' ? '' : val;
+        labelDisplay.setText(val);
+        target.setLabel(realVal);
+        this._conn?.send({ type: 'update_building_label', building_id: target._serverId, label: realVal });
+      };
+
+      const prevBtn = add(this.add.text(left + 70 + 160, labelRow, '◀', {
+        fontSize: '14px', color: '#88aacc', backgroundColor: '#222244', padding: { x: 4, y: 1 },
+      }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(72).setInteractive({ useHandCursor: true }));
+      prevBtn.on('pointerdown', () => {
+        selectedIdx = (selectedIdx - 1 + LABEL_OPTIONS.length) % LABEL_OPTIONS.length;
+        updateLabel();
+      });
+      prevBtn.on('pointerover', () => prevBtn.setColor('#ffffff'));
+      prevBtn.on('pointerout', () => prevBtn.setColor('#88aacc'));
+
+      const nextBtn = add(this.add.text(left + 70 + 190, labelRow, '▶', {
+        fontSize: '14px', color: '#88aacc', backgroundColor: '#222244', padding: { x: 4, y: 1 },
+      }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(72).setInteractive({ useHandCursor: true }));
+      nextBtn.on('pointerdown', () => {
+        selectedIdx = (selectedIdx + 1) % LABEL_OPTIONS.length;
+        updateLabel();
+      });
+      nextBtn.on('pointerover', () => nextBtn.setColor('#ffffff'));
+      nextBtn.on('pointerout', () => nextBtn.setColor('#88aacc'));
+    }
+
+    // Column headers
+    const headY = (isFurnace || isLogCutter) ? (top + 40) : (top + 56);
+    add(this.add.text(left + 16, headY, 'Item', {
+      fontSize: '11px', color: '#667788',
+    }).setOrigin(0, 0).setScrollFactor(0).setDepth(71));
+    add(this.add.text(left + 140, headY, 'You', {
+      fontSize: '11px', color: '#667788',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(71));
+    add(this.add.text(left + 248, headY, '', {
+      fontSize: '11px', color: '#667788',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(71));
+    add(this.add.text(left + 350, headY, 'Stored', {
+      fontSize: '11px', color: '#667788',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(71));
+
+    // Separator
+    add(this.add.rectangle(cx, headY + 16, panelW - 24, 1, 0x334455)
+      .setScrollFactor(0).setDepth(71));
+
+    // Close hint
+    add(this.add.text(cx, top + panelH - 12, 'Press E or ESC to close', {
+      fontSize: '10px', color: '#556677',
+    }).setOrigin(0.5, 1).setDepth(71));
+
+    // Content area — rebuilt by refresh
+    this._storagePanelLeft = left;
+    this._storageContentY = headY + 22;
+    this._storageContentEls = [];
+    this._storagePanelEls = els;
+    this._storageOpen = true;
+
+    this._refreshStoragePanel();
+
+    // Refresh timer
+    this._storageRefreshTimer = this.time.addEvent({
+      delay: 200, loop: true,
+      callback: () => { if (this._storageOpen) this._refreshStoragePanel(); },
+    });
+  }
+
+  _refreshStoragePanel() {
+    const target = this._storageTarget;
+    if (!target) return;
+    for (const el of this._storageContentEls) { this.removeHud(el); el.destroy(); }
+    this._storageContentEls = [];
+
+    const add = (obj) => { this.addHud(obj); this._storageContentEls.push(obj); return obj; };
+    const isFurnace = this._storageType === 'furnace';
+    const isLogCutter = this._storageType === 'log_cutter';
+    const left = this._storagePanelLeft;
+    let y = this._storageContentY;
+    const stored = target.getStored();
+    const inv = this.player?.inventory ?? {};
+    const logs = this.player?.logs ?? 0;
+
+    if (isLogCutter) {
+      y = this._addStorageRow(add, left, y, 'Logs (input)', 'Wood', logs, stored['Wood'] ?? 0, true, false, true);
+
+      // Status line
+      const statusY = y + 2;
+      if (target._cutting) {
+        add(this.add.text(left + 210, statusY, '\u2699\uFE0F Cutting...', {
+          fontSize: '13px', color: '#ddcc44',
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
+      } else {
+        add(this.add.text(left + 210, statusY, 'Idle', {
+          fontSize: '13px', color: '#666666',
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
+      }
+      y += 24;
+
+      // Output — planks (withdraw only)
+      y = this._addStorageRow(add, left, y, 'Planks (output)', 'planks', 0, stored['planks'] ?? 0, false, true, false);
+    } else if (isFurnace) {
+      y = this._addStorageRow(add, left, y, 'Raw Copper', 'raw_copper', inv['raw_copper'] ?? 0, stored['raw_copper'] ?? 0, true, true, false);
+      y = this._addStorageRow(add, left, y, 'Raw Tin', 'raw_tin', inv['raw_tin'] ?? 0, stored['raw_tin'] ?? 0, true, true, false);
+      y = this._addStorageRow(add, left, y, 'Planks (fuel)', 'planks', inv['planks'] ?? 0, stored['planks'] ?? 0, true, true, false);
+
+      // Status line
+      const statusY = y + 2;
+      if (target._smelting) {
+        add(this.add.text(left + 210, statusY, '\uD83D\uDD25 Smelting...', {
+          fontSize: '13px', color: '#ffdd44',
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
+      } else if (target._burning) {
+        add(this.add.text(left + 210, statusY, '\uD83D\uDD25 Fire burning', {
+          fontSize: '13px', color: '#ff8844',
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
+      } else {
+        add(this.add.text(left + 210, statusY, 'Idle', {
+          fontSize: '13px', color: '#666666',
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
+      }
+      y += 24;
+
+      // Output — bronze bars (withdraw only)
+      y = this._addStorageRow(add, left, y, 'Bronze Bar', 'bronze_bar', inv['bronze_bar'] ?? 0, stored['bronze_bar'] ?? 0, false, true, false);
+    } else {
+      // Crate — if labelled, only show that item type; otherwise show all
+      const crateLabel = target.getLabel?.() || '';
+      let allKeys;
+      if (crateLabel) {
+        const labelKey = crateLabel === 'logs' ? 'Wood' : crateLabel;
+        allKeys = new Set([labelKey]);
+      } else {
+        allKeys = new Set([
+          ...Object.keys(stored).filter(k => stored[k] > 0),
+          ...Object.keys(inv).filter(k => inv[k] > 0),
+        ]);
+        // Also show logs
+        if (logs > 0 || (stored['Wood'] ?? 0) > 0) allKeys.add('Wood');
+      }
+
+      if (allKeys.size === 0) {
+        add(this.add.text(left + 210, y + 8, 'Empty — deposit items from your inventory', {
+          fontSize: '12px', color: '#556677',
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
+      }
+      for (const key of allKeys) {
+        const isLogs = key === 'Wood';
+        const displayName = isLogs ? 'Logs' : key;
+        const pQty = isLogs ? logs : (inv[key] ?? 0);
+        const sQty = stored[key] ?? 0;
+        y = this._addStorageRow(add, left, y, displayName, key, pQty, sQty, true, true, isLogs);
+      }
+    }
+  }
+
+  /**
+   * Columnar row:  Label(left+16)  You:N(left+140)  [→](left+194)  [←](left+248)  Stored:N(left+350)
+   */
+  _addStorageRow(add, left, y, label, key, playerQty, storedQty, canDeposit, canWithdraw, isLogs) {
+    const rowY = y;
+
+    // Label
+    add(this.add.text(left + 16, rowY, label, {
+      fontSize: '13px', color: '#cccccc',
+    }).setOrigin(0, 0).setScrollFactor(0).setDepth(72));
+
+    // Player qty
+    add(this.add.text(left + 140, rowY, String(playerQty), {
+      fontSize: '13px', color: '#88ff88',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
+
+    // Deposit arrow →
+    if (canDeposit && playerQty > 0) {
+      const depBtn = add(this.add.text(left + 194, rowY - 1, '\u2192', {
+        fontSize: '15px', color: '#44ff88',
+        backgroundColor: '#1a3322', padding: { x: 8, y: 2 },
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(73).setInteractive({ useHandCursor: true }));
+      depBtn.on('pointerdown', (ptr) => this._depositToStorage(key, ptr.event.shiftKey ? 10 : 1, isLogs));
+      depBtn.on('pointerover', () => depBtn.setStyle({ backgroundColor: '#225533' }));
+      depBtn.on('pointerout', () => depBtn.setStyle({ backgroundColor: '#1a3322' }));
+    }
+
+    // Withdraw arrow ←
+    if (canWithdraw && storedQty > 0) {
+      const withBtn = add(this.add.text(left + 248, rowY - 1, '\u2190', {
+        fontSize: '15px', color: '#ff8844',
+        backgroundColor: '#331a11', padding: { x: 8, y: 2 },
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(73).setInteractive({ useHandCursor: true }));
+      withBtn.on('pointerdown', (ptr) => this._withdrawFromStorage(key, ptr.event.shiftKey ? 10 : 1, isLogs));
+      withBtn.on('pointerover', () => withBtn.setStyle({ backgroundColor: '#442211' }));
+      withBtn.on('pointerout', () => withBtn.setStyle({ backgroundColor: '#331a11' }));
+    }
+
+    // Stored qty
+    add(this.add.text(left + 350, rowY, String(storedQty), {
+      fontSize: '13px', color: '#88bbff',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
+
+    return y + 26;
+  }
+
+  _depositToStorage(key, amount, isLogs) {
+    const target = this._storageTarget;
+    if (!target) return;
+    if (isLogs) {
+      const have = this.player.logs ?? 0;
+      const qty = Math.min(amount, have);
+      if (qty <= 0) return;
+      if (target.addToStorage('Wood', qty)) {
+        this.player.logs -= qty;
+        this._conn?.send({ type: 'deduct_resource', resource: 'logs', amount: qty });
+      }
+    } else {
+      const inv = this.player.inventory ?? {};
+      const have = inv[key] ?? 0;
+      const qty = Math.min(amount, have);
+      if (qty <= 0) return;
+      if (target.addToStorage(key, qty)) {
+        inv[key] = (inv[key] ?? 0) - qty;
+        if (inv[key] <= 0) delete inv[key];
+        this._conn?.send({ type: 'deduct_resource', resource: key, amount: qty });
+      }
+    }
+    // Immediately sync stored state to server
+    if (target._serverId) {
+      this._conn?.send({ type: 'update_building_stored', building_id: target._serverId, stored: target.getStored() });
+    }
+  }
+
+  _withdrawFromStorage(key, amount, isLogs) {
+    const target = this._storageTarget;
+    if (!target) return;
+    const stored = target.getStored();
+    const qty = Math.min(amount, stored[key] ?? 0);
+    if (qty <= 0) return;
+    target.removeFromStorage(key, qty);
+    if (isLogs) {
+      this.player.logs = (this.player.logs ?? 0) + qty;
+    } else {
+      const inv = this.player.inventory ?? {};
+      inv[key] = (inv[key] ?? 0) + qty;
+      this.player.inventory = inv;
+    }
+    // Tell server to grant the resource to the player
+    this._conn?.send({ type: 'grant_resource', resource: isLogs ? 'logs' : key, amount: qty });
+    // Immediately sync stored state to server
+    if (target._serverId) {
+      this._conn?.send({ type: 'update_building_stored', building_id: target._serverId, stored: target.getStored() });
+    }
+  }
+
+  _openBuildingContextMenu(bid, buildingType, ptr, buildingObj) {
+    this._closeBuildingContextMenu();
+    this._inventoryUi.closeContextMenu();
+    const els = [];
+    const add = (obj) => { this.addHud(obj); els.push(obj); return obj; };
+    const rowH = 28;
+    const width = 180;
+
+    // Build menu items
+    const menuItems = [];
+    // "Pick up <item>" if conveyor is holding something
+    if (buildingType === 'conveyor' && buildingObj?.hasHeldItem?.()) {
+      const held = buildingObj.getHeldItem();
+      menuItems.push({ label: `Pick up ${held.resource} (${held.amount})`, color: '#88ddff', action: () => {
+        const item = buildingObj.getHeldItem();
+        if (!item) return;
+        buildingObj.removeHeldItem(false);
+        // Give the resource to the player via admin message
+        const topLevel = ['logs', 'stones', 'crystals', 'seeds', 'meat', 'vegetables', 'feathers', 'copper'];
+        const field = topLevel.includes(item.resource) ? item.resource : `inv:${item.resource}`;
+        this._conn?.send({ type: 'admin', field, value: item.amount });
+      }});
+    }
+    menuItems.push({ label: `Remove ${buildingType}`, color: '#ff8888', action: () => {
+      this._conn?.send({ type: 'remove_building', building_id: bid });
+    }});
+
+    const height = 10 + menuItems.length * rowH + 6;
+    const W = this._screenWidth();
+    const px = Number.isFinite(ptr?.x) ? ptr.x : ptr?.downX;
+    const py = Number.isFinite(ptr?.y) ? ptr.y : ptr?.downY;
+    const x = Phaser.Math.Clamp((px ?? W / 2) + 10, 12, W - width - 12);
+    const y = Phaser.Math.Clamp((py ?? this._screenHeight() / 2) + 10, 12, this._screenHeight() - height - 12);
+    this._buildingContextBounds = { x, y, width, height };
+    add(this.add.rectangle(x + width / 2, y + height / 2, width, height, 0x111122, 0.96)
+      .setStrokeStyle(2, 0x553333).setDepth(70));
+
+    menuItems.forEach((item, i) => {
+      const by = y + 8 + i * rowH;
+      const btn = add(this.add.rectangle(x + width / 2, by + 10, width - 12, 22, 0x223344, 1)
+        .setDepth(71).setInteractive({ useHandCursor: true }));
+      add(this.add.text(x + 12, by + 3, item.label, {
+        fontSize: '15px', color: item.color,
+      }).setDepth(72));
+      btn.on('pointerover', () => btn.setFillStyle(0x335566));
+      btn.on('pointerout', () => btn.setFillStyle(0x223344));
+      btn.on('pointerdown', () => { item.action(); this._closeBuildingContextMenu(); });
+    });
+
+    this._buildingContextEls = els;
+  }
+
+  _closeBuildingContextMenu() {
+    this._buildingContextBounds = null;
+    if (this._buildingContextEls) {
+      for (const el of this._buildingContextEls) { this.removeHud(el); el.destroy(); }
+      this._buildingContextEls = null;
+    }
+  }
+
+  _closeStorageUI() {
+    this._storageOpen = false;
+    this._storageTarget = null;
+    this._storageRefreshTimer?.remove();
+    this._storageRefreshTimer = null;
+    if (this._storageContentEls) {
+      for (const el of this._storageContentEls) { this.removeHud(el); el.destroy(); }
+      this._storageContentEls = null;
+    }
+    if (this._storagePanelEls) {
+      for (const el of this._storagePanelEls) { this.removeHud(el); el.destroy(); }
+      this._storagePanelEls = null;
+    }
+  }
+
   _logout() {
     // Save NPCs before leaving
     this._saveAllNPCs();
@@ -1814,42 +2350,24 @@ export default class GameScene extends Phaser.Scene {
 
       npcs[npc.id] = {
         x: npc.x, y: npc.y,
+        map: npc._map || this._currentMap,
         hp: npc.hp, maxHp: npc.maxHp,
         ki: npc.ki, maxKi: npc.maxKi,
         inf_ki: !!npc.infKi,
         str: npc.str, def: npc.def,
         level: npc.level, xp: npc.xp,
         blastLevel: npc.blastLevel,
-        kiSkillLevel: npc.kiSkillLevel ?? 1,
-        kiSkillXp: npc.kiSkillXp ?? 0,
-        realm_tier: npc.realmTier ?? 0,
-        ki_moves: npc.kiMoves ?? [],
-        ki_denominations: npc.kiDenominations ?? [],
-        ki_known_augments: npc.kiKnownAugments ?? {},
-        ki_equipped_augments: npc.kiEquippedAugments ?? {},
-        ki_upgrades: npc.kiUpgrades ?? {},
+        ki_blast_bonuses: npc.kiBlastBonuses ?? {},
         facing: (npc.getFacing?.() ? npc.getFacing() : 'down'),
         barrier_proc_until: Number(npc.barrierProcUntil || 0),
         barrier_proc_facing: npc.barrierProcFacing ? npc.barrierProcFacing : (npc.getFacing?.() ? npc.getFacing() : 'down'),
-        aura_tint: npc.auraTint != null ? npc.auraTint : 0x4fd6ff,
-        aura_alpha: npc.auraAlpha != null ? npc.auraAlpha : 0.42,
         name: npc.getName(),
         dead: npc.isDead(),
         knocked_out: npc.isKnockedOut?.() || false,
-        meditating: !!npc.meditating,
-        meditation_started_at: npc.meditationStartedAt ?? 0,
-        meditation_until: npc.meditationUntil ?? 0,
-        meditation_total_ms: npc.meditationTotalMs ?? 0,
-        meditation_crystal_quality: npc.meditationCrystalQuality ?? null,
         owner: this.playerId,
         logs: npc.logs, maxLogs: npc.maxLogs,
         stones: npc.stones ?? 0,
-        bastalite: npc.bastalite ?? 0,
-        crystal_pristine: npc.crystalPristine ?? 0,
-        crystal_normal: npc.crystalNormal ?? 0,
-        crystal_poor: npc.crystalPoor ?? 0,
-        realm_crystal_t1: npc.realmCrystalT1 ?? 0,
-        armor_elite: !!npc.armorElite,
+        crystals: npc.crystals ?? 0,
         gathering: this._taskRunners.get(npc.id)?.getStatus()?.tasks?.[0]?.task === 'gather',
         soul: soulData,
         personality,
@@ -1893,48 +2411,6 @@ export default class GameScene extends Phaser.Scene {
     this.chatBox?._addLog(`${from} → ${npc.getName()}: ${text}`, from_color || '#ffddaa');
 
     try {
-      if (meta?.type === 'fire_warning') {
-        const runner = this._taskRunners.get(npc.id);
-        const personality = npc.soul?.personality || {};
-        const cooperation = personality.cooperation ?? 0.5;
-        const aggression = personality.aggression ?? 0.3;
-        const neuroticism = personality.neuroticism ?? 0.3;
-        const complies = (cooperation + neuroticism * 0.35) >= (aggression + 0.15);
-        const reply = complies
-          ? (aggression > 0.55 ? 'Fine. I will leave the fire alone.' : 'Alright, I will leave the fire area.')
-          : (aggression > 0.6 ? 'No. I need this fire.' : 'I just need to heal.');
-
-        if (complies && runner) {
-          const existingTasks = runner.getStatus()?.tasks || [];
-          runner.setTasks([
-            {
-              task: 'move_away_from_fire',
-              fire_x: Number(meta.fire_x || 0),
-              fire_y: Number(meta.fire_y || 0),
-              min_distance: TILE_SIZE * Math.max(3, Number(meta.leave_distance_tiles || 5)),
-              duration_ms: 5000,
-            },
-            ...existingTasks,
-          ]);
-        }
-
-        npc.showBubble(reply, 3200, { silent: true });
-        this.chatBox?._addLog(`${npc.getName()}: ${reply}`, '#aaddff');
-        this._conn.send({
-          type: 'chat_reply',
-          to: from,
-          npc_id: target_npc_id,
-          npc_name: npc.getName(),
-          reply,
-          meta: {
-            type: 'fire_warning_reply',
-            complies,
-            fire_item_id: meta.fire_item_id || null,
-          },
-        });
-        return;
-      }
-
       // Non-owner command filtering
       const obeys = npc.shouldObey(from);
       const soulCtx = npc.getSoulContext(from);
@@ -2008,11 +2484,6 @@ export default class GameScene extends Phaser.Scene {
     let logLine = `${name}: ${reply}`;
     if (deltaStr) logLine += ` ${deltaStr}`;
     this.chatBox?._addLog(logLine, '#aaddff');
-    if (meta?.type === 'fire_warning_reply') {
-      for (const runner of this._taskRunners.values()) {
-        runner.handleFireWarningReply?.(key, { complies: !!meta.complies, reply });
-      }
-    }
   }
 
   /** Format emotion deltas for display. */
@@ -2141,18 +2612,25 @@ export default class GameScene extends Phaser.Scene {
     return this._inventoryUi.placeAnvil();
   }
 
-  _placeKiShrine() {
-    return this._inventoryUi.placeKiShrine();
-  }
-
   // ── Inventory ───────────────────────────────────────────────────────────────
 
   _toggleInventory() {
-    return this._inventoryUi.toggleInventory();
+    if (this._charMenuOpen && this._playerDetailPanel?.isOpen()) {
+      this._closeCharMenu();
+    } else {
+      if (this._charMenuOpen) this._closeCharMenu();
+      this._charMenuOpen = true;
+      this._playerDetailPanel?.open('inventory');
+    }
   }
 
   _openInventory() {
-    return this._inventoryUi.openInventory();
+    if (!this._charMenuOpen) {
+      this._charMenuOpen = true;
+      this._playerDetailPanel?.open('inventory');
+    } else {
+      this._playerDetailPanel?.switchTab('inventory');
+    }
   }
 
   _closeInvContextMenu() {
@@ -2194,15 +2672,21 @@ export default class GameScene extends Phaser.Scene {
     return this._combatFx.showKiBlastImpact(worldX, worldY, tint, radius, placeCrater);
   }
   _handleReplicatedFxEvents(events) {
+    for (const evt of events || []) {
+      if (evt?.type === 'chat' && evt.pid && evt.text) {
+        // Skip our own messages — already shown locally
+        if (evt.pid === this.playerId) continue;
+        this.chatBox?._addLog(`${evt.pid}: ${evt.text}`, evt.color || '#cccccc');
+        // Show speech bubble on the remote player sprite
+        const rp = this._remotePlayers[evt.pid];
+        if (rp) rp.showBubble?.(evt.text, 5000);
+      }
+    }
     return this._combatFx.handleReplicatedFxEvents(events);
   }
   _renderReplicatedKiBlast(event) {
     return this._combatFx.renderReplicatedKiBlast(event);
   }
-  _placeTemporaryCrater(worldX, worldY) {
-    return this._combatFx.placeTemporaryCrater(worldX, worldY);
-  }
-
   // ── Character Menu ─────────────────────────────────────────────────────────
 
   _toggleCharMenu() {

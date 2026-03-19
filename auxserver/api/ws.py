@@ -7,10 +7,22 @@ import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from services.game_state import game
+from services.game_state import game, WORLD_OBJECT_INSTANCES
+from services.animal_service import animal_manager
+from services.crop_service import crop_manager
 from services.accounts import save_player, load_player
+from services.ai_player import ai_player, PID as AI_PID
+from core.config import SPAWN_AI_PLAYER
+from services.database import save_npc as db_save_npc, load_npc as db_load_npc
 
 router = APIRouter()
+
+
+def _clean_npcs(npcs_dict):
+    """Strip internal fields (callables, move targets) from NPC dicts for serialization."""
+    return {nid: {k: v for k, v in npc.items() if not k.startswith("_")}
+            for nid, npc in npcs_dict.items()}
+
 
 # Connected clients: pid -> WebSocket
 clients: dict[str, WebSocket] = {}
@@ -36,39 +48,42 @@ def _save_player_state(pid: str):
         "hp": p["hp"], "maxHp": p["maxHp"],
         "ki": p.get("ki", 20), "maxKi": p.get("maxKi", 20),
         "blastLevel": p.get("blastLevel", 0),
-        "inf_ki": p.get("inf_ki", False),
         "kiSkillLevel": p.get("kiSkillLevel", 1),
         "kiSkillXp": p.get("kiSkillXp", 0),
-        "realm_tier": p.get("realm_tier", 0),
-        "realm_insight": p.get("realm_insight", 0),
-        "realm_crystal_t1": p.get("realm_crystal_t1", 0),
-        "ki_upgrades": p.get("ki_upgrades", {}),
+        "inf_ki": p.get("inf_ki", False),
         "str": p["str"], "def": p["def"],
         "level": p["level"], "xp": p["xp"],
         "logs": p["logs"],
         "stones": p.get("stones", 0),
-        "bastalite": p.get("bastalite", 0),
-        "crystal_pristine": p.get("crystal_pristine", 0),
-        "crystal_normal": p.get("crystal_normal", 0),
-        "crystal_poor": p.get("crystal_poor", 0),
-        "armor_elite": p.get("armor_elite", False),
-        "armor_elite_inv": p.get("armor_elite_inv", False),
+        "crystals": p.get("crystals", 0),
+        "copper": p.get("copper", 0),
+        "meat": p.get("meat", 0),
+        "feathers": p.get("feathers", 0),
+        "vegetables": p.get("vegetables", 0),
+        "seeds": p.get("seeds", 0),
+        "ki_blast_bonuses": p.get("ki_blast_bonuses", {}),
         "ki_moves": p.get("ki_moves", []),
-        "ki_denominations": p.get("ki_denominations", []),
-        "ki_known_augments": p.get("ki_known_augments", {}),
-        "ki_equipped_augments": p.get("ki_equipped_augments", {}),
-        "ki_upgrades": p.get("ki_upgrades", {}),
-        "aura_tint": p.get("aura_tint", 0x4fd6ff),
-        "aura_alpha": p.get("aura_alpha", 0.42),
         "npc_ids": p.get("npc_ids", []),
+        "map": p.get("map", "level_01"),
+        "equipment": p.get("equipment", {}),
+        "inventory": p.get("inventory", {}),
     }
     save_player(pid, data)
 
+    # Also persist NPC stats to the database
+    for npc_id, npc in p.get("npcs", {}).items():
+        if npc.get("dead"):
+            continue
+        stats = {k: v for k, v in npc.items() if not k.startswith("_") and k not in ("id", "name", "x", "y", "owner")}
+        db_save_npc(npc_id, npc.get("name", npc_id), npc.get("x", 0), npc.get("y", 0), stats, {})
+
 
 def _save_all_players():
-    """Save all connected players."""
+    """Save all connected players (including AI rival)."""
     for pid in list(clients.keys()):
         _save_player_state(pid)
+    # Also save the AI rival (not in clients dict)
+    _save_player_state(AI_PID)
 
 
 async def game_loop():
@@ -81,6 +96,7 @@ async def game_loop():
         last = now
 
         game.tick(dt)
+        ai_player.tick()
 
         # Periodic auto-save
         if now - _last_save >= SAVE_INTERVAL:
@@ -100,100 +116,143 @@ async def game_loop():
                 "blastLevel": p.get("blastLevel", 0),
                 "kiSkillLevel": p.get("kiSkillLevel", 1),
                 "kiSkillXp": p.get("kiSkillXp", 0),
-                "realm_tier": p.get("realm_tier", 0),
-                "realm_insight": p.get("realm_insight", 0),
-                "realm_crystal_t1": p.get("realm_crystal_t1", 0),
-                "ki_upgrades": p.get("ki_upgrades", {}),
-                "ki_moves": p.get("ki_moves", []),
                 "str": p["str"], "def": p["def"],
                 "level": p["level"], "xp": p["xp"],
                 "logs": p["logs"],
                 "stones": p.get("stones", 0),
-                "bastalite": p.get("bastalite", 0),
-                "crystal_pristine": p.get("crystal_pristine", 0),
-                "crystal_normal": p.get("crystal_normal", 0),
-                "crystal_poor": p.get("crystal_poor", 0),
+                "crystals": p.get("crystals", 0),
+                "copper": p.get("copper", 0),
+                "meat": p.get("meat", 0),
+                "feathers": p.get("feathers", 0),
+                "vegetables": p.get("vegetables", 0),
+                "seeds": p.get("seeds", 0),
+                "ki_blast_bonuses": p.get("ki_blast_bonuses", {}),
+                "ki_moves": p.get("ki_moves", []),
                 "dead": p.get("dead", False),
                 "knocked_out": p.get("knocked_out", False),
                 "knocked_until": p.get("knocked_until"),
-                "meditating": p.get("meditating", False),
-                "meditation_started_at": p.get("meditation_started_at"),
-                "meditation_until": p.get("meditation_until"),
-                "meditation_total_ms": p.get("meditation_total_ms", 0),
-                "meditation_crystal_quality": p.get("meditation_crystal_quality"),
-                "charging": p.get("charging", False),
-                "charge_power": p.get("charge_power", 0.0),
-                "clairvoyance_active": p.get("clairvoyance_active", False),
-                "clairvoyance_target_type": p.get("clairvoyance_target_type"),
-                "clairvoyance_target_id": p.get("clairvoyance_target_id"),
-                "clairvoyance_target_owner": p.get("clairvoyance_target_owner"),
                 "barrier_proc_until": p.get("barrier_proc_until", 0.0),
                 "barrier_proc_facing": p.get("barrier_proc_facing", "down"),
-                "carrying": p.get("carrying"),
-                "carried_by": p.get("carried_by"),
-                "armor_elite": p.get("armor_elite", False),
-                "armor_elite_inv": p.get("armor_elite_inv", False),
-                "aura_tint": p.get("aura_tint", 0x4fd6ff),
-                "aura_alpha": p.get("aura_alpha", 0.42),
-                "ki_denominations": p.get("ki_denominations", []),
-                "ki_known_augments": p.get("ki_known_augments", {}),
-                "ki_equipped_augments": p.get("ki_equipped_augments", {}),
-                "npcs": p.get("npcs", {}),
+                "npcs": _clean_npcs(p.get("npcs", {})),
                 "chatColor": p.get("chatColor", "#cccccc"),
-                "_ki_target_result": p.pop("_ki_target_result", None),
+                "is_ai_rival": p.get("is_ai_rival", False),
+                "map": p.get("map", "level_01"),
+                "equipment": p.get("equipment", {}),
+                "inventory": p.get("inventory", {}),
                 "_refine_result": p.pop("_refine_result", None),
-                "_meditation_result": p.pop("_meditation_result", None),
-                "_shrine_result": p.pop("_shrine_result", None),
+                "_crystal_result": p.pop("_crystal_result", None),
             }
         clean_dummies = {}
         for did, d in game.dummies.items():
             clean_dummies[did] = {
                 "id": d["id"], "x": d["x"], "y": d["y"],
                 "hp": d["hp"], "maxHp": d["maxHp"], "dead": d["dead"],
+                "map": d.get("map", "level_01"),
             }
-        clean_fences = {}
-        for fid, f in game.fences.items():
-            if not f["dead"]:
-                clean_fences[fid] = {
-                    "id": f["id"], "x": f["x"], "y": f["y"],
-                    "tier": f["tier"], "hp": f["hp"], "maxHp": f["maxHp"],
-                    "owner": f["owner"], "gate": f["gate"], "dead": f["dead"],
-                }
-        clean_ki_targets = {}
-        for ktid, kt in game.ki_targets.items():
-            if not kt.get("dead"):
-                clean_ki_targets[ktid] = {
-                    "id": kt["id"], "x": kt["x"], "y": kt["y"],
-                    "hp": kt["hp"], "maxHp": kt["maxHp"],
-                    "owner": kt.get("owner", ""),
-                }
         clean_anvils = {}
         for aid, a in game.anvils.items():
             if not a.get("dead"):
                 clean_anvils[aid] = {
                     "id": a["id"], "x": a["x"], "y": a["y"],
                     "owner": a.get("owner", ""),
+                    "map": a.get("map", "level_01"),
                 }
-        state = {
-            "type": "state",
-            "players": clean_players,
-            "trees": game.trees,
-            "rocks": game.rocks,
-            "ground_items": game.ground_items,
-            "dummies": clean_dummies,
-            "fences": clean_fences,
-            "ki_targets": clean_ki_targets,
-            "anvils": clean_anvils,
-            "fx_events": list(game.fx_events),
-        }
-        game.fx_events.clear()
-        payload = json.dumps(state)
+        clean_campfires = {}
+        now = time.time()
+        for cid, c in game.campfires.items():
+            if not c.get("dead"):
+                remaining = max(0, c["duration"] - (now - c["lit_at"]))
+                clean_campfires[cid] = {
+                    "id": c["id"], "x": c["x"], "y": c["y"],
+                    "logs": c["logs"],
+                    "remaining": round(remaining, 1),
+                    "duration": c["duration"],
+                    "map": c.get("map", "level_01"),
+                }
+        # Clean buildings dict
+        clean_buildings = {}
+        for bid, b in game.buildings.items():
+            cb = {
+                "id": b["id"], "kind": b["kind"],
+                "col": b["col"], "row": b["row"],
+                "map": b.get("map", "level_01"),
+                "direction": b.get("direction", ""),
+                "out_direction": b.get("out_direction", ""),
+                "label": b.get("label", ""),
+                "stored": b.get("stored", {}),
+            }
+            if b.get("_cart"):
+                cb["cart"] = b["_cart"]
+            if b.get("_held"):
+                cb["held"] = b["_held"]
+            clean_buildings[bid] = cb
 
-        # Broadcast to all connected clients
+        # Build clean world objects dict (filter internal fields)
+        clean_world_objects = {}
+        for wo_id, wo in WORLD_OBJECT_INSTANCES.items():
+            clean_world_objects[wo_id] = {
+                "id": wo["id"],
+                "asset_id": wo["asset_id"],
+                "map": wo["map"],
+                "x": wo["x"], "y": wo["y"],
+                "hp": wo["hp"], "maxHp": wo["maxHp"],
+                "depleted": wo["depleted"],
+            }
+        all_animals = animal_manager.get_all()
+        all_crops = crop_manager.get_all()
+        all_fx = list(game.fx_events)
+        game.fx_events.clear()
+
+        # Broadcast per-client — filter entities to the receiving player's map
         disconnected = []
         for pid, ws in clients.items():
+            recipient_map = game.players.get(pid, {}).get("map", "level_01")
+            on_overworld = recipient_map == "level_01"
+
+            # Players: include self always; others only if on same map
+            filtered_players = {}
+            for other_pid, pdata in clean_players.items():
+                if other_pid == pid or pdata.get("map", "level_01") == recipient_map:
+                    # Filter each player's NPCs to same map too
+                    filtered_npcs = {
+                        nid: npc for nid, npc in pdata.get("npcs", {}).items()
+                        if npc.get("map", "level_01") == recipient_map
+                    }
+                    filtered_players[other_pid] = {**pdata, "npcs": filtered_npcs}
+
+            # World objects: filter by map (they can exist on any map)
+            filtered_wo = {wid: wo for wid, wo in clean_world_objects.items()
+                           if wo["map"] == recipient_map}
+
+            # Buildings: filter by map
+            filtered_buildings = {bid: b for bid, b in clean_buildings.items()
+                                  if b["map"] == recipient_map}
+
+            # Filter anvils, dummies, campfires by map
+            filtered_anvils = {aid: a for aid, a in clean_anvils.items()
+                               if a.get("map", "level_01") == recipient_map}
+            filtered_dummies = {did: d for did, d in clean_dummies.items()
+                                if d.get("map", "level_01") == recipient_map}
+            filtered_campfires = {cid: c for cid, c in clean_campfires.items()
+                                  if c.get("map", "level_01") == recipient_map}
+
+            state = {
+                "type": "state",
+                "players": filtered_players,
+                "trees": game.trees if on_overworld else [],
+                "rocks": game.rocks if on_overworld else [],
+                "ground_items": game.ground_items if on_overworld else [],
+                "dummies": filtered_dummies,
+                "anvils": filtered_anvils,
+                "campfires": filtered_campfires,
+                "fx_events": all_fx if on_overworld else [],
+                "animals": all_animals if on_overworld else [],
+                "crops": all_crops if on_overworld else [],
+                "world_objects": filtered_wo,
+                "buildings": filtered_buildings,
+            }
             try:
-                await ws.send_text(payload)
+                await ws.send_text(json.dumps(state))
             except Exception:
                 disconnected.append(pid)
 
@@ -210,6 +269,10 @@ def ensure_loop():
     if not _loop_started:
         _loop_started = True
         asyncio.ensure_future(game_loop())
+        # Spawn and start the AI rival player (controlled by SPAWN_AI_PLAYER in .env)
+        if SPAWN_AI_PLAYER:
+            ai_player.spawn()
+            ai_player.start()
 
 
 @router.websocket("/ws")
@@ -244,41 +307,28 @@ async def websocket_endpoint(ws: WebSocket):
 
     if saved:
         # Restore saved stats
-        player["x"] = saved.get("x", player["x"])
-        player["y"] = saved.get("y", player["y"])
-        player["hp"] = saved.get("hp", player["hp"])
-        player["maxHp"] = saved.get("maxHp", player["maxHp"])
+        for key in ("x", "y", "hp", "maxHp", "str", "def", "level", "xp", "logs"):
+            if key in saved:
+                player[key] = saved[key]
         player["ki"] = saved.get("ki", player.get("ki", 20))
         player["maxKi"] = saved.get("maxKi", player.get("maxKi", 20))
-        player["blastLevel"] = saved.get("blastLevel", player.get("blastLevel", 0))
-        player["inf_ki"] = saved.get("inf_ki", player.get("inf_ki", False))
-        player["kiSkillLevel"] = saved.get("kiSkillLevel", player.get("kiSkillLevel", 1))
-        player["kiSkillXp"] = saved.get("kiSkillXp", player.get("kiSkillXp", 0))
-        player["realm_tier"] = saved.get("realm_tier", player.get("realm_tier", 0))
-        player["realm_insight"] = saved.get("realm_insight", player.get("realm_insight", 0))
-        player["realm_crystal_t1"] = saved.get("realm_crystal_t1", player.get("realm_crystal_t1", 0))
-        player["ki_upgrades"] = saved.get("ki_upgrades", player.get("ki_upgrades", {}))
-        player["str"] = saved.get("str", player["str"])
-        player["def"] = saved.get("def", player["def"])
-        player["level"] = saved.get("level", player["level"])
-        player["xp"] = saved.get("xp", player["xp"])
-        player["logs"] = saved.get("logs", player["logs"])
-        player["stones"] = saved.get("stones", player.get("stones", 0))
-        player["bastalite"] = saved.get("bastalite", 0)
-        player["crystal_pristine"] = saved.get("crystal_pristine", 0)
-        player["crystal_normal"] = saved.get("crystal_normal", 0)
-        player["crystal_poor"] = saved.get("crystal_poor", 0)
-        player["armor_elite"] = saved.get("armor_elite", False)
-        player["armor_elite_inv"] = saved.get("armor_elite_inv", False)
+        player["blastLevel"] = saved.get("blastLevel", 0)
+        player["kiSkillLevel"] = saved.get("kiSkillLevel", 1)
+        player["kiSkillXp"] = saved.get("kiSkillXp", 0)
+        player["inf_ki"] = saved.get("inf_ki", False)
+        player["stones"] = saved.get("stones", 0)
+        player["crystals"] = saved.get("crystals", 0)
+        player["copper"] = saved.get("copper", 0)
+        player["meat"] = saved.get("meat", 0)
+        player["feathers"] = saved.get("feathers", 0)
+        player["vegetables"] = saved.get("vegetables", 0)
+        player["seeds"] = saved.get("seeds", 0)
+        player["ki_blast_bonuses"] = saved.get("ki_blast_bonuses", player.get("ki_blast_bonuses", {}))
         player["ki_moves"] = saved.get("ki_moves", [])
-        player["ki_denominations"] = saved.get("ki_denominations", [])
-        player["ki_known_augments"] = saved.get("ki_known_augments", {})
-        player["ki_equipped_augments"] = saved.get("ki_equipped_augments", {})
-        player["aura_tint"] = saved.get("aura_tint", player.get("aura_tint", 0x4fd6ff))
-        player["aura_alpha"] = saved.get("aura_alpha", player.get("aura_alpha", 0.42))
         player["npc_ids"] = saved.get("npc_ids", [])
-        game._normalize_ki_progression(player)
-        game._ensure_level_based_ki(player)
+        player["map"] = saved.get("map", "level_01")
+        player["equipment"] = saved.get("equipment", {})
+        player["inventory"] = saved.get("inventory", {})
         print(f"[ws] Restored player {pid} (level {player['level']}, {player['logs']} logs)")
     else:
         player["npc_ids"] = []
@@ -289,14 +339,15 @@ async def websocket_endpoint(ws: WebSocket):
     welcome = {
         "type": "welcome",
         "your_id": pid,
-        "players": snap["players"],
+        "players": {pid_k: {**pv, "npcs": _clean_npcs(pv.get("npcs", {}))}
+                     for pid_k, pv in snap["players"].items()},
         "trees": snap["trees"],
         "ground_items": snap["ground_items"],
         "dummies": snap["dummies"],
-        "fences": snap["fences"],
-        "ki_targets": snap.get("ki_targets", {}),
         "anvils": snap.get("anvils", {}),
         "npc_ids": player.get("npc_ids", []),
+        "animals": animal_manager.get_all(),
+        "crops": crop_manager.get_all(),
     }
     await ws.send_text(json.dumps(welcome))
     clients[pid] = ws

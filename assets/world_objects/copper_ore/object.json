@@ -1,0 +1,22 @@
+{
+  "id": "copper_ore",
+  "label": "Copper Ore",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 54,
+    "tileRow": 20
+  },
+  "solid": true,
+  "interaction": "mine",
+  "required_level": 1,
+  "hp": 1,
+  "drops": [
+    {
+      "resource": "raw_copper",
+      "min": 1,
+      "max": 2
+    }
+  ],
+  "respawn_min": 30,
+  "respawn_max": 60
+}

@@ -5,36 +5,128 @@
 import Phaser from 'phaser';
 import { parseCommand, generateDialogue } from '../net/LLMClient.js';
 import { extractLearnablePhrases } from '../entities/NPC.js';
+import { DriveSystem } from '../systems/DriveSystem.js';
 
 const MAX_LOG_LINES = 80;
 const LOG_PAD = 12;
 const LOG_FONT_SIZE = 18;
 
-// Simple local patterns to avoid LLM round-trips
+// Only "stop" is kept as a hard local pattern — everything else routes through the LLM
+// so NPC personality can shape the response. This is the safety-valve override.
 const LOCAL_PATTERNS = [
-  { re: /\b(chop|get|gather|collect|fetch)\b.*\b(wood|logs?|trees?)\b/i, commands: [{ task: 'gather', item: 'wood' }], reply: 'On it, chopping wood!' },
-  { re: /\b(follow|come\s+with|come\s+here|stay\s+close)\b/i, commands: [{ task: 'follow' }], reply: 'Right behind you, boss.' },
-  { re: /\b(stop|idle|wait|stand|stay)\b/i, commands: [{ task: 'idle' }], reply: 'Alright, taking a break.' },
-  { re: /\b(train|practice|spar)\b/i, commands: [{ task: 'train' }], reply: 'Time to train! Heading to the dummy.' },
-  { re: /\b(guard|protect|watch|keep)\b.*\b(fire|campfire)\b/i, commands: [{ task: 'guard_fire' }], reply: 'I will guard the fire.' },
-  { re: /\b(guard|defend|protect)\s*(me|us)?\b/i, commands: [{ task: 'defend_player' }], reply: 'I\'ll keep you safe.' },
-  { re: /\b(give|hand|drop|deliver|bring)\b.*\b(wood|logs?|inventory|stuff)\b/i, commands: [{ task: 'give_logs' }], reply: 'Coming to drop off logs!' },
-  { re: /\b(give|hand\s+over|drop\s+off|bring)\b.*\b(me|here)\b/i, commands: [{ task: 'give_logs' }], reply: 'On my way with the goods!' },
-  // "attack" with no target name → attack nearest enemy (players/NPCs/dummies)
-  // "attack <name>" → handled dynamically in _submit via _resolveAttackTarget
-  { re: /^(attack|fight|kill)$/i, commands: [{ task: 'attack_nearest_enemy' }], reply: 'Looking for enemies!' },
-  { re: /\b(build|make|construct)\b.*\b(fences?|walls?|barriers?)\b/i, commands: [{ task: 'build_fence' }], reply: 'Building fences from nearby logs!' },
-  { re: /\b(light|ignite|start)\b.*\b(fire|campfire|log)\b/i, commands: [{ task: 'light_campfire' }], reply: 'I will light the fire.' },
-  { re: /\b(pick\s*up|get|grab|take|collect)\b.*\b(stone|rocks?)\b/i, commands: [{ task: 'pickup_stone' }], reply: 'I\'ll go grab that stone!' },
-  { re: /\b(refine|smelt|use)\b.*\b(stone|rocks?|anvil)\b/i, commands: [{ task: 'refine_stone' }], reply: 'Heading to the anvil to refine!' },
-  { re: /\b(learn|study|practice|train)\b.*\b(ki|blast|energy)\b/i, commands: [{ task: 'learn_ki' }], altTask: 'practice_ki', reply: 'I\'ll gather wood and build a Ki Target to learn!', altReply: 'Time to practice my ki blast!' },
-  { re: /\b(build|make|craft)\b.*\b(ki\s*target)\b/i, commands: [{ task: 'learn_ki' }], reply: 'Building a Ki Target to learn ki blast!' },
-  { re: /\b(show|demonstrate|fire|shoot|use)\b.*\b(ki|blast|energy)\b/i, commands: [{ task: 'show_blast' }], reply: 'Watch this!' },
-  { re: /\bmeditate\b.*\b(pristine)\b/i, commands: [{ task: 'meditate', crystal_quality: 'pristine' }], reply: 'I will enter a deep meditation.' },
-  { re: /\bmeditate\b.*\b(ki|normal)\s+crystal\b/i, commands: [{ task: 'meditate', crystal_quality: 'normal' }], reply: 'I will meditate with a ki crystal.' },
-  { re: /\bmeditate\b.*\b(cracked|poor)\b/i, commands: [{ task: 'meditate', crystal_quality: 'poor' }], reply: 'I will meditate with a cracked crystal.' },
-  { re: /\bmeditate\b/i, commands: [{ task: 'meditate' }], reply: 'I will begin meditating.' },
+  { re: /^(stop|idle|halt)$/i, commands: [{ task: 'idle' }], reply: null },
+  { re: /\bmine\b.*\b(and|then)\b.*\bdeposit\b|\bmine\b.*\bdeposit\b/i, commands: [{ task: 'mine_ore' }], reply: null },  // "mine and deposit" — mine_ore auto-chains to deposit when full
+  { re: /\b(mine|mining)\b.*\b(ore|copper|tin)\b|\b(ore|copper|tin)\b.*\b(mine|mining)\b/i, commands: [{ task: 'mine_ore' }], reply: null },
+  { re: /^(mine|go mine)$/i, commands: [{ task: 'mine_ore' }], reply: null },
+  { re: /\bdeposit\b|\bstore\b.*\b(items?|ore|stuff)\b|\bput.*\b(in|into)\b.*\bcrate\b/i, commands: [{ task: 'deposit_to_crate' }], reply: null },
+  { re: /\bgather\b.*\b(wood|logs?|tree)\b|\bchop\b/i, commands: [{ task: 'gather', item: 'wood' }], reply: null },
+  { re: /\bgather\b.*\b(stone|rock)\b/i, commands: [{ task: 'gather_stone' }], reply: null },
+  { re: /\bgather\b.*\b(all|everything)\b|\bgather all\b/i, commands: [{ task: 'gather_all' }], reply: null },
+  { re: /^(follow|come|follow me|come here)$/i, commands: [{ task: 'follow' }], reply: null },
+  { re: /^(defend|protect|guard)$/i, commands: [{ task: 'defend_player' }], reply: null },
+  { re: /^(train|practice|spar)$/i, commands: [{ task: 'train' }], reply: null },
+  { re: /\bgive\b.*\b(logs?|wood)\b|\bbring.*logs?\b/i, commands: [{ task: 'give_logs' }], reply: null },
+  { re: /\bgive\b.*\b(materials?|stones?|stuff)\b/i, commands: [{ task: 'give_materials' }], reply: null },
 ];
+
+// Personality-flavored task acknowledgement lines
+const PERSONALITY_TASK_REPLIES = {
+  Guardian: {
+    gather: 'I\'ll get the resources. Stay safe.',
+    follow: 'Right beside you.',
+    attack_nearest_enemy: 'Engaging threats.',
+    attack_player: 'Taking them down.',
+    attack_npc: 'Targeting their companion.',
+    defend_player: 'I\'ll protect you.',
+    train: 'Sharpening my skills.',
+    practice_ki: 'Focusing my energy.',
+    give_logs: 'Here, take these.',
+    gather_stone: 'Mining stone now.',
+    refine_stone: 'Refining at the anvil.',
+    mine_ore: 'Mining ore. Stay safe.',
+    deposit_to_crate: 'Storing supplies.',
+  },
+  Scout: {
+    gather: 'Sure, I\'ll grab some.',
+    follow: 'Yeah yeah, coming.',
+    attack_nearest_enemy: 'Ooh, a fight? Okay!',
+    attack_player: 'Going after them!',
+    attack_npc: 'On it!',
+    defend_player: 'I\'ll keep an eye out.',
+    train: 'Practice makes perfect!',
+    practice_ki: 'Let me try something...',
+    give_logs: 'Catch!',
+    gather_stone: 'Rocks, rocks, where are the rocks...',
+    refine_stone: 'Let\'s see what we get!',
+    mine_ore: 'Ooh, shiny ore! On it!',
+    deposit_to_crate: 'Dropping stuff off!',
+  },
+  Berserker: {
+    gather: '*grumbles* Fine. Trees.',
+    follow: 'Whatever.',
+    attack_nearest_enemy: 'FINALLY! Let\'s GO!',
+    attack_player: 'They\'re DEAD!',
+    attack_npc: 'Crushing their bot!',
+    defend_player: 'Nobody touches you!',
+    train: 'HRAAAH! Training time!',
+    practice_ki: 'POWER! More POWER!',
+    give_logs: 'Here. Take \'em.',
+    gather_stone: 'Smashing rocks!',
+    refine_stone: 'Gimme something good...',
+    mine_ore: 'SMASHING ore!',
+    deposit_to_crate: '*tosses stuff in crate*',
+  },
+  Caretaker: {
+    gather: 'Of course! I\'ll get wood for us.',
+    follow: 'I\'m right here with you.',
+    attack_nearest_enemy: 'If I must... for you.',
+    attack_player: 'I don\'t like this, but... okay.',
+    attack_npc: 'I\'ll try my best.',
+    defend_player: 'I won\'t let anyone hurt you!',
+    train: 'Let me practice a bit.',
+    practice_ki: 'Gently focusing...',
+    give_logs: 'Here you go! All yours.',
+    gather_stone: 'I\'ll find some nice stones.',
+    refine_stone: 'Let\'s see what we can make!',
+    mine_ore: 'I\'ll get some ore for us!',
+    deposit_to_crate: 'Putting everything away neatly.',
+  },
+  Paranoid: {
+    gather: 'Fine, but I\'m keeping watch.',
+    follow: '...right behind you. Watching.',
+    attack_nearest_enemy: 'I knew they were trouble!',
+    attack_player: 'They had it coming!',
+    attack_npc: 'Can\'t trust that thing.',
+    defend_player: 'I\'ll watch EVERYTHING.',
+    train: 'Need to be ready...',
+    practice_ki: 'More power, just in case...',
+    give_logs: 'Here. Don\'t lose them.',
+    gather_stone: 'Getting stone... watching my back.',
+    refine_stone: 'Hope this works...',
+    mine_ore: 'Mining... but I\'m watching my back.',
+    deposit_to_crate: 'Storing it. Nobody better touch it.',
+  },
+  Pragmatist: {
+    gather: 'Efficient. On it.',
+    follow: 'Moving with you.',
+    attack_nearest_enemy: 'Engaging.',
+    attack_player: 'Targeting.',
+    attack_npc: 'Acknowledged.',
+    defend_player: 'Defensive position.',
+    train: 'Training.',
+    practice_ki: 'Ki practice underway.',
+    give_logs: 'Delivering resources.',
+    gather_stone: 'Mining stone.',
+    refine_stone: 'Refining.',
+    mine_ore: 'Mining. Optimal route calculated.',
+    deposit_to_crate: 'Depositing. Inventory managed.',
+  },
+};
+
+function _getPersonalityTaskReply(personalityType, taskName) {
+  const typeReplies = PERSONALITY_TASK_REPLIES[personalityType] || PERSONALITY_TASK_REPLIES.Pragmatist;
+  return typeReplies[taskName] || typeReplies.gather || 'Got it.';
+}
 
 /** Format emotion deltas into a compact display string. Returns '' if no meaningful changes. */
 function _formatDeltas(deltas) {
@@ -245,6 +337,20 @@ export class ChatBox {
     }
     this._historyIdx = -1;
 
+    // Slash commands — admin commands handled separately, NPC shortcuts stripped and re-routed
+    if (text.startsWith('/')) {
+      const slashWord = text.slice(1).trim().split(/\s+/)[0]?.toLowerCase();
+      const NPC_SLASH_CMDS = ['mine', 'deposit', 'store', 'gather', 'chop', 'follow', 'stop', 'idle', 'defend', 'guard', 'train', 'attack'];
+      if (NPC_SLASH_CMDS.includes(slashWord)) {
+        // Strip the '/' and continue as normal NPC chat command
+        text = text.slice(1).trim();
+      } else {
+        this._close();
+        this._handleSlashCommand(text);
+        return;
+      }
+    }
+
     const npc = this._getSelectedNPC();
     if (!npc) { this._close(); return; }
 
@@ -284,15 +390,20 @@ export class ChatBox {
       this._addLog(`You → ${targetName}: ${text}`, '#ffddaa');
       this._scene.player?.showBubble?.(`→ ${targetName}: ${text}`, 4000);
 
-      // If it's a remote NPC, send chat relay so their owner's LLM can respond
       const conn = this._scene._conn;
-      if (conn?.connected && npc.ownerPid && npc.npcId) {
-        conn.send({
-          type: 'chat_to_npc',
-          target_owner: npc.ownerPid,
-          target_npc_id: npc.npcId,
-          text,
-        });
+      if (conn?.connected) {
+        if (npc.ownerPid && npc.npcId) {
+          // Remote NPC — relay so their owner's LLM can respond
+          conn.send({
+            type: 'chat_to_npc',
+            target_owner: npc.ownerPid,
+            target_npc_id: npc.npcId,
+            text,
+          });
+        } else if (npc.playerId) {
+          // Remote player (e.g. AI rival) — send as global chat directed at them
+          conn.send({ type: 'chat', text: `@${npc.playerId} ${text}` });
+        }
       }
       return;
     }
@@ -312,19 +423,6 @@ export class ChatBox {
     }
 
     const playerId = this._getPlayerId();
-
-    const carryMatch = text.match(/\b(carry|drag|haul|take)\b(.+?)\b(away|off|with you|over there)?\b/i);
-    if (carryMatch) {
-      const resolved = this._resolveCarryTarget((carryMatch[2] || '').trim().toLowerCase());
-      if (resolved) {
-        const reply = `I'll haul ${resolved.displayName} away.`;
-        npc.showBubble(reply, 3200, { silent: true });
-        npc.addMemory(`Player commanded: "${text}"`, 'command', playerId);
-        this._onCommands(npc, [resolved.command]);
-        this._addLog(`${npc.getName()}: ${reply}`);
-        return;
-      }
-    }
 
     // Check for "talk to <name>" / "go talk to <name>" / "chat with <name>" — socialize command
     const talkMatch = text.match(/\b(?:go\s+)?(?:talk|chat|speak|socialize)\s+(?:to|with)\s+(.+)/i);
@@ -374,15 +472,26 @@ export class ChatBox {
       // If no target found with that name, fall through to general attack
     }
 
-    // Try local pattern matching first
+    // Local pattern matching — instant command shortcuts (no LLM needed)
     for (const pat of LOCAL_PATTERNS) {
       if (pat.re.test(text)) {
-        // If NPC already knows ki blast, use altTask for learn_ki patterns
-        let commands = pat.commands;
-        let reply = pat.reply;
-        if (pat.altTask && npc._hasKiBlast) {
-          commands = [{ task: pat.altTask }];
-          reply = pat.altReply || pat.reply;
+        const commands = pat.commands;
+        const taskName = commands[0]?.task || 'idle';
+        const pType = npc.soul?.personality?.type || 'Pragmatist';
+        let reply;
+        if (taskName === 'idle') {
+          const stopLines = {
+            Guardian:   ['Standing down.', 'Holding position.'],
+            Scout:      ['Fine, fine. Stopping.', 'Alright, taking a break.'],
+            Berserker:  ['Tch. Fine.', '*grumbles* ...okay.'],
+            Caretaker:  ['Of course. Resting now.', 'Taking a breather.'],
+            Paranoid:   ['...okay, but I\'m watching.', 'Stopping. For now.'],
+            Pragmatist: ['Understood. Idle.', 'Roger.'],
+          };
+          const lines = stopLines[pType] || ['Stopping.'];
+          reply = lines[Math.floor(Math.random() * lines.length)];
+        } else {
+          reply = _getPersonalityTaskReply(pType, taskName);
         }
         npc.showBubble(reply, 3000, { silent: true });
         npc.addMemory(`Player commanded: "${text}"`, 'command', playerId);
@@ -407,22 +516,33 @@ export class ChatBox {
       npc.addMemory(`Player commanded: "${text}"`, 'command', playerId);
 
       if (commands.length > 0 && commands[0].task !== 'idle') {
-        // Got real commands — execute them
+        // Got real commands — check drive compliance first
         const taskName = commands[0].task;
-        const replies = {
-          gather: 'On it!',
-          follow: 'Following you!',
-          attack_nearest_enemy: 'Looking for a fight!',
-          attack_player: 'Going after them!',
-          attack_npc: 'Targeting their NPC!',
-          defend_player: 'I\'ll guard you!',
-          train: 'Time to train!',
-          meditate: 'I will meditate.',
-        };
-        const reply = replies[taskName] ?? 'Got it!';
-        npc.showBubble(reply, 3000, { silent: true });
-        this._onCommands(npc, commands);
-        this._addLog(`${npc.getName()}: ${reply}`);
+        const pType = npc.soul?.personality?.type || 'Pragmatist';
+        const compliance = DriveSystem.checkCompliance(npc, taskName);
+
+        if (compliance.level === 'refusal') {
+          // Only survival-emergency refusals — rare
+          const refusalLines = {
+            Guardian:   'I can\'t do that — we\'re in danger!',
+            Berserker:  'You crazy?! I\'m barely standing!',
+            Scout:      'Not a chance, I need to survive first!',
+            Caretaker:  'I\'m sorry, but I need to stay safe right now.',
+            Paranoid:   'No! Not now! Something\'s wrong!',
+            Pragmatist: 'Negative. Self-preservation takes priority.',
+          };
+          const reply = refusalLines[pType] || 'I can\'t do that right now.';
+          npc.showBubble(reply, 4000);
+          this._addLog(`${npc.getName()}: ${reply}`);
+        } else {
+          // Willing or reluctant — execute with flavored response
+          let reply = _getPersonalityTaskReply(pType, taskName);
+          if (compliance.level === 'reluctant') reply = `*grumbles* ${reply}`;
+          else if (compliance.level === 'eager') reply = reply + '!';
+          npc.showBubble(reply, 3000, { silent: true });
+          this._onCommands(npc, commands);
+          this._addLog(`${npc.getName()}: ${reply}`);
+        }
       } else {
         // Idle or unclear — try dialogue instead
         await this._fetchDialogue(npc, text);
@@ -434,6 +554,119 @@ export class ChatBox {
       this._scene.time.delayedCall(3000, () => this._status.setVisible(false));
       this._addLog('(LLM offline — start Ollama)');
     }
+  }
+
+  _handleSlashCommand(text) {
+    const conn = this._scene?._conn;
+    const parts = text.slice(1).trim().split(/\s+/);
+    const cmd = parts[0]?.toLowerCase();
+
+    if (cmd === 'give') {
+      const item = parts[1]?.toLowerCase();
+      const amount = parseInt(parts[2], 10) || 10;
+      const validItems = ['seeds', 'logs', 'stones', 'crystals', 'meat', 'feathers', 'vegetables'];
+      if (!item || !validItems.includes(item)) {
+        this._addLog(`Usage: /give <${validItems.join('|')}> [amount]`, '#ffaa44');
+        return;
+      }
+      conn?.send({ type: 'admin', field: item, value: amount });
+      this._addLog(`Gave yourself ${amount} ${item}.`, '#88ff88');
+      return;
+    }
+
+    // ── Custom task recording commands ──────────────────────────────────────
+    const recorder = this._scene?._taskRecorder;
+
+    if (cmd === 'create_task') {
+      const taskName = parts.slice(1).join('_') || '';
+      if (!taskName) {
+        this._addLog('Usage: /create_task <name>  (e.g. /create_task mine_and_deposit)', '#ffaa44');
+        return;
+      }
+      if (!recorder) { this._addLog('Task recorder not available.', '#ff6644'); return; }
+      if (recorder.isRecording()) {
+        this._addLog('Already recording! Use /save_task or /cancel_task first.', '#ffaa44');
+        return;
+      }
+      recorder.startRecording(taskName);
+      this._addLog(`Recording task "${taskName}". Click ore nodes and storage crates to add targets.`, '#44ff44');
+      this._addLog('When done: /save_task to save, /cancel_task to abort.', '#888888');
+      return;
+    }
+
+    if (cmd === 'save_task') {
+      if (!recorder?.isRecording()) {
+        this._addLog('Not recording any task. Use /create_task <name> first.', '#ffaa44');
+        return;
+      }
+      const saved = recorder.saveRecording();
+      if (saved) {
+        this._addLog(`Task "${saved.name}" saved! Ores: ${saved.ore_labels.join(', ')}. Crates: ${saved.crate_labels.join(', ') || 'auto'}.`, '#44ff44');
+        this._addLog(`Assign to an NPC with: /${saved.name}`, '#888888');
+      } else {
+        this._addLog('Cannot save — add at least one ore target first.', '#ff6644');
+      }
+      return;
+    }
+
+    if (cmd === 'cancel_task') {
+      if (!recorder?.isRecording()) {
+        this._addLog('Not recording any task.', '#ffaa44');
+        return;
+      }
+      const name = recorder.getTaskName();
+      recorder.cancelRecording();
+      this._addLog(`Task recording "${name}" cancelled.`, '#ffaa44');
+      return;
+    }
+
+    if (cmd === 'tasks') {
+      if (!recorder) { this._addLog('Task recorder not available.', '#ff6644'); return; }
+      const names = recorder.getTaskNames();
+      if (names.length === 0) {
+        this._addLog('No custom tasks saved. Use /create_task <name> to create one.', '#888888');
+      } else {
+        this._addLog(`Saved tasks: ${names.map(n => '/' + n).join(', ')}`, '#cccccc');
+      }
+      return;
+    }
+
+    if (cmd === 'delete_task') {
+      const taskName = parts.slice(1).join('_') || '';
+      if (!taskName) { this._addLog('Usage: /delete_task <name>', '#ffaa44'); return; }
+      if (!recorder) return;
+      recorder.deleteTask(taskName);
+      this._addLog(`Task "${taskName}" deleted.`, '#ffaa44');
+      return;
+    }
+
+    // ── Check if it's a custom task name → assign to selected NPC ───────
+    if (recorder) {
+      const taskDef = recorder.getTask(cmd);
+      if (taskDef) {
+        const npc = this._getSelectedNPC();
+        if (!npc) {
+          this._addLog('Select an NPC first, then use /' + taskDef.name, '#ffaa44');
+          return;
+        }
+        // Dispatch as custom_task command
+        const commands = [{
+          task: 'custom_task',
+          task_name: taskDef.name,
+          ore_asset_ids: taskDef.ore_asset_ids,
+          crate_building_ids: taskDef.crate_building_ids,
+          crate_labels: taskDef.crate_labels,
+        }];
+        const pType = npc.soul?.personality?.type || 'Pragmatist';
+        const reply = _getPersonalityTaskReply(pType, 'mine_ore');
+        npc.showBubble(reply, 3000, { silent: true });
+        this._onCommands(npc, commands);
+        this._addLog(`${npc.getName()}: ${reply} (task: ${taskDef.name})`, '#cccccc');
+        return;
+      }
+    }
+
+    this._addLog(`Unknown command: ${text}`, '#ff6644');
   }
 
   async _fetchDialogue(npc, text) {
@@ -556,40 +789,6 @@ export class ChatBox {
     }
 
     return null;
-  }
-
-  _resolveCarryTarget(targetName) {
-    const scene = this._scene;
-    const knocked = [];
-
-    for (const rp of Object.values(scene._remotePlayers || {})) {
-      if (rp.isDead?.() || !rp.isKnockedOut?.()) continue;
-      knocked.push({
-        entity: rp,
-        displayName: rp.playerId,
-        command: { task: 'carry_away_player', target_id: rp.playerId, target_name: rp.playerId },
-      });
-    }
-
-    for (const rnpc of Object.values(scene._remoteNPCSprites || {})) {
-      if (rnpc.isDead?.() || !rnpc.isKnockedOut?.()) continue;
-      const name = rnpc.getName?.() || rnpc.npcId || 'them';
-      knocked.push({
-        entity: rnpc,
-        displayName: name,
-        command: {
-          task: 'carry_away_npc',
-          target_owner: rnpc.ownerPid,
-          target_npc_id: rnpc.npcId,
-          target_name: name,
-        },
-      });
-    }
-
-    if (knocked.length === 0) return null;
-    const generic = !targetName || /\b(body|them|him|her|that|target|one)\b/.test(targetName);
-    if (generic && knocked.length === 1) return knocked[0];
-    return knocked.find(entry => entry.displayName.toLowerCase().includes(targetName)) || null;
   }
 
   /** Build a short list of nearby entities so the NPC can answer world-awareness questions. */

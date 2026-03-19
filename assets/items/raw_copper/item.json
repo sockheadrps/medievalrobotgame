@@ -1,0 +1,14 @@
+{
+  "id": "raw_copper",
+  "label": "Raw Copper",
+  "category": "resource",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 45,
+    "tileRow": 17
+  },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#cccccc",
+  "description": "raw copper ore"
+}

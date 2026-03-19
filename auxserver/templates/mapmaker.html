@@ -25,6 +25,13 @@
         <button class="tool-btn" id="btnLine" onclick="setTool('line')">
           Line
         </button>
+        <button class="tool-btn" id="btnCollision" onclick="setTool('collision')" title="Paint invisible collision zones (editor-only, saved separately)">
+          Collision
+        </button>
+        <input type="color" id="collisionColor" value="#ff003388" title="Collision overlay color" style="width:28px;height:28px;padding:1px;border:1px solid #555;background:#222;cursor:pointer;border-radius:2px;" />
+        <button class="tool-btn" id="btnPortal" onclick="setTool('portal')" title="Click a tile to place a portal to another map">
+          Portal
+        </button>
       </section>
 
       <section id="gridSection">
@@ -54,9 +61,58 @@
       <aside id="sidebar">
         <div class="sidebar-content">
           <h3>Tilesheet</h3>
+          <!-- Tile history bar -->
+          <div id="tileHistory" class="tile-history"></div>
           <canvas id="sheetCanvas"></canvas>
-          <canvas id="zoom" width="320" height="320"></canvas>
-          <div id="info">col=-  row=-  frame=-  (px -, -)  COLS=-</div>
+
+          <!-- Two-column row: big zoom left, map items registry right -->
+          <div class="zoom-row">
+            <!-- Left: magnifier -->
+            <div class="zoom-col">
+              <canvas id="zoom" width="160" height="160"></canvas>
+            </div>
+
+            <!-- Right: selected tile info + map items registry -->
+            <div class="items-col">
+              <!-- Map Items registry (scrollable, fills available height) -->
+              <div class="items-registry">
+                <div class="items-registry-header">
+                  <strong>Map Items</strong>
+                  <button id="addItemBtn" class="small-tool-btn" title="Add item slot">+</button>
+                </div>
+                <div id="itemsList" class="items-list">
+                  <!-- entries injected by JS -->
+                </div>
+              </div>
+              <!-- World Objects palette -->
+              <div class="items-registry" id="woRegistry" style="margin-top:6px;">
+                <div class="items-registry-header">
+                  <strong>World Objects</strong>
+                </div>
+                <div id="woPickerList" class="items-list">
+                  <!-- entries injected by JS -->
+                </div>
+              </div>
+              <!-- Info label pinned to bottom of right col -->
+              <div id="info" class="info-label">col=-&nbsp; row=-&nbsp; frame=-</div>
+            </div>
+          </div>
+
+          <!-- Mix Palette -->
+          <div id="mixPalettePanel">
+            <div class="mix-palette-header">
+              <strong>Mix Palette</strong>
+              <div class="mix-size-row">
+                <label>Slots</label>
+                <input type="number" id="mixSlotCount" value="4" min="2" max="10" step="1" />
+              </div>
+            </div>
+            <div id="mixSlots" class="mix-slots"></div>
+            <div class="mix-hint" id="mixHint">Click a slot, then pick a tile above</div>
+            <button id="mixFillBtn" class="mix-fill-btn" title="Randomly scatter palette tiles across the map (equal distribution)">
+              Mix Fill &#x1F5D1;
+            </button>
+          </div>
 
           <div id="spriteEditorPanel" class="hidden">
             <h3>Sprite Maker</h3>

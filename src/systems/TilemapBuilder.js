@@ -22,6 +22,8 @@ export function buildTilemapFromData(scene, mapData) {
   const tiles  = mapData.tiles  || [];
   const treePositions = [];
   const rockSpawnTiles = [];
+  const collisionRects = [];
+  const tileImages = [];
 
   // Build a lookup: "col,row" -> {tileX, tileY}
   const lookup = {};
@@ -36,8 +38,7 @@ export function buildTilemapFromData(scene, mapData) {
 
       const t = lookup[`${col},${row}`];
       if (!t) {
-        scene.add.image(x, y, SHEET_KEY, FRAME_GRASS)
-          .setScale(SCALE).setDepth(0);
+        tileImages.push(scene.add.image(x, y, SHEET_KEY, FRAME_GRASS).setScale(SCALE).setDepth(0));
         continue;
       }
 
@@ -45,12 +46,10 @@ export function buildTilemapFromData(scene, mapData) {
 
       if (frame === FRAME_TREE) {
         // Render grass underneath the tree
-        scene.add.image(x, y, SHEET_KEY, FRAME_GRASS)
-          .setScale(SCALE).setDepth(0);
+        tileImages.push(scene.add.image(x, y, SHEET_KEY, FRAME_GRASS).setScale(SCALE).setDepth(0));
         treePositions.push({ col, row });
       } else {
-        scene.add.image(x, y, SHEET_KEY, frame)
-          .setScale(SCALE).setDepth(0);
+        tileImages.push(scene.add.image(x, y, SHEET_KEY, frame).setScale(SCALE).setDepth(0));
         // Bare ground tiles can spawn rocks
         if (frame === FRAME_BARE) {
           rockSpawnTiles.push({ col, row });
@@ -59,7 +58,14 @@ export function buildTilemapFromData(scene, mapData) {
     }
   }
 
-  return { treePositions, rockSpawnTiles, width, height };
+  // Build static physics bodies for collision tiles
+  for (const ct of (mapData.collisionTiles || [])) {
+    const cx = ct.x * TILE_SIZE;
+    const cy = ct.y * TILE_SIZE;
+    collisionRects.push({ x: cx, y: cy, w: TILE_SIZE, h: TILE_SIZE });
+  }
+
+  return { treePositions, rockSpawnTiles, collisionRects, tileImages, width, height };
 }
 
 /**

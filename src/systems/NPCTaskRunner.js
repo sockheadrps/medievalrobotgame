@@ -2,20 +2,16 @@
 // Supports: gather, follow, attack_nearest_enemy, defend_player, attack_player, attack_npc, idle.
 
 import Phaser from 'phaser';
-import { TILE_SIZE, TREE_CHOP_DIST, NRG_KEY } from '../constants.js';
+import { TILE_SIZE, TREE_CHOP_DIST, ROCK_MINE_DIST, NRG_KEY } from '../constants.js';
 import { generateNPCChat } from '../net/LLMClient.js';
 
-const FOLLOW_DIST   = TILE_SIZE * 2;   // stay 2 tiles from player
-const FOLLOW_LEASH  = TILE_SIZE * 1.2; // stop when this close
+const FOLLOW_DIST_BASE = TILE_SIZE * 2;   // stay 2 tiles from player (base, scaled by personality)
+const FOLLOW_LEASH_BASE = TILE_SIZE * 1.2; // stop when this close (base)
 const ATTACK_RANGE  = TILE_SIZE * 1.2;
 const DEFEND_RANGE  = TILE_SIZE * 6;
-const ATTACK_COOLDOWN_MS = 1000; // ms between NPC attacks
-const CAMPFIRE_SENSE_RADIUS = TILE_SIZE * 8;
-const CAMPFIRE_GUARD_WARN_RADIUS = TILE_SIZE * 4;
-const CAMPFIRE_GUARD_ATTACK_RADIUS = TILE_SIZE * 2;
-const CAMPFIRE_GUARD_RESPONSE_MS = 2500;
+const ATTACK_COOLDOWN_BASE = 1000; // ms between NPC attacks (base, scaled by personality)
 const KI_BLAST_RANGE = TILE_SIZE * 4; // NPC ki blast range (matches player)
-const KI_BLAST_COOLDOWN_MS = 1200; // NPC ki blast cooldown (matches player)
+const KI_BLAST_COOLDOWN_BASE = 1200; // NPC ki blast cooldown (base, scaled by personality)
 
 export class NPCTaskRunner {
   constructor(scene, npc) {
@@ -26,9 +22,30 @@ export class NPCTaskRunner {
     this._target = null; // current movement/interaction target
     this._targetType = null; // 'player', 'npc', 'dummy'
     this._chopCooldown = 0; // ms until NPC can chop again
+    this._mineCooldown = 0; // ms until NPC can mine again
     this._attackCooldown = 0; // ms until NPC can attack again
     this._kiBlastCooldown = 0; // ms until NPC can ki blast again
-    this._campfireRecovery = null;
+  }
+
+  // ── Personality-modulated constants ─────────────────────────────────────────
+
+  /** Effective follow distance — personality controls orbit radius. */
+  _getFollowDist() {
+    return FOLLOW_DIST_BASE * (this._npc._personalityMod?.followDist ?? 1.0);
+  }
+
+  /** Effective follow leash — scales with follow distance. */
+  _getFollowLeash() {
+    return FOLLOW_LEASH_BASE * (this._npc._personalityMod?.followDist ?? 1.0);
+  }
+
+  /** Effective melee attack cooldown — personality + emotion. */
+  _getAttackCooldownMs() {
+    const mod = this._npc._personalityMod?.meleeCd ?? 1.0;
+    const rel = this._npc._getOwnerRelationship?.();
+    const anger = rel?.anger ?? 0;
+    // Angry NPCs attack faster (reckless swings, up to 25% faster at max anger)
+    return Math.max(200, ATTACK_COOLDOWN_BASE * mod * (1 - anger * 0.25));
   }
 
   /** Replace entire task queue. */
@@ -37,7 +54,6 @@ export class NPCTaskRunner {
     this._state = 'idle';
     this._target = null;
     this._socializing = false;
-    this._campfireRecovery = null;
     this._npc.stopMoving();
   }
 
@@ -46,7 +62,6 @@ export class NPCTaskRunner {
     this._tasks = [];
     this._state = 'idle';
     this._target = null;
-    this._campfireRecovery = null;
     this._npc.stopMoving();
   }
 
@@ -69,74 +84,10 @@ export class NPCTaskRunner {
     this.setTasks([{ task: 'idle' }]);
   }
 
-  _getOwnServerNPCState() {
-    return this._scene?._lastServerState?.players?.[this._scene.playerId]?.npcs?.[this._npc.id] ?? null;
-  }
-
-  _npcIsCarryingTarget(cmd) {
-    const carrying = this._getOwnServerNPCState()?.carrying;
-    if (!carrying) return false;
-    if (cmd.task === 'carry_away_player') {
-      return carrying.type === 'player' && carrying.id === cmd.target_id;
-    }
-    return carrying.type === 'npc' && carrying.owner === cmd.target_owner && carrying.id === cmd.target_npc_id;
-  }
-
-  _maybeOpportunisticRob(cmd, target) {
-    if (cmd._robAttempted) return;
-    cmd._robAttempted = true;
-    const npc = this._npc;
-    const pers = npc.soul?.personality || {};
-    const robScore = (pers.aggression ?? 0.3) * 0.55 + (1 - (pers.cooperation ?? 0.5)) * 0.25 + (pers.neuroticism ?? 0.3) * 0.2;
-    if (robScore < 0.52 || (target?.logs ?? 0) <= 0) return;
-    if (cmd.task === 'carry_away_player') {
-      this._scene._conn?.send({ type: 'npc_rob_player', npc_id: npc.id, target_id: cmd.target_id });
-    } else {
-      this._scene._conn?.send({
-        type: 'npc_rob_npc',
-        npc_id: npc.id,
-        owner_id: cmd.target_owner,
-        target_npc_id: cmd.target_npc_id,
-      });
-    }
-    const line = `Took their stuff too.`;
-    npc.showBubble(line, 2600, { silent: true });
-    this._scene._addNPCSpeechToChat?.(npc, line, '#ffccaa');
-  }
-
-  _finishCarryAway(cmd, targetName = 'them') {
-    const npc = this._npc;
-    const scene = this._scene;
-    const line = (npc.soul?.personality?.aggression ?? 0.3) > 0.6
-      ? `${targetName} woke up stranded. Hah.`
-      : `I dumped ${targetName} far off and came back.`;
-    npc.showBubble(line, 3600, { silent: true });
-    scene._addNPCSpeechToChat?.(npc, line, '#ffccaa');
-    npc.addMemory(`I carried ${targetName} away while they were unconscious.`, 'event', scene.playerId, 0.82);
-    this.setTasks([{ task: 'follow' }]);
-  }
-
-  _carryAwayDestination() {
-    const npc = this._npc;
-    const player = this._scene.player;
-    const dx = npc.x - player.x;
-    const dy = npc.y - player.y;
-    const len = Math.max(1, Math.hypot(dx, dy));
-    return {
-      x: npc.x + (dx / len) * TILE_SIZE * 5,
-      y: npc.y + (dy / len) * TILE_SIZE * 5,
-    };
-  }
-
   /** Called every frame from GameScene update. */
   update(delta) {
     if (this._npc.isDead()) return;
-    if (this._npc.meditating) {
-      this._npc.stopMoving();
-      return;
-    }
     if (this._kiBlastCooldown > 0) this._kiBlastCooldown -= delta;
-    if (this._tryCampfireRecovery(delta)) return;
     if (this._tasks.length === 0) return;
 
     const cmd = this._tasks[0];
@@ -146,6 +97,8 @@ export class NPCTaskRunner {
       case 'idle':     this._tasks.shift(); break;
       case 'attack_nearest_enemy': this._doAttack(delta); break;
       case 'train':                this._doTrain(delta); break;
+      case 'gather_stone':         this._doGatherStone(delta); break;
+      case 'gather_all':           this._doGatherAll(delta); break;
       case 'defend_player':        this._doDefend(delta); break;
       case 'attack_player':        this._doAttackPlayer(delta); break;
       case 'attack_npc':            this._doAttackNPC(delta); break;
@@ -153,80 +106,18 @@ export class NPCTaskRunner {
       case 'give_logs':            this._doGiveLogs(delta); break;
       case 'steal_logs':           this._doStealLogs(delta); break;
       case 'socialize_npc':        this._doSocializeNPC(delta); break;
-      case 'build_fence':          this._doBuildFence(delta); break;
-      case 'light_campfire':       this._doLightCampfire(delta); break;
-      case 'guard_fire':           this._doGuardFire(delta); break;
-      case 'move_away_from_fire':  this._doMoveAwayFromFire(delta); break;
-      case 'carry_away_player':    this._doCarryAwayPlayer(delta); break;
-      case 'carry_away_npc':       this._doCarryAwayNPC(delta); break;
-      case 'learn_ki':             this._doLearnKi(delta); break;
-      case 'show_blast':           this._doShowBlast(delta); break;
       case 'practice_ki':          this._doPracticeKi(delta); break;
       case 'pickup_stone':         this._doPickupStone(delta); break;
       case 'refine_stone':         this._doRefineStone(delta); break;
       case 'give_materials':       this._doGiveMaterials(delta); break;
-      case 'meditate':             this._doMeditate(delta); break;
+      case 'wander_explore':       this._doWanderExplore(delta); break;
+      case 'mine_ore':             this._doMineOre(delta); break;
+      case 'deposit_to_crate':     this._doDepositToCrate(delta); break;
+      case 'custom_task':          this._doCustomTask(delta); break;
       default:
         console.warn(`[TaskRunner] Unknown task: ${cmd.task}`);
         this._tasks.shift();
     }
-  }
-
-  _campfireRecoveryBlocked(taskName) {
-    return new Set([
-      'attack_nearest_enemy', 'defend_player', 'attack_player', 'attack_npc',
-      'flee_player', 'steal_logs', 'socialize_npc', 'carry_away_player',
-      'carry_away_npc', 'guard_fire',
-    ]).has(taskName);
-  }
-
-  _restoreCampfireRecoveryTasks() {
-    if (!this._campfireRecovery) return;
-    const paused = this._campfireRecovery.pausedTasks || [];
-    this._campfireRecovery = null;
-    if (this._tasks.length === 0 && paused.length > 0) {
-      this._tasks = paused;
-    }
-  }
-
-  _tryCampfireRecovery(_delta) {
-    const scene = this._scene;
-    const npc = this._npc;
-    const currentTask = this._tasks[0]?.task || null;
-    if (this._campfireRecoveryBlocked(currentTask)) {
-      this._restoreCampfireRecoveryTasks();
-      return false;
-    }
-    if (npc.hp >= npc.maxHp) {
-      this._restoreCampfireRecoveryTasks();
-      return false;
-    }
-
-    const fire = scene._findNearestLitCampfire?.(npc.x, npc.y, 8);
-    if (!fire) {
-      this._restoreCampfireRecoveryTasks();
-      return false;
-    }
-
-    if (!this._campfireRecovery) {
-      this._campfireRecovery = {
-        fireId: fire._serverId,
-        pausedTasks: this._tasks.length > 0 ? [...this._tasks] : [],
-      };
-      this._tasks = [];
-    }
-
-    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, fire.x, fire.y);
-    if (dist > TILE_SIZE * 1.2) {
-      npc.moveTo(fire.x, fire.y);
-    } else {
-      npc.stopMoving();
-      if (!this._campfireRecovery.announcedAt || Date.now() - this._campfireRecovery.announcedAt > 6000) {
-        npc.showBubble('Using the fire to patch myself up.', 2200, { silent: true });
-        this._campfireRecovery.announcedAt = Date.now();
-      }
-    }
-    return true;
   }
 
   // ── Gather wood ─────────────────────────────────────────────────────────────
@@ -254,13 +145,18 @@ export class NPCTaskRunner {
       }
     }
 
-    // Inventory full — deliver logs to player, then resume gathering
+    // Inventory full — deposit to crate if available, else deliver logs to player
     if (npc.isInventoryFull()) {
       npc.stopMoving();
-      npc.showBubble(`Full up! Bringing logs to you.`, 3000);
-      // Replace current gather with: give_logs → gather (auto-resume)
+      const hasCrates = (scene._crates || []).length > 0;
       this._tasks.shift();
-      this._tasks.unshift({ task: 'give_logs' }, { task: 'gather', item: 'wood' });
+      if (hasCrates) {
+        npc.showBubble(`Full up! Going to deposit.`, 3000);
+        this._tasks.unshift({ task: 'deposit_to_crate' }, { task: 'gather', item: 'wood' });
+      } else {
+        npc.showBubble(`Full up! Bringing logs to you.`, 3000);
+        this._tasks.unshift({ task: 'give_logs' }, { task: 'gather', item: 'wood' });
+      }
       return;
     }
 
@@ -326,7 +222,7 @@ export class NPCTaskRunner {
 
     const dist = Phaser.Math.Distance.Between(npc.x, npc.y, player.x, player.y);
 
-    if (dist > FOLLOW_LEASH) {
+    if (dist > this._getFollowLeash()) {
       // Walk to player first
       npc.moveTo(player.x, player.y);
     } else {
@@ -346,6 +242,178 @@ export class NPCTaskRunner {
     }
   }
 
+  _doGatherStone(_delta) {
+    const scene = this._scene;
+    const npc = this._npc;
+    const player = scene.player;
+
+    if (this._mineCooldown > 0) {
+      this._mineCooldown -= _delta;
+      npc.stopMoving();
+      return;
+    }
+
+    if ((npc.stones || 0) + (npc.crystals || 0) > 0) {
+      if (!player) return;
+      const distToPlayer = Phaser.Math.Distance.Between(npc.x, npc.y, player.x, player.y);
+      if (distToPlayer > this._getFollowLeash()) {
+        npc.moveTo(player.x, player.y);
+      } else {
+        npc.stopMoving();
+        const conn = scene._conn;
+        if (conn?.connected) {
+          conn.send({ type: 'npc_give_materials', npc_id: npc.id });
+        }
+        const parts = [];
+        if ((npc.crystals || 0) > 0) parts.push(`${npc.crystals} Crystal${npc.crystals > 1 ? 's' : ''}`);
+        if ((npc.stones || 0) > 0) parts.push(`${npc.stones} Stone${npc.stones > 1 ? 's' : ''}`);
+        npc.showBubble(`Bringing you ${parts.join(', ')}!`, 3000, { silent: true });
+        npc.crystals = 0;
+        npc.stones = 0;
+      }
+      return;
+    }
+
+    let rockSprite = null;
+    let bestRockDist = Infinity;
+    for (const rock of Object.values(scene._rockSprites || {})) {
+      if (!rock || rock._mined) continue;
+      const d = Phaser.Math.Distance.Between(npc.x, npc.y, rock.x, rock.y);
+      if (d < bestRockDist) {
+        bestRockDist = d;
+        rockSprite = rock;
+      }
+    }
+    if (rockSprite) {
+      const distToRock = Phaser.Math.Distance.Between(npc.x, npc.y, rockSprite.x, rockSprite.y);
+      if (distToRock > ROCK_MINE_DIST) {
+        npc.moveTo(rockSprite.x, rockSprite.y);
+      } else {
+        npc.stopMoving();
+        const conn = scene._conn;
+        if (conn?.connected && rockSprite.rockId >= 0) {
+          conn.send({ type: 'npc_mine_rock', rock_id: rockSprite.rockId, npc_id: npc.id });
+        }
+        npc.stones = (npc.stones || 0) + 1;
+        npc.showBubble('Mining stone!', 1200, { silent: true });
+        this._mineCooldown = 1000;
+      }
+      return;
+    }
+
+    let stoneItem = null;
+    let bestDist = Infinity;
+    for (const gi of (scene.groundItems || [])) {
+      if (gi.resource !== 'Stone' || !gi._placed) continue;
+      const d = Phaser.Math.Distance.Between(npc.x, npc.y, gi.x, gi.y);
+      if (d < bestDist) {
+        bestDist = d;
+        stoneItem = gi;
+      }
+    }
+
+    if (!stoneItem) {
+      npc.showBubble('No stone to gather right now.', 2000);
+      this._tasks.shift();
+      return;
+    }
+
+    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, stoneItem.x, stoneItem.y);
+    if (dist > TILE_SIZE * 1.2) {
+      npc.moveTo(stoneItem.x, stoneItem.y);
+      return;
+    }
+
+    npc.stopMoving();
+    const tileCol = Math.floor(stoneItem.x / TILE_SIZE);
+    const tileRow = Math.floor(stoneItem.y / TILE_SIZE);
+    let amount = 0;
+    for (const gi of (scene.groundItems || [])) {
+      if (gi.resource !== 'Stone' || !gi._placed) continue;
+      if (Math.floor(gi.x / TILE_SIZE) !== tileCol || Math.floor(gi.y / TILE_SIZE) !== tileRow) continue;
+      amount += gi.amount || 1;
+    }
+    const conn = scene._conn;
+    if (conn?.connected) {
+      conn.send({ type: 'npc_pickup_stone_tile', x: stoneItem.x, y: stoneItem.y, npc_id: npc.id });
+    }
+    npc.stones = (npc.stones || 0) + amount;
+    npc.showBubble(`Picked up ${amount} stone!`, 2000, { silent: true });
+  }
+
+  _doGatherAll(_delta) {
+    const scene = this._scene;
+    const npc = this._npc;
+
+    const hasMaterials = (npc.stones || 0) + (npc.crystals || 0) > 0;
+    if (hasMaterials) {
+      this._doGatherStone(_delta);
+      return;
+    }
+
+    const hasRockNodes = Object.values(scene._rockSprites || {}).some(rock => rock && !rock._mined);
+    if (hasRockNodes) {
+      this._doGatherStone(_delta);
+      return;
+    }
+
+    const hasStoneOnGround = (scene.groundItems || []).some(gi => gi.resource === 'Stone' && gi._placed);
+    if (hasStoneOnGround) {
+      this._doGatherStone(_delta);
+      return;
+    }
+
+    if (npc.isInventoryFull()) {
+      this._doGiveLogs(_delta);
+      return;
+    }
+
+    const trees = (scene.trees ?? []).filter(t => !t._chopped);
+    if (trees.length === 0) {
+      if ((npc.logs || 0) > 0) {
+        this._doGiveLogs(_delta);
+      } else {
+        npc.showBubble('Nothing left to gather.', 2500);
+        this._tasks.shift();
+      }
+      return;
+    }
+
+    if (this._chopCooldown > 0) {
+      this._chopCooldown -= _delta;
+      npc.stopMoving();
+      return;
+    }
+
+    if (!this._target || this._target._chopped) {
+      trees.sort((a, b) =>
+        Phaser.Math.Distance.Between(npc.x, npc.y, a.x, a.y) -
+        Phaser.Math.Distance.Between(npc.x, npc.y, b.x, b.y)
+      );
+      this._target = trees[0];
+      this._state = 'moving_to_tree';
+    }
+
+    const tree = this._target;
+    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, tree.x, tree.y);
+    if (dist > TREE_CHOP_DIST) {
+      npc.moveTo(tree.x, tree.y);
+      return;
+    }
+
+    npc.stopMoving();
+    if (!tree._chopped) {
+      const conn = scene._conn;
+      if (conn?.connected && tree.treeIndex >= 0) {
+        conn.send({ type: 'npc_chop', tree_id: tree.treeIndex, owner_id: scene.playerId });
+      }
+      npc.logs = Math.min(npc.logs + 1, npc.maxLogs);
+      npc.showBubble(`Gathering all! (${npc.logs}/${npc.maxLogs} logs)`, 1500, { silent: true });
+      this._chopCooldown = 1500;
+    }
+    this._target = null;
+  }
+
   // ── Follow player ───────────────────────────────────────────────────────────
 
   _doFollow(_delta) {
@@ -355,9 +423,45 @@ export class NPCTaskRunner {
 
     const dist = Phaser.Math.Distance.Between(npc.x, npc.y, player.x, player.y);
 
-    if (dist > FOLLOW_DIST) {
+    if (dist > this._getFollowDist()) {
       npc.moveTo(player.x, player.y);
-    } else if (dist < FOLLOW_LEASH) {
+    } else if (dist < this._getFollowLeash()) {
+      npc.stopMoving();
+    }
+  }
+
+  // ── Wander/explore (driven by curiosity) ────────────────────────────────────
+
+  _doWanderExplore(_delta) {
+    const scene = this._scene;
+    const npc = this._npc;
+    const player = scene.player;
+    const now = Date.now();
+
+    const target = this._wanderTarget;
+    const expired = !target || now > target.expiresAt;
+
+    if (expired) {
+      // Pick a new random point orbiting the player (6–12 tiles out)
+      const baseX = player ? player.x : npc.x;
+      const baseY = player ? player.y : npc.y;
+      const angle = Math.random() * Math.PI * 2;
+      const radius = TILE_SIZE * (6 + Math.random() * 6);
+      this._wanderTarget = {
+        x: baseX + Math.cos(angle) * radius,
+        y: baseY + Math.sin(angle) * radius,
+        expiresAt: now + 8000 + Math.random() * 4000,
+      };
+      npc.moveTo(this._wanderTarget.x, this._wanderTarget.y);
+      return;
+    }
+
+    // Check if arrived
+    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, target.x, target.y);
+    if (dist < TILE_SIZE * 0.8) {
+      // Reached destination — task complete, drive will decay
+      this._wanderTarget = null;
+      this._tasks.shift();
       npc.stopMoving();
     }
   }
@@ -431,7 +535,7 @@ export class NPCTaskRunner {
       npc.stopMoving();
       this._faceTarget(npc, target);
       npc.playAttack?.(target.x);
-      this._attackCooldown = ATTACK_COOLDOWN_MS;
+      this._attackCooldown = this._getAttackCooldownMs();
 
       const conn = scene._conn;
       if (this._targetType === 'player' && conn?.connected) {
@@ -457,6 +561,7 @@ export class NPCTaskRunner {
   _doTrain(_delta) {
     const scene = this._scene;
     const npc   = this._npc;
+    if (this._attackCooldown > 0) { this._attackCooldown -= _delta; return; }
 
     const dummies = (scene.dummies ?? []).filter(d => !d.isDead());
     if (dummies.length === 0) {
@@ -480,13 +585,7 @@ export class NPCTaskRunner {
       npc.moveTo(target.x, target.y);
     } else {
       npc.stopMoving();
-      const dx = target.x - npc.x;
-      const dy = target.y - npc.y;
-      if (Math.abs(dx) > Math.abs(dy)) {
-        npc._facing = dx > 0 ? 'right' : 'left';
-      } else {
-        npc._facing = dy > 0 ? 'down' : 'up';
-      }
+      this._faceTarget(npc, target);
       // Attack via server if server-synced dummy, otherwise local
       const conn = this._scene._conn;
       if (conn?.connected && target._serverId) {
@@ -495,6 +594,7 @@ export class NPCTaskRunner {
       } else {
         target.npcAttack(npc);
       }
+      this._attackCooldown = this._getAttackCooldownMs();
       if (target.isDead()) {
         this._target = null;
       }
@@ -534,7 +634,7 @@ export class NPCTaskRunner {
       npc.stopMoving();
       this._faceTarget(npc, rp);
       npc.playAttack?.(rp.x);
-      this._attackCooldown = ATTACK_COOLDOWN_MS;
+      this._attackCooldown = this._getAttackCooldownMs();
       const conn = scene._conn;
       if (conn?.connected) {
         conn.send({
@@ -578,7 +678,7 @@ export class NPCTaskRunner {
       npc.stopMoving();
       this._faceTarget(npc, rnpc);
       npc.playAttack?.(rnpc.x);
-      this._attackCooldown = ATTACK_COOLDOWN_MS;
+      this._attackCooldown = this._getAttackCooldownMs();
       const conn = scene._conn;
       if (conn?.connected) {
         conn.send({
@@ -590,86 +690,6 @@ export class NPCTaskRunner {
         });
       }
     }
-  }
-
-  _doCarryAwayPlayer(_delta) {
-    const scene = this._scene;
-    const npc = this._npc;
-    const cmd = this._tasks[0];
-    const rp = scene._remotePlayers?.[cmd.target_id];
-    const targetName = rp?.playerId || cmd.target_name || 'them';
-    if (!rp || rp.isDead?.()) {
-      npc.showBubble('Body got away...', 2000);
-      this.setTasks([{ task: 'follow' }]);
-      return;
-    }
-    if (!rp.isKnockedOut?.() && !this._npcIsCarryingTarget(cmd)) {
-      this._finishCarryAway(cmd, targetName);
-      return;
-    }
-    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rp.x, rp.y);
-    if (!this._npcIsCarryingTarget(cmd)) {
-      if (dist > ATTACK_RANGE) {
-        npc.moveTo(rp.x, rp.y);
-        return;
-      }
-      npc.stopMoving();
-      this._faceTarget(npc, rp);
-      this._maybeOpportunisticRob(cmd, rp);
-      scene._conn?.send({ type: 'npc_carry_player', npc_id: npc.id, target_id: cmd.target_id });
-      return;
-    }
-    if (rp.isKnockedOut?.()) {
-      if (!cmd._dest) cmd._dest = this._carryAwayDestination();
-      const dd = Phaser.Math.Distance.Between(npc.x, npc.y, cmd._dest.x, cmd._dest.y);
-      if (dd > TILE_SIZE * 1.2) npc.moveTo(cmd._dest.x, cmd._dest.y);
-      else npc.stopMoving();
-      return;
-    }
-    this._finishCarryAway(cmd, targetName);
-  }
-
-  _doCarryAwayNPC(_delta) {
-    const scene = this._scene;
-    const npc = this._npc;
-    const cmd = this._tasks[0];
-    const key = `${cmd.target_owner}_${cmd.target_npc_id}`;
-    const rnpc = scene._remoteNPCSprites?.[key];
-    const targetName = rnpc?.getName?.() || cmd.target_name || 'them';
-    if (!rnpc || rnpc.isDead?.()) {
-      npc.showBubble('Body got away...', 2000);
-      this.setTasks([{ task: 'follow' }]);
-      return;
-    }
-    if (!rnpc.isKnockedOut?.() && !this._npcIsCarryingTarget(cmd)) {
-      this._finishCarryAway(cmd, targetName);
-      return;
-    }
-    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rnpc.x, rnpc.y);
-    if (!this._npcIsCarryingTarget(cmd)) {
-      if (dist > ATTACK_RANGE) {
-        npc.moveTo(rnpc.x, rnpc.y);
-        return;
-      }
-      npc.stopMoving();
-      this._faceTarget(npc, rnpc);
-      this._maybeOpportunisticRob(cmd, rnpc);
-      scene._conn?.send({
-        type: 'npc_carry_npc',
-        npc_id: npc.id,
-        owner_id: cmd.target_owner,
-        target_npc_id: cmd.target_npc_id,
-      });
-      return;
-    }
-    if (rnpc.isKnockedOut?.()) {
-      if (!cmd._dest) cmd._dest = this._carryAwayDestination();
-      const dd = Phaser.Math.Distance.Between(npc.x, npc.y, cmd._dest.x, cmd._dest.y);
-      if (dd > TILE_SIZE * 1.2) npc.moveTo(cmd._dest.x, cmd._dest.y);
-      else npc.stopMoving();
-      return;
-    }
-    this._finishCarryAway(cmd, targetName);
   }
 
   // ── Flee from a specific player ─────────────────────────────────────────
@@ -853,7 +873,7 @@ export class NPCTaskRunner {
       npc.stopMoving();
       this._faceTarget(npc, rnpc);
       npc.playAttack?.(rnpc.x);
-      this._attackCooldown = ATTACK_COOLDOWN_MS * 2; // longer cooldown for stealing
+      this._attackCooldown = this._getAttackCooldownMs() * 2; // longer cooldown for stealing
 
       // Steal 1-3 logs based on STR
       const stealAmount = Math.min(1 + Math.floor(Math.random() * Math.min(3, npc.str)), rnpc.logs ?? 0);
@@ -1077,6 +1097,370 @@ export class NPCTaskRunner {
     return null;
   }
 
+  // ── Mine ore (world objects) ────────────────────────────────────────────────
+
+  _doMineOre(_delta) {
+    const scene = this._scene;
+    const npc   = this._npc;
+    const cmd   = this._tasks[0];
+
+    if (this._mineCooldown > 0) {
+      this._mineCooldown -= _delta;
+      npc.stopMoving();
+      return;
+    }
+
+    // Check NPC inventory capacity (max 10 total ore items)
+    const npcInv = npc._npcInventory || {};
+    const totalOre = Object.values(npcInv).reduce((s, v) => s + v, 0);
+    if (totalOre >= 10) {
+      const hasCrates = (scene._crates || []).length > 0;
+      if (hasCrates) {
+        npc.showBubble('Full up! Going to deposit.', 2000, { silent: true });
+        // Chain: deposit → resume mining
+        this._tasks.shift();
+        this._tasks.unshift({ task: 'deposit_to_crate' }, { task: 'mine_ore', asset_id: cmd.asset_id });
+      } else {
+        npc.showBubble('Inventory full!', 2000, { silent: true });
+        this._tasks.shift();
+      }
+      return;
+    }
+
+    // Find nearest non-depleted world object (ore) on the same map
+    const targetAssetId = cmd.asset_id || null; // optional filter
+    let bestWo = null;
+    let bestDist = Infinity;
+    for (const [woId, wo] of Object.entries(scene._worldObjSprites || {})) {
+      if (!wo || wo._depleted) continue;
+      if (targetAssetId && wo._assetId !== targetAssetId) continue;
+      const d = Phaser.Math.Distance.Between(npc.x, npc.y, wo.x, wo.y);
+      if (d < bestDist) {
+        bestDist = d;
+        bestWo = wo;
+      }
+    }
+
+    if (!bestWo) {
+      npc.showBubble('No ore to mine!', 2000);
+      this._tasks.shift();
+      return;
+    }
+
+    if (bestDist > ROCK_MINE_DIST) {
+      npc.moveTo(bestWo.x, bestWo.y);
+    } else {
+      npc.stopMoving();
+      const conn = scene._conn;
+      if (conn?.connected && bestWo._woId) {
+        conn.send({ type: 'npc_interact_world_object', wo_id: bestWo._woId, npc_id: npc.id });
+      }
+      // Optimistic local inventory update
+      const assetId = bestWo._assetId || 'ore';
+      const dropResource = bestWo._dropResource || assetId;
+      if (!npc._npcInventory) npc._npcInventory = {};
+      npc._npcInventory[dropResource] = (npc._npcInventory[dropResource] || 0) + 1;
+      const total = Object.values(npc._npcInventory).reduce((s, v) => s + v, 0);
+      npc.showBubble(`Mining! (${total}/10)`, 1200, { silent: true });
+      this._mineCooldown = 1200;
+    }
+  }
+
+  // ── Deposit items to nearest crate (label-aware) ────────────────────────────
+
+  /**
+   * Find the best crate for a resource.
+   * Priority: 1) crate labeled with this exact resource  2) unlabeled crate  3) any crate
+   */
+  _findCrateForResource(resource) {
+    const scene = this._scene;
+    const npc = this._npc;
+    const crates = scene._crates || [];
+    let labelMatch = null, labelDist = Infinity;
+    let unlabeled = null, unlabeledDist = Infinity;
+    let any = null, anyDist = Infinity;
+    for (const crate of crates) {
+      const d = Phaser.Math.Distance.Between(npc.x, npc.y, crate.x, crate.y);
+      const lbl = (crate.getLabel?.() || '').toLowerCase();
+      if (lbl && lbl === resource.toLowerCase()) {
+        if (d < labelDist) { labelDist = d; labelMatch = crate; }
+      } else if (!lbl) {
+        if (d < unlabeledDist) { unlabeledDist = d; unlabeled = crate; }
+      }
+      if (d < anyDist) { anyDist = d; any = crate; }
+    }
+    return labelMatch || unlabeled || any;
+  }
+
+  _doDepositToCrate(_delta) {
+    const scene = this._scene;
+    const npc   = this._npc;
+    const cmd   = this._tasks[0];
+
+    // Build list of all items NPC is carrying
+    const items = []; // { resource, qty, source: 'inv'|'logs'|'stones' }
+    const npcInv = npc._npcInventory || {};
+    for (const [res, qty] of Object.entries(npcInv)) {
+      if (qty > 0) items.push({ resource: res, qty, source: 'inv' });
+    }
+    if ((npc.logs || 0) > 0) items.push({ resource: 'logs', qty: npc.logs, source: 'logs' });
+    if ((npc.stones || 0) > 0) items.push({ resource: 'stones', qty: npc.stones, source: 'stones' });
+
+    if (items.length === 0) {
+      npc.showBubble('Nothing to deposit!', 2000);
+      this._tasks.shift();
+      return;
+    }
+
+    // Find target crate — if cmd.building_id is specified, use that directly
+    let targetCrate = null;
+    let depositItems = items; // what to deposit at this crate
+
+    if (cmd.building_id) {
+      for (const crate of (scene._crates || [])) {
+        if (crate._serverId === cmd.building_id) { targetCrate = crate; break; }
+      }
+    }
+
+    if (!targetCrate) {
+      // Find the best crate for the first item, deposit all matching items there
+      const firstItem = items[0];
+      targetCrate = this._findCrateForResource(firstItem.resource);
+
+      if (targetCrate) {
+        const lbl = (targetCrate.getLabel?.() || '').toLowerCase();
+        if (lbl) {
+          // Only deposit items that match this crate's label
+          depositItems = items.filter(i => i.resource.toLowerCase() === lbl);
+        }
+        // If unlabeled, deposit everything
+      }
+    }
+
+    if (!targetCrate) {
+      npc.showBubble('No crate nearby!', 2000);
+      this._tasks.shift();
+      return;
+    }
+
+    const distToCrate = Phaser.Math.Distance.Between(npc.x, npc.y, targetCrate.x, targetCrate.y);
+    if (distToCrate > TILE_SIZE * 1.5) {
+      npc.moveTo(targetCrate.x, targetCrate.y);
+      return;
+    }
+
+    // Close enough — deposit matching items
+    npc.stopMoving();
+    const conn = scene._conn;
+    const bid = targetCrate._serverId;
+    const deposited = [];
+
+    for (const item of depositItems) {
+      if (!conn?.connected || !bid) break;
+      conn.send({ type: 'npc_deposit_to_crate', npc_id: npc.id, building_id: bid, resource: item.resource, amount: item.qty });
+      targetCrate.addToStorage?.(item.resource, item.qty);
+      deposited.push(item.resource);
+
+      // Clear from NPC
+      if (item.source === 'inv') {
+        delete npcInv[item.resource];
+      } else if (item.source === 'logs') {
+        npc.logs = 0;
+      } else if (item.source === 'stones') {
+        npc.stones = 0;
+      }
+    }
+    if (npc._npcInventory) {
+      // Clean empty entries
+      for (const k of Object.keys(npc._npcInventory)) {
+        if (npc._npcInventory[k] <= 0) delete npc._npcInventory[k];
+      }
+    }
+
+    const label = targetCrate.getLabel?.() || 'crate';
+    npc.showBubble(`Stored ${deposited.join(', ')} in ${label}!`, 3000, { silent: true });
+
+    // Check if NPC still has items to deposit elsewhere
+    const remaining = [];
+    for (const [res, qty] of Object.entries(npc._npcInventory || {})) {
+      if (qty > 0) remaining.push(res);
+    }
+    if ((npc.logs || 0) > 0) remaining.push('logs');
+    if ((npc.stones || 0) > 0) remaining.push('stones');
+
+    if (remaining.length > 0) {
+      // Re-run deposit for remaining items (will find a different crate)
+      return; // don't shift — re-enter next frame to find next crate
+    }
+
+    this._tasks.shift();
+  }
+
+  // ── Custom task (mine specified ores → deposit to specified crates, repeat) ─
+
+  _doCustomTask(_delta) {
+    const scene = this._scene;
+    const npc   = this._npc;
+    const cmd   = this._tasks[0];
+
+    // Initialize custom task state on first entry
+    if (!cmd._phase) {
+      cmd._phase = 'mine';  // 'mine' or 'deposit'
+      cmd._oreIdx = 0;      // which ore type we're currently mining
+    }
+
+    if (cmd._phase === 'mine') {
+      // Mine cooldown
+      if (this._mineCooldown > 0) {
+        this._mineCooldown -= _delta;
+        npc.stopMoving();
+        return;
+      }
+
+      // Check NPC inventory capacity (max 10 total ore items)
+      const npcInv = npc._npcInventory || {};
+      const totalOre = Object.values(npcInv).reduce((s, v) => s + v, 0);
+      if (totalOre >= 10) {
+        // Switch to deposit phase
+        cmd._phase = 'deposit';
+        cmd._depositIdx = 0;
+        npc.showBubble('Full up! Going to deposit.', 2000, { silent: true });
+        return;
+      }
+
+      // Find nearest non-depleted ore matching any of the task's asset_ids
+      const oreAssetIds = cmd.ore_asset_ids || [];
+      let bestWo = null;
+      let bestDist = Infinity;
+      for (const [woId, wo] of Object.entries(scene._worldObjSprites || {})) {
+        if (!wo || wo._depleted) continue;
+        if (oreAssetIds.length > 0 && !oreAssetIds.includes(wo._assetId)) continue;
+        const d = Phaser.Math.Distance.Between(npc.x, npc.y, wo.x, wo.y);
+        if (d < bestDist) {
+          bestDist = d;
+          bestWo = wo;
+        }
+      }
+
+      if (!bestWo) {
+        npc.showBubble('No ore to mine!', 2000, { silent: true });
+        // Wait and retry — ore may respawn
+        this._mineCooldown = 3000;
+        return;
+      }
+
+      if (bestDist > ROCK_MINE_DIST) {
+        npc.moveTo(bestWo.x, bestWo.y);
+      } else {
+        npc.stopMoving();
+        const conn = scene._conn;
+        if (conn?.connected && bestWo._woId) {
+          conn.send({ type: 'npc_interact_world_object', wo_id: bestWo._woId, npc_id: npc.id });
+        }
+        const dropResource = bestWo._dropResource || bestWo._assetId || 'ore';
+        if (!npc._npcInventory) npc._npcInventory = {};
+        npc._npcInventory[dropResource] = (npc._npcInventory[dropResource] || 0) + 1;
+        const total = Object.values(npc._npcInventory).reduce((s, v) => s + v, 0);
+        npc.showBubble(`Mining! (${total}/10)`, 1200, { silent: true });
+        this._mineCooldown = 1200;
+      }
+    } else if (cmd._phase === 'deposit') {
+      // Deposit items to specified crates (or best-match if no specific crates)
+      const npcInv = npc._npcInventory || {};
+      const items = [];
+      for (const [res, qty] of Object.entries(npcInv)) {
+        if (qty > 0) items.push({ resource: res, qty });
+      }
+
+      if (items.length === 0) {
+        // All deposited — loop back to mining
+        cmd._phase = 'mine';
+        return;
+      }
+
+      // Find the best crate for the first item
+      const firstItem = items[0];
+      let targetCrate = null;
+
+      // Try specified crate building_ids first
+      const crateBids = cmd.crate_building_ids || [];
+      const crateLabels = cmd.crate_labels || [];
+      if (crateBids.length > 0) {
+        // Find a crate whose label matches this resource, or any specified crate
+        for (let i = 0; i < crateBids.length; i++) {
+          const bid = crateBids[i];
+          const lbl = (crateLabels[i] || '').toLowerCase();
+          if (lbl && lbl !== firstItem.resource.toLowerCase()) continue;
+          for (const crate of (scene._crates || [])) {
+            if (crate._serverId === bid) { targetCrate = crate; break; }
+          }
+          if (targetCrate) break;
+        }
+        // Fallback: any specified crate (unlabeled)
+        if (!targetCrate) {
+          for (const bid of crateBids) {
+            for (const crate of (scene._crates || [])) {
+              if (crate._serverId === bid) {
+                const lbl = (crate.getLabel?.() || '').toLowerCase();
+                if (!lbl) { targetCrate = crate; break; }
+              }
+            }
+            if (targetCrate) break;
+          }
+        }
+      }
+
+      // Fallback to label-matching any crate in scene
+      if (!targetCrate) {
+        targetCrate = this._findCrateForResource(firstItem.resource);
+      }
+
+      if (!targetCrate) {
+        npc.showBubble('No crate nearby!', 2000, { silent: true });
+        // Loop back to mining anyway — crates may appear
+        cmd._phase = 'mine';
+        this._mineCooldown = 3000;
+        return;
+      }
+
+      const distToCrate = Phaser.Math.Distance.Between(npc.x, npc.y, targetCrate.x, targetCrate.y);
+      if (distToCrate > TILE_SIZE * 1.5) {
+        npc.moveTo(targetCrate.x, targetCrate.y);
+        return;
+      }
+
+      // Close enough — deposit matching items
+      npc.stopMoving();
+      const conn = scene._conn;
+      const bid = targetCrate._serverId;
+      const lbl = (targetCrate.getLabel?.() || '').toLowerCase();
+      const depositItems = lbl ? items.filter(i => i.resource.toLowerCase() === lbl) : items;
+
+      for (const item of depositItems) {
+        if (!conn?.connected || !bid) break;
+        conn.send({ type: 'npc_deposit_to_crate', npc_id: npc.id, building_id: bid, resource: item.resource, amount: item.qty });
+        targetCrate.addToStorage?.(item.resource, item.qty);
+        delete npcInv[item.resource];
+      }
+
+      // Clean empty entries
+      for (const k of Object.keys(npc._npcInventory || {})) {
+        if (npc._npcInventory[k] <= 0) delete npc._npcInventory[k];
+      }
+
+      const label = targetCrate.getLabel?.() || 'crate';
+      npc.showBubble(`Stored in ${label}!`, 2000, { silent: true });
+
+      // Check if more items remain
+      const remaining = Object.values(npc._npcInventory || {}).reduce((s, v) => s + v, 0);
+      if (remaining <= 0) {
+        // All deposited — loop back to mining
+        cmd._phase = 'mine';
+      }
+      // If remaining > 0, will re-enter deposit to find next crate
+    }
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   _faceTarget(npc, target) {
@@ -1089,576 +1473,22 @@ export class NPCTaskRunner {
     }
   }
 
-  // ── Build Fence ──────────────────────────────────────────────────────────
-
-  _doBuildFence(_delta) {
+  _findAndWatchKiTarget(cmd) {
     const scene = this._scene;
     const npc = this._npc;
-    const cmd = this._tasks[0];
-
-    // Cooldown after building a fence (wait for server to process)
-    if (cmd._buildCooldown > 0) {
-      cmd._buildCooldown -= _delta;
-      return;
-    }
-
-    // Find nearest ground log pile that doesn't already have a fence on it
-    let targetX = null;
-    let targetY = null;
-    let bestDist = Infinity;
-    for (const gi of scene.groundItems) {
-      if (gi.resource !== 'Wood' && gi.resource !== 'log') continue;
-      if (gi._lit) continue;
-      // Skip piles that already have a fence on the same tile
-      const tileCol = Math.floor(gi.x / TILE_SIZE);
-      const tileRow = Math.floor(gi.y / TILE_SIZE);
-      let hasFence = false;
-      for (const fid of Object.keys(scene._fenceSprites || {})) {
-        const f = scene._fenceSprites[fid];
-        if (Math.floor(f.x / TILE_SIZE) === tileCol && Math.floor(f.y / TILE_SIZE) === tileRow) {
-          hasFence = true;
-          break;
-        }
-      }
-      if (hasFence) continue;
-      const d = Phaser.Math.Distance.Between(npc.x, npc.y, gi.x, gi.y);
-      if (d < bestDist) {
-        bestDist = d;
-        targetX = gi.x;
-        targetY = gi.y;
-      }
-    }
-
-    if (targetX == null) {
-      npc.showBubble('No more logs to build with!', 3000);
-      this._tasks.shift();
-      return;
-    }
-
-    // Walk to the log pile
-    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, targetX, targetY);
-    if (dist > TILE_SIZE * 1.2) {
-      npc.moveTo(targetX, targetY);
-      return;
-    }
-
-    // At the pile — send build request to server
-    npc.stopMoving();
-    const conn = scene._conn;
-    if (conn?.connected) {
-      conn.send({ type: 'build_fence', x: targetX, y: targetY });
-    }
-    const remaining = scene.groundItems.filter(gi =>
-      (gi.resource === 'Wood' || gi.resource === 'log') && (gi.x !== targetX || gi.y !== targetY)
-    ).length;
-    npc.showBubble(remaining > 0 ? `Built a fence! (${remaining} more to go)` : 'Built a fence! All done.', 2000);
-
-    // Wait for server to process before looking for next pile
-    cmd._buildCooldown = 800;
-
-    // If no more piles remain, finish the task
-    if (remaining <= 0) {
-      this._tasks.shift();
-    }
-  }
-
-  _doLightCampfire(_delta) {
-    const scene = this._scene;
-    const npc = this._npc;
-    const cmd = this._tasks[0];
-
-    if (cmd._lightCooldown > 0) {
-      cmd._lightCooldown -= _delta;
-      return;
-    }
-
-    const candidates = (scene.groundItems || []).filter(gi =>
-      (gi.resource === 'Wood' || gi.resource === 'log') &&
-      !gi._lit &&
-      scene._canLightCampfire?.(gi)
-    );
-
-    if (candidates.length === 0) {
-      npc.showBubble('No ready campfire to light.', 2500, { silent: true });
-      this._tasks.shift();
-      return;
-    }
-
-    candidates.sort((a, b) =>
-      Phaser.Math.Distance.Between(npc.x, npc.y, a.x, a.y) -
-      Phaser.Math.Distance.Between(npc.x, npc.y, b.x, b.y)
-    );
-
-    const target = candidates[0];
-    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, target.x, target.y);
-    if (dist > TILE_SIZE * 1.2) {
-      npc.moveTo(target.x, target.y);
-      return;
-    }
-
-    npc.stopMoving();
-    this._faceTarget(npc, target);
-    if (scene._tryLightCampfire?.(target, npc)) {
-      npc.showBubble('Lighting it now.', 2200, { silent: true });
-      cmd._lightCooldown = 600;
-      this._tasks.shift();
-      return;
-    }
-
-    npc.showBubble('Could not light it.', 2000, { silent: true });
-    this._tasks.shift();
-  }
-
-  _doGuardFire(_delta) {
-    const scene = this._scene;
-    const npc = this._npc;
-    const cmd = this._tasks[0];
-
-    if (this._attackCooldown > 0) this._attackCooldown -= _delta;
-
-    let fire = null;
-    if (cmd.fire_item_id) {
-      fire = (scene.groundItems || []).find(gi => gi._serverId === cmd.fire_item_id && gi._lit);
-    }
-    if (!fire) {
-      fire = scene._findNearestLitCampfire?.(npc.x, npc.y, 12) || null;
-      if (fire) cmd.fire_item_id = fire._serverId;
-    }
-
-    if (!fire) {
-      npc.showBubble('That fire is out.', 2200, { silent: true });
-      this._tasks.shift();
-      return;
-    }
-
-    cmd._warned = cmd._warned || {};
-    const now = Date.now();
-    let intruder = null;
-    let intruderDistToFire = Infinity;
-    for (const rnpc of Object.values(scene._remoteNPCSprites || {})) {
-      if (rnpc.isDead?.() || rnpc.isKnockedOut?.()) continue;
-      const dToFire = Phaser.Math.Distance.Between(rnpc.x, rnpc.y, fire.x, fire.y);
-      if (dToFire < intruderDistToFire && dToFire <= CAMPFIRE_GUARD_WARN_RADIUS) {
-        intruder = rnpc;
-        intruderDistToFire = dToFire;
-      }
-    }
-
-    const guardDist = Phaser.Math.Distance.Between(npc.x, npc.y, fire.x, fire.y);
-    if (guardDist > TILE_SIZE * 1.5 && (!intruder || intruderDistToFire > CAMPFIRE_GUARD_ATTACK_RADIUS)) {
-      npc.moveTo(fire.x, fire.y);
-      return;
-    }
-
-    npc.stopMoving();
-
-    if (!intruder) return;
-
-    const warnKey = `${intruder.ownerPid}_${intruder.npcId}`;
-    const warning = cmd._warned[warnKey] || null;
-    if (warning) {
-      const movingAway = intruderDistToFire > (warning.lastDistToFire ?? intruderDistToFire) + TILE_SIZE * 0.15;
-      warning.lastDistToFire = intruderDistToFire;
-      if (movingAway) {
-        warning.leaving = true;
-      }
-      if (intruderDistToFire > CAMPFIRE_GUARD_WARN_RADIUS) {
-        if (warning.leaving) {
-          const name = intruder.getName?.() || intruder.npcId || 'them';
-          const line = `${name} is leaving the fire alone.`;
-          npc.showBubble(line, 2200, { silent: true });
-          scene._addNPCSpeechToChat?.(npc, line, '#cce8aa');
-        }
-        delete cmd._warned[warnKey];
-        return;
-      }
-      if (warning.complies && intruderDistToFire <= CAMPFIRE_GUARD_WARN_RADIUS) {
-        const gotCloserThanWarned = intruderDistToFire < (warning.warnDistToFire ?? intruderDistToFire) - TILE_SIZE * 0.15;
-        if (!gotCloserThanWarned) {
-          if (!warning.remindedAt || now - warning.remindedAt > 4000) {
-            const line = `${intruder.getName?.() || intruder.npcId || 'You'}, keep your distance from the fire.`;
-            npc.showBubble(line, 2200, { silent: true });
-            scene._addNPCSpeechToChat?.(npc, line, '#ffd39a');
-            warning.remindedAt = now;
-          }
-          return;
-        }
-      }
-    }
-
-    if (intruderDistToFire <= CAMPFIRE_GUARD_WARN_RADIUS && !warning) {
-      const name = intruder.getName?.() || intruder.npcId || 'you';
-      const line = `${name}, back off. This fire is claimed.`;
-      npc.showBubble(line, 2800, { silent: true });
-      scene._addNPCSpeechToChat?.(npc, line, '#ffd39a');
-      cmd._warned[warnKey] = {
-        warnedAt: now,
-        warnDistToFire: intruderDistToFire,
-        lastDistToFire: intruderDistToFire,
-        leaving: false,
-        complies: false,
-        awaitingResponse: true,
-        response: '',
-      };
-      scene._conn?.send({
-        type: 'chat_to_npc',
-        target_owner: intruder.ownerPid,
-        target_npc_id: intruder.npcId,
-        text: line,
-        meta: {
-          type: 'fire_warning',
-          fire_item_id: cmd.fire_item_id || fire._serverId || null,
-          fire_x: fire.x,
-          fire_y: fire.y,
-          guard_npc_id: npc.id,
-          guard_npc_name: npc.getName?.() || npc.id,
-          leave_distance_tiles: 5,
-        },
-      });
-      return;
-    }
-
-    if (intruderDistToFire > CAMPFIRE_GUARD_ATTACK_RADIUS) return;
-    if (!warning) return;
-    if (warning.leaving) return;
-    if (warning.complies) {
-      const gotCloserThanWarned = intruderDistToFire < (warning.warnDistToFire ?? intruderDistToFire) - TILE_SIZE * 0.15;
-      if (!gotCloserThanWarned) return;
-    }
-    if (warning.awaitingResponse) return;
-    if (now - warning.warnedAt < CAMPFIRE_GUARD_RESPONSE_MS) return;
-    if (this._attackCooldown > 0) return;
-
-    const distToIntruder = Phaser.Math.Distance.Between(npc.x, npc.y, intruder.x, intruder.y);
-    if (distToIntruder > ATTACK_RANGE) {
-      npc.moveTo(intruder.x, intruder.y);
-      return;
-    }
-
-    npc.stopMoving();
-    this._faceTarget(npc, intruder);
-    npc.playAttack?.(intruder.x);
-    this._attackCooldown = ATTACK_COOLDOWN_MS;
-    scene._conn?.send({
-      type: 'npc_attack_npc',
-      target_owner: intruder.ownerPid,
-      target_npc_id: intruder.npcId,
-      str: npc.str,
-      npc_id: npc.id,
-    });
-  }
-
-  handleFireWarningReply(warnKey, response = {}) {
-    const cmd = this._tasks[0];
-    if (!cmd || cmd.task !== 'guard_fire' || !warnKey) return;
-    cmd._warned = cmd._warned || {};
-    const warning = cmd._warned[warnKey];
-    if (!warning) return;
-    warning.awaitingResponse = false;
-    warning.complies = !!response.complies;
-    warning.leaving = !!response.complies;
-    warning.response = response.reply || '';
-  }
-
-  _doMoveAwayFromFire(_delta) {
-    const npc = this._npc;
-    const cmd = this._tasks[0];
-    const minDistance = Math.max(TILE_SIZE * 3, Number(cmd.min_distance || TILE_SIZE * 5));
-    const dx = npc.x - Number(cmd.fire_x || 0);
-    const dy = npc.y - Number(cmd.fire_y || 0);
-    const dist = Math.hypot(dx, dy);
-    const durationMs = Number(cmd.duration_ms || 5000);
-    cmd.startedAt = cmd.startedAt || Date.now();
-
-    if (dist >= minDistance || Date.now() - cmd.startedAt >= durationMs) {
-      npc.stopMoving();
-      this._tasks.shift();
-      return;
-    }
-
-    const len = Math.max(1, dist);
-    const dirX = dist < 4 ? 1 : dx / len;
-    const dirY = dist < 4 ? 0 : dy / len;
-    const targetX = npc.x + dirX * TILE_SIZE * 2;
-    const targetY = npc.y + dirY * TILE_SIZE * 2;
-    npc.moveTo(targetX, targetY);
-  }
-
-  // ── Learn Ki ──────────────────────────────────────────────────────────────
-
-  _doLearnKi(_delta) {
-    const scene = this._scene;
-    const npc = this._npc;
-    const cmd = this._tasks[0];
-
-    // Already learned? Done.
-    if (npc._hasKiBlast) {
-      npc.showBubble('I already know Ki Blast!', 3000);
-      this._tasks.shift();
-      return;
-    }
-
-    // Phase 0: Initialize — remember where the player was when the command was given
-    if (!cmd._learnPhase) {
-      cmd._learnPhase = 'gather';
-      cmd._targetX = scene.player?.x ?? npc.x;
-      cmd._targetY = scene.player?.y ?? npc.y;
-      cmd._logsNeeded = 10;
-      cmd._originalLogs = npc.logs;
-      npc.showBubble('I\'ll gather wood for a Ki Target!', 3000);
-      scene._addNPCSpeechToChat?.(npc, 'Starting ki training — gathering wood for a Ki Target.', '#ffccaa');
-    }
-
-    switch (cmd._learnPhase) {
-      case 'gather':
-        this._learnKi_gather(cmd, _delta);
-        break;
-      case 'return':
-        this._learnKi_return(cmd, _delta);
-        break;
-      case 'build':
-        this._learnKi_build(cmd, _delta);
-        break;
-      case 'step_back':
-        this._learnKi_stepBack(cmd, _delta);
-        break;
-      case 'watch':
-        this._learnKi_watch(cmd, _delta);
-        break;
-    }
-  }
-
-  _learnKi_gather(cmd, _delta) {
-    const npc = this._npc;
-    const scene = this._scene;
-
-    // Check if we have enough logs
-    if (npc.logs >= 10) {
-      cmd._learnPhase = 'return';
-      npc.showBubble('Got enough logs! Heading back to build the target.', 3000);
-      return;
-    }
-
-    // Cooldown after chopping
-    if (this._chopCooldown > 0) {
-      this._chopCooldown -= _delta;
-      npc.stopMoving();
-      return;
-    }
-
-    // Find nearest tree
-    if (!this._target || this._target._chopped) {
-      const trees = (scene.trees ?? []).filter(t => !t._chopped);
-      if (trees.length === 0) {
-        npc.showBubble('No trees! Need logs for the Ki Target.', 3000);
-        npc.stopMoving();
-        return;
-      }
-      trees.sort((a, b) =>
-        Phaser.Math.Distance.Between(npc.x, npc.y, a.x, a.y) -
-        Phaser.Math.Distance.Between(npc.x, npc.y, b.x, b.y)
-      );
-      this._target = trees[0];
-    }
-
-    const tree = this._target;
-    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, tree.x, tree.y);
-    if (dist > TREE_CHOP_DIST) {
-      npc.moveTo(tree.x, tree.y);
-    } else {
-      npc.stopMoving();
-      if (!tree._chopped) {
-        const conn = scene._conn;
-        if (conn?.connected && tree.treeIndex >= 0) {
-          conn.send({ type: 'npc_chop', tree_id: tree.treeIndex, owner_id: scene.playerId });
-        }
-        npc.logs = Math.min(npc.logs + 1, npc.maxLogs);
-        npc.showBubble(`Chopping for Ki Target (${npc.logs}/10)`, 1500, { silent: true });
-        this._chopCooldown = 1500;
-      }
-      this._target = null;
-    }
-  }
-
-  _learnKi_return(cmd, _delta) {
-    const npc = this._npc;
-    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, cmd._targetX, cmd._targetY);
-    if (dist > TILE_SIZE * 1.5) {
-      npc.moveTo(cmd._targetX, cmd._targetY);
-    } else {
-      npc.stopMoving();
-      cmd._learnPhase = 'build';
-      cmd._buildTimer = 2000; // 2s build animation
-      npc.showBubble('Building the Ki Target...', 2500);
-    }
-  }
-
-  _learnKi_build(cmd, _delta) {
-    const npc = this._npc;
-    const scene = this._scene;
-    cmd._buildTimer -= _delta;
-    if (cmd._buildTimer > 0) return;
-
-    // Build ki target via server
-    const conn = scene._conn;
-    if (conn?.connected) {
-      // Place it 2 tiles ahead of the NPC
-      const dx = cmd._targetX - npc.x;
-      const dy = cmd._targetY - npc.y;
-      const len = Math.max(1, Math.hypot(dx, dy));
-      const buildX = npc.x + (dx / len) * TILE_SIZE * 2;
-      const buildY = npc.y + (dy / len) * TILE_SIZE * 2;
-
-      // Transfer NPC's logs to player, then build (server deducts from player)
-      const logsToGive = Math.min(npc.logs, 10);
-      npc.logs = Math.max(0, npc.logs - 10);
-      npc._givingLogs = true;
-      conn.send({ type: 'admin', field: 'logs', value: logsToGive });
-      conn.send({
-        type: 'build_ki_target',
-        x: buildX,
-        y: buildY,
-      });
-
-      cmd._kiTargetX = buildX;
-      cmd._kiTargetY = buildY;
-      cmd._learnPhase = 'step_back';
-      npc.showBubble('Ki Target built! Stepping back to observe.', 3000);
-      scene._addNPCSpeechToChat?.(npc, 'Ki Target is ready! Show me your blast!', '#ffccaa');
-    }
-  }
-
-  _learnKi_stepBack(cmd, _delta) {
-    const npc = this._npc;
-    // Step back ~3 tiles from the ki target
-    const dx = npc.x - cmd._kiTargetX;
-    const dy = npc.y - cmd._kiTargetY;
-    const dist = Math.hypot(dx, dy);
-
-    if (dist < TILE_SIZE * 3) {
-      // Move away from the ki target
-      const len = Math.max(1, dist);
-      const stepX = npc.x + (dx / len) * TILE_SIZE * 2;
-      const stepY = npc.y + (dy / len) * TILE_SIZE * 2;
-      npc.moveTo(stepX, stepY);
-    } else {
-      npc.stopMoving();
-      // Face toward the ki target
-      if (Math.abs(dx) > Math.abs(dy)) {
-        npc._facing = dx > 0 ? 'left' : 'right';
-      } else {
-        npc._facing = dy > 0 ? 'up' : 'down';
-      }
-      cmd._learnPhase = 'watch';
-      cmd._watchTimer = 0;
-
-      // Mark this NPC as watching the nearest ki target
-      this._findAndWatchKiTarget(cmd);
-
-      npc.showBubble('Ready! Blast the Ki Target!', 3000);
-    }
-  }
-
-  _findAndWatchKiTarget(cmd, excludeId) {
-    const scene = this._scene;
-    const npc = this._npc;
-    // Find nearest ki target sprite (optionally excluding one that just broke)
-    let bestDist = Infinity;
+    const tx = cmd._kiTargetX;
+    const ty = cmd._kiTargetY;
+    // Find the ki target sprite closest to the expected build position
     let bestId = null;
+    let bestDist = TILE_SIZE * 2; // must be within 2 tiles of expected pos
     for (const [ktid, ktSprite] of Object.entries(scene._kiTargetSprites || {})) {
-      if (ktid === excludeId) continue;
-      const d = Phaser.Math.Distance.Between(npc.x, npc.y, ktSprite.x, ktSprite.y);
+      const d = Phaser.Math.Distance.Between(tx, ty, ktSprite.x, ktSprite.y);
       if (d < bestDist) {
         bestDist = d;
         bestId = ktid;
       }
     }
     npc._watchingKiTarget = bestId;
-  }
-
-  _learnKi_watch(cmd, _delta) {
-    const npc = this._npc;
-    const scene = this._scene;
-    cmd._watchTimer = (cmd._watchTimer || 0) + _delta;
-
-    // If NPC learned ki blast (set by _handleKiTargetResult), we're done!
-    if (npc._hasKiBlast) {
-      npc._watchingKiTarget = null;
-      this._tasks.shift();
-      npc.showBubble('I mastered the Ki Blast! Thank you, master!', 5000);
-      scene._addNPCSpeechToChat?.(npc, 'Ki training complete! I can now use Ki Blast!', '#44eeff');
-      return;
-    }
-
-    // Check if the ki target still exists
-    const targetId = npc._watchingKiTarget;
-    const hasTarget = targetId && scene._kiTargetSprites[targetId];
-
-    // If we had a target and it's gone, OR we never found one — rebuild
-    if (!hasTarget) {
-      // Broke acknowledgment: show reaction, then wait before rebuilding
-      if (!cmd._brokeAckTimer) {
-        // First frame noticing it's gone — react
-        const brokeId = targetId; // remember which one broke (might still be in sprites briefly)
-        npc._watchingKiTarget = null;
-
-        // Try to re-find a nearby ki target first (maybe one was placed manually)
-        this._findAndWatchKiTarget(cmd, brokeId);
-        if (npc._watchingKiTarget && scene._kiTargetSprites[npc._watchingKiTarget]) {
-          npc.showBubble('Found a Ki Target! Watching...', 2500);
-          return;
-        }
-
-        // No target — show disappointment and pause before rebuilding
-        const breakLines = [
-          'Damn... maybe next time.',
-          'So close! I almost had it...',
-          'Tch, the target crumbled. I need more practice.',
-          'Not yet... but I\'m getting closer, I can feel it.',
-          'Ugh, shattered again. One more try!',
-          'The energy slipped away... build another one!',
-        ];
-        npc.showBubble(breakLines[Math.floor(Math.random() * breakLines.length)], 3500);
-        cmd._brokeAckTimer = 3500; // wait for the bubble to display
-        return;
-      }
-
-      // Count down the ack timer
-      cmd._brokeAckTimer -= _delta;
-      if (cmd._brokeAckTimer > 0) return;
-      delete cmd._brokeAckTimer;
-
-      // Update target position to player's current location for rebuild
-      const player = scene.player;
-      if (player) {
-        cmd._targetX = player.x;
-        cmd._targetY = player.y;
-      }
-
-      // Now transition to rebuild
-      npc.showBubble('I\'ll build another one!', 2500);
-      if (npc.logs >= 10) {
-        cmd._learnPhase = 'build';
-        cmd._buildTimer = 2000;
-      } else {
-        cmd._learnPhase = 'gather';
-      }
-      return;
-    }
-
-    // Periodic commentary while watching
-    if (cmd._watchTimer > 8000) {
-      cmd._watchTimer = 0;
-      const lines = [
-        'I\'m studying your technique...',
-        'Keep blasting! I\'m watching carefully.',
-        'Show me that energy again!',
-        'Almost getting it... I think...',
-        'The way you channel ki is fascinating.',
-        'Hit the target! I need to see more!',
-      ];
-      npc.showBubble(lines[Math.floor(Math.random() * lines.length)], 2500, { silent: true });
-    }
   }
 
   // ── Ranged Ki Blast helper (used by combat methods) ─────────────────────────
@@ -1683,11 +1513,12 @@ export class NPCTaskRunner {
   }
 
   _getKiShotUpgrade(stat) {
-    return Number(this._npc?.kiUpgrades?.ki_shot?.[stat] || 0);
+    return Number(this._npc?.kiBlastBonuses?.[stat] || 0);
   }
 
   _getKiBlastCooldownMs() {
-    return Math.max(150, KI_BLAST_COOLDOWN_MS * (1 - this._getKiShotUpgrade('cooldown') * 0.01));
+    const personalityMod = this._npc._personalityMod?.kiCd ?? 1.0;
+    return Math.max(150, KI_BLAST_COOLDOWN_BASE * personalityMod * (1 - this._getKiShotUpgrade('cooldown') * 0.01));
   }
 
   _getKiBlastRange() {
@@ -1698,41 +1529,6 @@ export class NPCTaskRunner {
     return 400 * (1 + this._getKiShotUpgrade('speed') * 0.01);
   }
 
-  // ── Show Blast (demonstrate ki blast on command) ────────────────────────────
-
-  _doShowBlast(_delta) {
-    const npc = this._npc;
-
-    if (!npc._hasKiBlast) {
-      npc.showBubble('I haven\'t learned any blasts yet...', 3000);
-      this._tasks.shift();
-      return;
-    }
-
-    if (!npc.infKi && npc.ki < npc.getBlastCost()) {
-      npc.showBubble('Not enough ki energy right now...', 3000);
-      this._tasks.shift();
-      return;
-    }
-
-    // Face away from player (safe direction)
-    const player = this._scene.player;
-    if (player) {
-      const dx = npc.x - player.x;
-      const dy = npc.y - player.y;
-      if (Math.abs(dx) > Math.abs(dy)) {
-        npc._facing = dx > 0 ? 'right' : 'left';
-      } else {
-        npc._facing = dy > 0 ? 'down' : 'up';
-      }
-    }
-
-    npc.stopMoving();
-    npc.showBubble('Watch this!', 2000);
-    this._npcFireKiBlast(null, null);
-    this._tasks.shift();
-  }
-
   // ── Practice Ki (NPC self-trains: gather → build → blast → repeat) ─────────
 
   _doPracticeKi(_delta) {
@@ -1741,8 +1537,8 @@ export class NPCTaskRunner {
     const cmd = this._tasks[0];
 
     if (!npc._hasKiBlast) {
-      npc.showBubble('I need to learn Ki Blast first!', 3000);
-      this._tasks.shift();
+      // NPC doesn't have ki blast yet — go watch a ki target to learn
+      this._doPracticeKi_watchAndLearn(_delta);
       return;
     }
 
@@ -1784,11 +1580,85 @@ export class NPCTaskRunner {
     }
   }
 
+  /**
+   * NPC doesn't have ki blast yet — find a ki target and watch it,
+   * waiting for the player to blast it so the NPC can learn (1/25 chance).
+   */
+  _doPracticeKi_watchAndLearn(_delta) {
+    const npc = this._npc;
+    const scene = this._scene;
+    const cmd = this._tasks[0];
+
+    // Init
+    if (!cmd._watchPhase) {
+      cmd._watchPhase = 'find_target';
+      cmd._watchBubbleShown = false;
+    }
+
+    // Find nearest ki target sprite
+    const kiTargets = Object.entries(scene._kiTargetSprites || {});
+    if (kiTargets.length === 0) {
+      // No ki targets exist — tell player
+      if (!cmd._watchBubbleShown) {
+        npc.showBubble("I need a Ki Target to watch! Build one near me.", 4000);
+        scene._addNPCSpeechToChat?.(npc, "I need a Ki Target to learn ki blast. Please build one!", '#ffaa44');
+        cmd._watchBubbleShown = true;
+      }
+      npc.stopMoving();
+      return;
+    }
+
+    // Find closest ki target
+    let bestId = null, bestSprite = null, bestDist = Infinity;
+    for (const [ktId, ktSprite] of kiTargets) {
+      const d = Phaser.Math.Distance.Between(npc.x, npc.y, ktSprite.x, ktSprite.y);
+      if (d < bestDist) {
+        bestDist = d;
+        bestId = ktId;
+        bestSprite = ktSprite;
+      }
+    }
+
+    const WATCH_DIST = 80;
+
+    if (bestDist > WATCH_DIST) {
+      // Walk to the ki target
+      npc.moveTo(bestSprite.x, bestSprite.y);
+      if (!cmd._watchBubbleShown) {
+        npc.showBubble("Going to watch the Ki Target...", 2500);
+        cmd._watchBubbleShown = true;
+      }
+    } else {
+      // Close enough — face the target, set watching flag, wait
+      npc.stopMoving();
+      this._faceTarget(npc, bestSprite);
+      npc._watchingKiTarget = bestId;
+
+      if (!cmd._watchingMsg) {
+        npc.showBubble("Watching... blast it so I can learn!", 4000);
+        scene._addNPCSpeechToChat?.(npc, "I'm watching the Ki Target. Blast it so I can learn ki!", '#66bbff');
+        cmd._watchingMsg = true;
+      }
+
+      // If NPC gained ki blast (server set it), celebrate and switch to full practice
+      if (npc._hasKiBlast) {
+        npc.showBubble("I learned Ki Blast!!", 4000);
+        scene._addNPCSpeechToChat?.(npc, "I learned Ki Blast!!", '#44ff44');
+        npc._watchingKiTarget = null;
+        // Reset cmd state so _doPracticeKi initializes fresh
+        delete cmd._watchPhase;
+        delete cmd._watchBubbleShown;
+        delete cmd._watchingMsg;
+        return;
+      }
+    }
+  }
+
   _practiceKi_gather(cmd, _delta) {
     const npc = this._npc;
     const scene = this._scene;
 
-    if (npc.logs >= 10) {
+    if (npc.logs >= 5) {
       cmd._practicePhase = 'return';
       npc.showBubble('Got the logs! Building a target.', 2000);
       return;
@@ -2172,7 +2042,7 @@ export class NPCTaskRunner {
     if (!player) return;
 
     const dist = Phaser.Math.Distance.Between(npc.x, npc.y, player.x, player.y);
-    if (dist > FOLLOW_LEASH) {
+    if (dist > this._getFollowLeash()) {
       npc.moveTo(player.x, player.y);
     } else {
       npc.stopMoving();
@@ -2191,15 +2061,9 @@ export class NPCTaskRunner {
     }
 
     // Build report message from NPC's current inventory
-    const parts = [];
-    if (npc.bastalite > 0) parts.push(`${npc.bastalite} Bastalite`);
-    if (npc.crystalPristine > 0) parts.push(`${npc.crystalPristine} Pristine Crystal`);
-    if (npc.crystalNormal > 0) parts.push(`${npc.crystalNormal} Ki Crystal`);
-    if (npc.crystalPoor > 0) parts.push(`${npc.crystalPoor} Cracked Crystal`);
-
     let msg;
-    if (parts.length > 0) {
-      msg = `Done refining ${cmd._refineCount} stone! Got: ${parts.join(', ')}. Here you go!`;
+    if ((npc.crystals || 0) > 0) {
+      msg = `Done refining ${cmd._refineCount} stone! Got: ${npc.crystals} Crystal${npc.crystals > 1 ? 's' : ''}. Here you go!`;
     } else {
       msg = `Refined ${cmd._refineCount} stone but didn't find anything good. Sorry boss!`;
     }
@@ -2208,10 +2072,7 @@ export class NPCTaskRunner {
     scene.chatBox?._addLog(`${npc.getName()}: ${msg}`, '#44eeff');
 
     // Clear NPC materials (server already transferred them)
-    npc.bastalite = 0;
-    npc.crystalPristine = 0;
-    npc.crystalNormal = 0;
-    npc.crystalPoor = 0;
+    npc.crystals = 0;
     npc.stones = 0;
 
     this._tasks.shift();
@@ -2225,9 +2086,7 @@ export class NPCTaskRunner {
     const player = scene.player;
     if (!player) return;
 
-    const hasMats = (npc.bastalite || 0) + (npc.crystalPristine || 0) +
-                    (npc.crystalNormal || 0) + (npc.crystalPoor || 0) +
-                    (npc.stones || 0);
+    const hasMats = (npc.crystals || 0) + (npc.stones || 0);
     if (hasMats <= 0) {
       npc.showBubble("I don't have any materials to give!", 2000);
       this._tasks.shift();
@@ -2235,7 +2094,7 @@ export class NPCTaskRunner {
     }
 
     const dist = Phaser.Math.Distance.Between(npc.x, npc.y, player.x, player.y);
-    if (dist > FOLLOW_LEASH) {
+    if (dist > this._getFollowLeash()) {
       npc.moveTo(player.x, player.y);
     } else {
       npc.stopMoving();
@@ -2245,50 +2104,16 @@ export class NPCTaskRunner {
       }
 
       const parts = [];
-      if (npc.bastalite > 0) parts.push(`${npc.bastalite} Bastalite`);
-      if (npc.crystalPristine > 0) parts.push(`${npc.crystalPristine} Pristine Crystal`);
-      if (npc.crystalNormal > 0) parts.push(`${npc.crystalNormal} Ki Crystal`);
-      if (npc.crystalPoor > 0) parts.push(`${npc.crystalPoor} Cracked Crystal`);
+      if (npc.crystals > 0) parts.push(`${npc.crystals} Crystal${npc.crystals > 1 ? 's' : ''}`);
       if (npc.stones > 0) parts.push(`${npc.stones} Stone`);
 
       npc.showBubble(`Here's what I have: ${parts.join(', ')}!`, 4000);
 
-      npc.bastalite = 0;
-      npc.crystalPristine = 0;
-      npc.crystalNormal = 0;
-      npc.crystalPoor = 0;
+      npc.crystals = 0;
       npc.stones = 0;
 
       this._tasks.shift();
     }
-  }
-
-  _doMeditate(_delta) {
-    const npc = this._npc;
-    const scene = this._scene;
-    const cmd = this._tasks[0] || {};
-    if (npc.meditating) {
-      this._tasks.shift();
-      return;
-    }
-    if ((npc.kiSkillLevel ?? 1) < 10) {
-      const line = 'I need stronger ki before I can meditate.';
-      npc.showBubble(line, 2600, { silent: true });
-      scene._addNPCSpeechToChat?.(npc, line);
-      this._tasks.shift();
-      return;
-    }
-    scene._conn?.send({
-      type: 'npc_meditate',
-      npc_id: npc.id,
-      crystal_quality: cmd.crystal_quality || undefined,
-    });
-    const line = cmd.crystal_quality
-      ? `Meditating with a ${cmd.crystal_quality} crystal.`
-      : 'Beginning meditation.';
-    npc.showBubble(line, 2600, { silent: true });
-    scene._addNPCSpeechToChat?.(npc, line);
-    this._tasks.shift();
   }
 
   // ── NPC Ki Blast (visual + server message) ─────────────────────────────────
@@ -2317,7 +2142,6 @@ export class NPCTaskRunner {
 
     // Determine facing direction based on target or current facing
     const facing = npc._facing || 'down';
-    const shotMode = npc.getEquippedKiAugment?.('ki_shot');
     const dirFrames = { down: 0, up: 1, right: 2, left: 3 };
     const blastFrame = dirFrames[facing] ?? 0;
 
@@ -2348,7 +2172,7 @@ export class NPCTaskRunner {
       // Animate toward target
       const targetProjY = target.y - (target.displayHeight || TILE_SIZE) * 0.4;
       const speed = this._getKiBlastProjectileSpeed();
-      const impactPoint = scene._getKiBlastImpactPoint?.(projX, projY, target.x, targetProjY, shotMode === 'explosive')
+      const impactPoint = scene._getKiBlastImpactPoint?.(projX, projY, target.x, targetProjY, false)
         || { x: target.x, y: targetProjY };
       const travelDist = Phaser.Math.Distance.Between(projX, projY, impactPoint.x, impactPoint.y);
       scene.tweens.add({
@@ -2357,7 +2181,7 @@ export class NPCTaskRunner {
         y: impactPoint.y,
         duration: Math.max(120, (travelDist / speed) * 1000),
         onComplete: () => {
-          scene._showKiBlastImpact?.(impactPoint.x, impactPoint.y, npc.auraTint, shotMode === 'explosive' ? 28 : 18, shotMode === 'explosive');
+          scene._showKiBlastImpact?.(impactPoint.x, impactPoint.y, npc.auraTint, 18, false);
           proj.destroy();
         },
       });
@@ -2367,7 +2191,7 @@ export class NPCTaskRunner {
       const dir = dirVecs[facing] || dirVecs.down;
       const intendedEndX = projX + dir.x * this._getKiBlastRange();
       const intendedEndY = projY + dir.y * this._getKiBlastRange();
-      const impactPoint = scene._getKiBlastImpactPoint?.(projX, projY, intendedEndX, intendedEndY, shotMode === 'explosive')
+      const impactPoint = scene._getKiBlastImpactPoint?.(projX, projY, intendedEndX, intendedEndY, false)
         || { x: intendedEndX, y: intendedEndY };
       const endX = impactPoint.x;
       const endY = impactPoint.y;
@@ -2378,7 +2202,7 @@ export class NPCTaskRunner {
         alpha: 0,
         duration: Math.max(140, (this._getKiBlastRange() / this._getKiBlastProjectileSpeed()) * 1000),
         onComplete: () => {
-          scene._showKiBlastImpact?.(endX, endY, npc.auraTint, shotMode === 'explosive' ? 28 : 18, shotMode === 'explosive');
+          scene._showKiBlastImpact?.(endX, endY, npc.auraTint, 18, false);
           proj.destroy();
         },
       });

@@ -2,9 +2,9 @@ import json
 
 import httpx
 
-from core.config import MODEL, OLLAMA_URL
 from schemas.commands import ChatRequest
 from services.prompt_loader import load_prompt, render_prompt
+from services.llm_gateway import chat_completion
 
 VALID_CATEGORIES = {
     "gather",
@@ -17,6 +17,8 @@ VALID_CATEGORIES = {
 
 VALID_TASKS = {
     "gather",
+    "gather_stone",
+    "gather_all",
     "follow",
     "idle",
     "attack_nearest_enemy",
@@ -96,21 +98,16 @@ def validate_commands(raw: list) -> list:
 
 async def route_category(text: str, client: httpx.AsyncClient) -> str:
     router_prompt = load_prompt("router")
-    resp = await client.post(
-        OLLAMA_URL,
-        json={
-            "model": MODEL,
-            "messages": [
-                {"role": "system", "content": router_prompt},
-                {"role": "user", "content": text},
-            ],
-            "stream": False,
-            "think": False,
-            "options": {"temperature": 0, "num_predict": 5},
-        },
+    raw_text = await chat_completion(
+        [
+            {"role": "system", "content": router_prompt},
+            {"role": "user", "content": text},
+        ],
+        temperature=0,
+        max_tokens=5,
+        timeout=60.0,
     )
-    resp.raise_for_status()
-    raw = resp.json()["message"]["content"].strip().lower().split()[0]
+    raw = raw_text.strip().lower().split()[0]
     category = raw.strip(".,!?")
     if category not in VALID_CATEGORIES:
         print(f"[Router] UNKNOWN category '{category}' for input: {text!r}")
@@ -139,27 +136,52 @@ async def specialist_commands(category: str, request: ChatRequest, client: httpx
         context_str = ("\n\n" + "\n".join(ctx_parts)) if ctx_parts else ""
         specialist_prompt += context_str
 
-    resp = await client.post(
-        OLLAMA_URL,
-        json={
-            "model": MODEL,
-            "messages": [
-                {"role": "system", "content": specialist_prompt},
-                {"role": "user", "content": request.text},
-            ],
-            "stream": False,
-            "think": False,
-            "options": {"temperature": 0, "num_predict": 300},
-        },
+    raw = await chat_completion(
+        [
+            {"role": "system", "content": specialist_prompt},
+            {"role": "user", "content": request.text},
+        ],
+        temperature=0,
+        max_tokens=300,
+        timeout=60.0,
     )
-    resp.raise_for_status()
-    raw = resp.json()["message"]["content"].strip()
     print(f"[Specialist:{category}] raw -> {raw!r}")
     commands = extract_command_json(raw)
     return validate_commands(commands)
 
 
+_KEYWORD_SHORTCUTS = {
+    "practice ki":      ("combat", [{"task": "practice_ki"}]),
+    "train ki":         ("combat", [{"task": "practice_ki"}]),
+    "learn ki":         ("combat", [{"task": "practice_ki"}]),
+    "ki blast practice":("combat", [{"task": "practice_ki"}]),
+    "practice energy":  ("combat", [{"task": "practice_ki"}]),
+    "train on dummy":   ("combat", [{"task": "train"}]),
+    "train melee":      ("combat", [{"task": "train"}]),
+    "attack":           ("combat", [{"task": "attack_nearest_enemy"}]),
+    "defend me":        ("combat", [{"task": "defend_player"}]),
+    "guard me":         ("combat", [{"task": "defend_player"}]),
+    "follow me":        ("follow", [{"task": "follow"}]),
+    "come here":        ("follow", [{"task": "follow"}]),
+    "stop":             ("idle",   [{"task": "idle"}]),
+    "gather wood":      ("gather", [{"task": "gather"}]),
+    "chop trees":       ("gather", [{"task": "gather"}]),
+    "get wood":         ("gather", [{"task": "gather"}]),
+    "gather logs":      ("gather", [{"task": "gather"}]),
+    "get logs":         ("gather", [{"task": "gather"}]),
+    "pickup stone":     ("combat", [{"task": "pickup_stone"}]),
+    "refine stone":     ("combat", [{"task": "refine_stone"}]),
+}
+
+
 async def parse_command(request: ChatRequest) -> tuple[str, list]:
+    # Fast keyword matching — bypass LLM for common commands
+    text_lower = request.text.strip().lower()
+    for keyword, result in _KEYWORD_SHORTCUTS.items():
+        if text_lower == keyword or text_lower.startswith(keyword + " "):
+            print(f"[CommandService] Keyword shortcut: '{request.text}' -> {result}")
+            return result
+
     async with httpx.AsyncClient(timeout=60.0) as client:
         category = await route_category(request.text, client)
         # Chat is conversation, not a command — return idle to fall through to dialogue

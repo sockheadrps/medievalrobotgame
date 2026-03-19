@@ -1,9 +1,10 @@
 // LLMClient — talks to the player's local Ollama instance for all LLM calls.
 // All prompts are built client-side — no server round-trips for prompt rendering.
 
-import { OLLAMA_URL as OLLAMA_BASE } from '../config.js';
+import { API_BASE } from '../config.js';
 
-const OLLAMA_URL = `${OLLAMA_BASE}/api/chat`;
+const LLM_CHAT_URL = `${API_BASE}/llm/chat/completions`;
+const LLM_MODELS_URL = `${API_BASE}/llm/models`;
 let _model = 'tinyllama:latest';
 let _numCtx = 4096;
 
@@ -16,13 +17,13 @@ export function setNumCtx(n) { _numCtx = n; }
 /** Get the current model name. */
 export function getModel() { return _model; }
 
-/** Fetch available models from local Ollama. Returns array of model name strings. */
+/** Fetch available models from the aux server proxy. Returns array of model name strings. */
 export async function fetchModels() {
   try {
-    const res = await fetch(`${OLLAMA_BASE}/api/tags`);
+    const res = await fetch(LLM_MODELS_URL);
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.models || []).map(m => m.name);
+    return (data.models || []).map(m => m.id || m.name).filter(Boolean);
   } catch {
     return [];
   }
@@ -110,10 +111,10 @@ Available: [{"task": "follow"}], [{"task": "idle"}]`,
   idle: `Output ONLY: [{"task": "idle"}]`,
 
   build: `Convert the player's build instruction into a JSON task list. Output ONLY a JSON array.
-  Available: [{"task": "build_fence"}]`,
+  Available: [{"task": "idle"}]`,
 
   fallback: `Convert player instructions into a JSON task list. Output ONLY a JSON array.
-Available tasks: gather, follow, attack_nearest_enemy, defend_player, train, give_logs, build_fence, light_campfire, guard_fire, idle`,
+Available tasks: gather, follow, attack_nearest_enemy, defend_player, train, give_logs, idle`,
 };
 
 // ── Prompt builders ─────────────────────────────────────────────────────────
@@ -396,7 +397,7 @@ Respond ONLY with JSON (no markdown):
 // ── Valid tasks for validation ──────────────────────────────────────────────
 
 const VALID_CATEGORIES = new Set(['gather', 'combat', 'follow', 'idle', 'build', 'chat']);
-const VALID_TASKS = new Set(['gather', 'follow', 'idle', 'attack_nearest_enemy', 'attack_player', 'attack_npc', 'defend_player', 'train', 'give_logs', 'build_fence', 'light_campfire', 'guard_fire']);
+const VALID_TASKS = new Set(['gather', 'gather_stone', 'gather_all', 'follow', 'idle', 'attack_nearest_enemy', 'attack_player', 'attack_npc', 'defend_player', 'train', 'give_logs']);
 
 // ── JSON extraction helpers ─────────────────────────────────────────────────
 
@@ -426,6 +427,61 @@ function extractJSON(raw) {
     }
   }
   return null;
+}
+
+function _extractQuotedStringField(raw, field) {
+  const match = raw.match(new RegExp(`"${field}"\\s*:\\s*"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"`, 'i'));
+  if (!match) return undefined;
+  try {
+    return JSON.parse(`"${match[1]}"`);
+  } catch {
+    return match[1];
+  }
+}
+
+function _extractNullableStringField(raw, field) {
+  const nullMatch = raw.match(new RegExp(`"${field}"\\s*:\\s*null`, 'i'));
+  if (nullMatch) return null;
+  return _extractQuotedStringField(raw, field);
+}
+
+function _extractNumberField(raw, field) {
+  const match = raw.match(new RegExp(`"${field}"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)`, 'i'));
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function extractPartialDecisionJSON(raw) {
+  if (!raw || typeof raw !== 'string' || !raw.includes('{')) return null;
+  const out = {};
+
+  const primary = _extractQuotedStringField(raw, 'primary_intent');
+  if (primary) out.primary_intent = primary;
+
+  const secondary = _extractNullableStringField(raw, 'secondary_intent');
+  if (secondary !== undefined) out.secondary_intent = secondary;
+
+  const targetId = _extractNullableStringField(raw, 'target_id');
+  if (targetId !== undefined) out.target_id = targetId;
+
+  const speech = _extractNullableStringField(raw, 'speech');
+  if (speech !== undefined) out.speech = typeof speech === 'string' ? stripVocabTags(speech) : speech;
+
+  const reason = _extractNullableStringField(raw, 'reason_summary');
+  if (reason !== undefined) out.reason_summary = reason;
+
+  const confidence = _extractNumberField(raw, 'decision_confidence');
+  if (confidence !== undefined) out.decision_confidence = confidence;
+
+  const emotion = {};
+  for (const key of ['trust', 'fear', 'anger']) {
+    const value = _extractNumberField(raw, key);
+    if (value !== undefined) emotion[key] = value;
+  }
+  if (Object.keys(emotion).length > 0) out.emotion_delta = emotion;
+
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 function extractJSONArray(raw) {
@@ -476,7 +532,7 @@ function _cleanResponse(content) {
 async function _call(systemPrompt, userMessage, opts = {}) {
   const { temperature = 0.7, maxTokens = 300 } = opts;
 
-  const res = await fetch(OLLAMA_URL, {
+  const res = await fetch(LLM_CHAT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -486,14 +542,14 @@ async function _call(systemPrompt, userMessage, opts = {}) {
         { role: 'user',   content: userMessage },
       ],
       stream: false,
-      options: { temperature, num_predict: maxTokens, num_ctx: _numCtx },
-      think: false,
+      temperature,
+      max_tokens: maxTokens,
     }),
   });
 
-  if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`LLM HTTP ${res.status}`);
   const data = await res.json();
-  return _cleanResponse(data.message?.content?.trim() ?? '');
+  return _cleanResponse(data?.choices?.[0]?.message?.content?.trim() ?? '');
 }
 
 /** Multi-turn call with conversation history */
@@ -511,21 +567,21 @@ async function _callWithHistory(systemPrompt, chatHistory, userMessage, opts = {
   }
   messages.push({ role: 'user', content: userMessage });
 
-  const res = await fetch(OLLAMA_URL, {
+  const res = await fetch(LLM_CHAT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: _model,
       messages,
       stream: false,
-      options: { temperature, num_predict: maxTokens, num_ctx: _numCtx },
-      think: false,
+      temperature,
+      max_tokens: maxTokens,
     }),
   });
 
-  if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`LLM HTTP ${res.status}`);
   const data = await res.json();
-  return _cleanResponse(data.message?.content?.trim() ?? '');
+  return _cleanResponse(data?.choices?.[0]?.message?.content?.trim() ?? '');
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -600,7 +656,7 @@ export async function generateDecision(statePacket) {
   const userMessage = 'Decide the NPC\'s next high-level action for the next 2 to 5 seconds.\nReturn JSON only.\n\nState:\n' + JSON.stringify(statePacket);
 
   const raw = await _call(systemPrompt, userMessage, { temperature: 0.4, maxTokens: 1024 });
-  return _sanitizeDecision(extractJSON(raw), statePacket);
+  return _sanitizeDecision(extractJSON(raw) || extractPartialDecisionJSON(raw), statePacket);
 }
 
 function _sanitizeDecision(raw, statePacket) {
@@ -728,7 +784,7 @@ ${transcript}`;
 /** Check if Ollama is reachable. */
 export async function checkConnection() {
   try {
-    const res = await fetch(`${OLLAMA_BASE}/api/tags`, { method: 'GET' });
+    const res = await fetch(LLM_MODELS_URL, { method: 'GET' });
     return res.ok;
   } catch {
     return false;

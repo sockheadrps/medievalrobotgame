@@ -1,11 +1,9 @@
 import json
 
-import httpx
-
-from core.config import MODEL, OLLAMA_URL
 from services.prompt_loader import load_prompt, render_prompt
 from services.soul_service import extract_soul_json
 from services import personality_types as ptypes
+from services.llm_gateway import chat_completion
 
 
 VALID_INTENTS = {
@@ -19,7 +17,12 @@ VALID_INTENTS = {
     "reposition",
     "do_nothing",
     "gather_wood",
+    "gather_stone",
     "train",
+    "practice_ki",
+    "refine_stone",
+    "give_materials",
+    "consume_crystal",
 }
 
 VALID_MEMORY_TYPES = {"event", "command", "observation", "dialogue", "relationship", "goal"}
@@ -143,23 +146,15 @@ async def generate_decision(state: dict) -> dict:
     )
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                OLLAMA_URL,
-                json={
-                    "model": MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_content},
-                        {"role": "user", "content": user_content},
-                    ],
-                    "stream": False,
-                    "think": False,
-                    "options": {"temperature": 0.4, "num_predict": 400},
-                },
-            )
-            resp.raise_for_status()
-
-        raw_text = resp.json()["message"]["content"].strip()
+        raw_text = await chat_completion(
+            [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.4,
+            max_tokens=400,
+            timeout=60.0,
+        )
         print(f"[decision:{npc_info.get('id', '?')}] raw -> {raw_text!r}")
 
         parsed = extract_soul_json(raw_text)

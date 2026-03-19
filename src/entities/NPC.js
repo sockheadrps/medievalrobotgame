@@ -11,18 +11,7 @@ import {
   NFRAME_PUNCH_RIGHT, NFRAME_PUNCH_LEFT,
   KI_MAX_BASE, KI_MAX_PER_LEVEL, KI_REGEN_MS, KI_BLAST_BASE_COST, KI_BLAST_BASE_DMG, KI_BLAST_SCALE,
 } from '../constants.js';
-import { createArmorOverlay, getNpcArmorFrameName, syncArmorOverlay } from './ArmorOverlay.js';
-import { createAuraOverlay, syncAuraOverlay } from './AuraOverlay.js';
 import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
-import {
-  applyActorChargeState,
-  applyActorMeditationState,
-  getEquippedActorKiAugment,
-  hasActorKiAugment,
-  hasActorKiDenomination,
-  hasActorKiMove,
-  initializeActorKiState,
-} from './actorKiState.js';
 
 const HP_REGEN_MS = 30000;
 const SCALE = TILE_SIZE / NPC_FRAME_H; // 48/32 = 1.5
@@ -89,12 +78,9 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this.infKi = false;
     this._kiRegenAccum = 0;
     this.blastLevel = 0;
-    this.kiSkillLevel = 1;
-    this.kiSkillXp = 0;
-    this.realmTier = 0;
-    this.realmCrystalT1 = 0;
+    this.crystals = 0;
     this.kiMoves = [];
-    initializeActorKiState(this);
+    this.kiBlastBonuses = { blast_speed: 0, blast_range: 0, blast_dmg: 0, blast_cooldown: 0, barrier_duration: 0, barrier_cooldown: 0 };
     this._emotionDecayAccum = 0;
     this._memoryDecayAccum = 0;
     this._emotionReactAccum = 0; // periodic check for emotion-driven behavior
@@ -107,10 +93,6 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this.logs    = 0;
     this.maxLogs = this._calcMaxLogs();
     this.stones  = 0;
-    this.bastalite = 0;
-    this.crystalPristine = 0;
-    this.crystalNormal = 0;
-    this.crystalPoor = 0;
 
     // Movement
     this._moveTarget = null;
@@ -120,10 +102,11 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._baseSpeed  = 100;
     this._facing     = 'down';
     this._punching   = false;
-    this.armorElite = false;
 
     // Soul / personality
     this.soul = _makeSoul();
+    // Behavioral modifiers derived from personality type
+    this._personalityMod = getPersonalityModifiers(this.soul.personality.type);
 
     // Name label
     this._nameLabel = scene.add.text(x, y - TILE_SIZE - 10, this._name, {
@@ -137,14 +120,6 @@ export class NPC extends Phaser.GameObjects.Sprite {
       padding: { x: 4, y: 3 }, wordWrap: { width: 160 },
     }).setOrigin(0.5, 1).setDepth(10).setVisible(false);
     this._bubbleTimer = null;
-    this._meditationLabel = scene.add.text(x, y - TILE_SIZE - 36, '', {
-      fontSize: '9px', color: '#99ddff', backgroundColor: '#001122aa',
-      padding: { x: 4, y: 2 },
-    }).setOrigin(0.5, 1).setDepth(11).setVisible(false);
-    this._meditationBarBg = scene.add.rectangle(x, y - TILE_SIZE - 26, 34, 4, 0x112233, 0.95)
-      .setDepth(11).setVisible(false);
-    this._meditationBar = scene.add.rectangle(x - 17, y - TILE_SIZE - 26, 34, 4, 0x66bbff, 0.95)
-      .setOrigin(0, 0.5).setDepth(12).setVisible(false);
 
     // Selection ring
     this._ring = scene.add.circle(x, y - 6, 20, 0x22d8ff, 0.34)
@@ -165,8 +140,6 @@ export class NPC extends Phaser.GameObjects.Sprite {
       .setOrigin(0, 0.5).setDepth(3);
     this._kiBar = scene.add.rectangle(x - 20, y - TILE_SIZE + 3, 40, 3, 0x4488ff)
       .setOrigin(0, 0.5).setDepth(3);
-    this._armorOverlay = createArmorOverlay(scene, this);
-    this._auraOverlay = createAuraOverlay(scene, this);
     this._barrierOverlay = createBarrierOverlay(scene, this);
 
     this._ensureAnims(scene);
@@ -180,43 +153,20 @@ export class NPC extends Phaser.GameObjects.Sprite {
   isKnockedOut()  { return this._knockedOut; }
   getFacing()     { return this._facing; }
 
-  setMeditationState(state = {}) {
-    applyActorMeditationState(this, state, () => this._updateMeditationVisuals());
+  /** Effective movement speed — personality base * emotion modifiers. */
+  getEffectiveSpeed() {
+    const base = this._baseSpeed * (this._personalityMod?.speed ?? 1.0);
+    const rel = this._getOwnerRelationship();
+    const fear = rel?.fear ?? 0;
+    const anger = rel?.anger ?? 0;
+    // Afraid NPCs move faster (fleeing instinct), angry NPCs charge slightly faster
+    return base * (1 + fear * 0.3 + anger * 0.15);
   }
 
-  setChargeState(state = {}) {
-    applyActorChargeState(this, state, { facingFallback: this._facing });
-  }
-
-  hasKiMove(moveId) {
-    return hasActorKiMove(this, moveId);
-  }
-
-  hasKiDenomination(denominationId) {
-    return hasActorKiDenomination(this, denominationId);
-  }
-
-  hasKiAugment(moveId, augmentId) {
-    return hasActorKiAugment(this, moveId, augmentId);
-  }
-
-  getEquippedKiAugment(moveId) {
-    return getEquippedActorKiAugment(this, moveId);
-  }
-
-  _updateMeditationVisuals() {
-    const active = !!this.meditating;
-    const nowSec = Date.now() / 1000;
-    const totalSec = Math.max(0.001, this.meditationTotalMs / 1000);
-    const remaining = Math.max(0, this.meditationUntil - nowSec);
-    const pct = Phaser.Math.Clamp(remaining / totalSec, 0, 1);
-    this._meditationLabel?.setVisible(active).setText(active ? `Meditating ${Math.ceil(remaining)}s` : '');
-    this._meditationBarBg?.setVisible(active);
-    this._meditationBar?.setVisible(active);
-    this._meditationLabel?.setPosition(this.x, this.y - TILE_SIZE - 34);
-    this._meditationBarBg?.setPosition(this.x, this.y - TILE_SIZE - 24);
-    this._meditationBar?.setPosition(this.x - 17, this.y - TILE_SIZE - 24);
-    this._meditationBar?.setDisplaySize(34 * pct, 4);
+  /** Get the owner relationship (for emotion-driven modifiers). */
+  _getOwnerRelationship() {
+    const ownerId = this.scene?.playerId || 'default';
+    return this.soul.relationships[ownerId] || this.soul.relationships['default'];
   }
 
   /** Play punch frame toward a target. */
@@ -402,127 +352,26 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._pathTargetKey = null;
   }
 
-  /** Check if a position is blocked by a fence. */
-  _isFenceBlocked(x, y) {
-    const fenceSprites = this.scene?._fenceSprites;
-    if (!fenceSprites) return false;
-    const myOwner = this.scene?.playerId;
-    for (const fid of Object.keys(fenceSprites)) {
-      const f = fenceSprites[fid];
-      if (f._dead) continue;
-      const fd = Math.sqrt((x - f.x) ** 2 + (y - f.y) ** 2);
-      if (fd < TILE_SIZE * 0.45) {
-        if (f.isGate && f.owner === myOwner) continue;
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /** Check if a straight line from (x0,y0) to (x1,y1) passes near any fence. */
-  _isLineBlocked(x0, y0, x1, y1) {
-    const fenceSprites = this.scene?._fenceSprites;
-    if (!fenceSprites) return false;
-    const myOwner = this.scene?.playerId;
-    const ldx = x1 - x0;
-    const ldy = y1 - y0;
-    const len = Math.sqrt(ldx * ldx + ldy * ldy);
-    if (len < 1) return false;
-    // Sample points along the line every half-tile
-    const steps = Math.ceil(len / (TILE_SIZE * 0.5));
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      const sx = x0 + ldx * t;
-      const sy = y0 + ldy * t;
-      for (const fid of Object.keys(fenceSprites)) {
-        const f = fenceSprites[fid];
-        if (f._dead) continue;
-        if (f.isGate && f.owner === myOwner) continue;
-        const fd = Math.sqrt((sx - f.x) ** 2 + (sy - f.y) ** 2);
-        if (fd < TILE_SIZE * 0.45) return true;
-      }
-    }
-    return false;
-  }
-
-  /** Try to move by (mx, my). Returns true if not blocked by a fence. */
+  /** Try to move by (mx, my). */
   _tryMove(mx, my) {
-    const newX = this.x + mx;
-    const newY = this.y + my;
-    if (this._isFenceBlocked(newX, newY)) return false;
-    this.x = newX;
-    this.y = newY;
+    this.x += mx;
+    this.y += my;
     return true;
   }
 
-  /**
-   * Simple BFS pathfinding on the tile grid around fences.
-   * Returns array of {x,y} waypoints (tile centers), or null if no path.
-   */
+  /** Pathfinding stub — no obstacles currently. Returns null (direct path). */
   _findPath(fromX, fromY, toX, toY) {
-    const col0 = Math.floor(fromX / TILE_SIZE);
-    const row0 = Math.floor(fromY / TILE_SIZE);
-    const col1 = Math.floor(toX / TILE_SIZE);
-    const row1 = Math.floor(toY / TILE_SIZE);
-    if (col0 === col1 && row0 === row1) return null;
-
-    // Build blocked set from fences
-    const blocked = new Set();
-    const fenceSprites = this.scene?._fenceSprites;
-    const myOwner = this.scene?.playerId;
-    if (fenceSprites) {
-      for (const fid of Object.keys(fenceSprites)) {
-        const f = fenceSprites[fid];
-        if (f._dead) continue;
-        if (f.isGate && f.owner === myOwner) continue;
-        const fc = Math.floor(f.x / TILE_SIZE);
-        const fr = Math.floor(f.y / TILE_SIZE);
-        blocked.add(`${fc},${fr}`);
-      }
-    }
-    if (blocked.size === 0) return null; // no fences, direct path fine
-
-    // BFS with limited search radius
-    const maxDist = 15;
-    const queue = [[col0, row0]];
-    const visited = new Map();
-    visited.set(`${col0},${row0}`, null);
-    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
-
-    while (queue.length > 0) {
-      const [c, r] = queue.shift();
-      if (c === col1 && r === row1) {
-        // Reconstruct path
-        const path = [];
-        let key = `${c},${r}`;
-        while (key) {
-          const [pc, pr] = key.split(',').map(Number);
-          path.unshift({ x: pc * TILE_SIZE + TILE_SIZE / 2, y: pr * TILE_SIZE + TILE_SIZE / 2 });
-          key = visited.get(key);
-        }
-        return path.length > 1 ? path.slice(1) : null; // skip start tile
-      }
-      for (const [dc, dr] of dirs) {
-        const nc = c + dc;
-        const nr = r + dr;
-        const nk = `${nc},${nr}`;
-        if (visited.has(nk)) continue;
-        if (blocked.has(nk)) continue;
-        if (Math.abs(nc - col0) > maxDist || Math.abs(nr - row0) > maxDist) continue;
-        visited.set(nk, `${c},${r}`);
-        queue.push([nc, nr]);
-      }
-    }
-    return null; // no path found
+    return null;
   }
 
   getSpeed() {
+    const base = this.getEffectiveSpeed();
     const fillPct = this.maxLogs > 0 ? this.logs / this.maxLogs : 0;
-    if (fillPct <= 0.75) return this._baseSpeed;
+    if (fillPct <= 0.75) return base;
     // Linear slowdown from 100% speed at 75% full to 60% speed at 100% full
     const overPct = (fillPct - 0.75) / 0.25; // 0..1
     const slowFactor = 1 - overPct * 0.4;    // 1.0..0.6
-    return this._baseSpeed * slowFactor;
+    return base * slowFactor;
   }
 
   /** Max logs capacity based on level: 5 + level * 5 */
@@ -542,9 +391,12 @@ export class NPC extends Phaser.GameObjects.Sprite {
 
   showBubble(text, durationMs = 5000, { silent = false } = {}) {
     if (!this._bubble) return;
+    // Scale bubble duration by personality — Berserkers are terse, Caretakers linger
+    const durMod = this._personalityMod?.bubbleDuration ?? 1.0;
+    const effectiveDur = Math.round(durationMs * durMod);
     this._bubble.setText(text).setVisible(true);
     if (this._bubbleTimer) this._bubbleTimer.remove();
-    this._bubbleTimer = this.scene?.time.delayedCall(durationMs, () => {
+    this._bubbleTimer = this.scene?.time.delayedCall(effectiveDur, () => {
       if (this._bubble) this._bubble.setVisible(false);
       this._bubbleTimer = null;
     });
@@ -863,13 +715,8 @@ export class NPC extends Phaser.GameObjects.Sprite {
       name: this._name,
       x: this.x,
       y: this.y,
-      stats: { maxHp: this.maxHp, hp: this.hp, str: this.str, def: this.def, level: this.level, xp: this.xp, logs: this.logs, stones: this.stones, bastalite: this.bastalite, crystalPristine: this.crystalPristine, crystalNormal: this.crystalNormal, crystalPoor: this.crystalPoor, realmCrystalT1: this.realmCrystalT1, maxKi: this.maxKi, ki: this.ki, infKi: !!this.infKi, blastLevel: this.blastLevel, hasKiBlast: !!this._hasKiBlast, kiSkillLevel: this.kiSkillLevel, kiSkillXp: this.kiSkillXp, realmTier: this.realmTier, kiMoves: this.kiMoves ?? [], kiDenominations: this.kiDenominations ?? [], kiKnownAugments: this.kiKnownAugments ?? {}, kiEquippedAugments: this.kiEquippedAugments ?? {}, kiUpgrades: this.kiUpgrades ?? {}, auraTint: this.auraTint, auraAlpha: this.auraAlpha },
-      armorElite: !!this.armorElite,
-      meditating: !!this.meditating,
-      meditation_started_at: this.meditationStartedAt,
-      meditation_until: this.meditationUntil,
-      meditation_total_ms: this.meditationTotalMs,
-      meditation_crystal_quality: this.meditationCrystalQuality,
+      stats: { maxHp: this.maxHp, hp: this.hp, str: this.str, def: this.def, level: this.level, xp: this.xp, logs: this.logs, stones: this.stones, crystals: this.crystals, maxKi: this.maxKi, ki: this.ki, infKi: !!this.infKi, blastLevel: this.blastLevel, hasKiBlast: !!this._hasKiBlast, kiBlastBonuses: this.kiBlastBonuses ?? {} },
+      map: this._map || null,
       soul: this.soul,
     };
   }
@@ -877,6 +724,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
   /** Restore NPC state from saved data. */
   loadFrom(data) {
     if (data.id) this.id = data.id;
+    if (data.map) this._map = data.map;
     if (data.name) this.setName(data.name);
     if (data.stats) {
       this.maxHp = data.stats.maxHp ?? this.maxHp;
@@ -887,13 +735,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
       this.xp    = data.stats.xp ?? this.xp;
       this.logs  = data.stats.logs ?? this.logs;
       this.stones = data.stats.stones ?? this.stones;
-      this.bastalite = data.stats.bastalite ?? this.bastalite;
-      this.crystalPristine = data.stats.crystalPristine ?? this.crystalPristine;
-      this.crystalNormal = data.stats.crystalNormal ?? this.crystalNormal;
-      this.crystalPoor = data.stats.crystalPoor ?? this.crystalPoor;
-      this.realmCrystalT1 = data.stats.realmCrystalT1 ?? data.realm_crystal_t1 ?? this.realmCrystalT1;
-      this.auraTint = data.stats.auraTint ?? this.auraTint;
-      this.auraAlpha = data.stats.auraAlpha ?? this.auraAlpha;
+      this.crystals = data.stats.crystals ?? this.crystals;
       this.barrierProcUntil = Number(data.stats.barrierProcUntil ?? data.barrier_proc_until ?? this.barrierProcUntil);
       this.barrierProcFacing = data.stats.barrierProcFacing ?? data.barrier_proc_facing ?? this.barrierProcFacing;
       this.maxLogs = this._calcMaxLogs();
@@ -901,19 +743,21 @@ export class NPC extends Phaser.GameObjects.Sprite {
       this.ki    = data.stats.ki ?? this.ki;
       this.infKi = !!(data.stats.infKi ?? data.inf_ki ?? this.infKi);
       this.blastLevel = data.stats.blastLevel ?? this.blastLevel;
-      this.kiSkillLevel = data.stats.kiSkillLevel ?? this.kiSkillLevel;
-      this.kiSkillXp = data.stats.kiSkillXp ?? this.kiSkillXp;
-      this.realmTier = data.stats.realmTier ?? this.realmTier;
-      this.kiMoves = Array.isArray(data.stats.kiMoves) ? [...data.stats.kiMoves] : (Array.isArray(data.ki_moves) ? [...data.ki_moves] : this.kiMoves);
-      this.kiDenominations = Array.isArray(data.stats.kiDenominations) ? [...data.stats.kiDenominations] : (Array.isArray(data.ki_denominations) ? [...data.ki_denominations] : this.kiDenominations);
-      this.kiKnownAugments = (data.stats.kiKnownAugments && typeof data.stats.kiKnownAugments === 'object') ? { ...data.stats.kiKnownAugments } : ((data.ki_known_augments && typeof data.ki_known_augments === 'object') ? { ...data.ki_known_augments } : this.kiKnownAugments);
-      this.kiEquippedAugments = (data.stats.kiEquippedAugments && typeof data.stats.kiEquippedAugments === 'object') ? { ...data.stats.kiEquippedAugments } : ((data.ki_equipped_augments && typeof data.ki_equipped_augments === 'object') ? { ...data.ki_equipped_augments } : this.kiEquippedAugments);
-      this.kiUpgrades = (data.stats.kiUpgrades && typeof data.stats.kiUpgrades === 'object') ? { ...data.stats.kiUpgrades } : ((data.ki_upgrades && typeof data.ki_upgrades === 'object') ? { ...data.ki_upgrades } : this.kiUpgrades);
+      this.kiBlastBonuses = (data.stats.kiBlastBonuses && typeof data.stats.kiBlastBonuses === 'object') ? { ...this.kiBlastBonuses, ...data.stats.kiBlastBonuses } : this.kiBlastBonuses;
       if (data.stats.hasKiBlast) this._hasKiBlast = true;
     }
-    this.armorElite = !!(data.armorElite ?? data.stats?.armorElite ?? this.armorElite);
-    this.setMeditationState(data);
     if (data.soul) {
+      const savedDrives = data.soul.drives;
+      const mergedDrives = { ..._makeDefaultDrives() };
+      if (savedDrives && typeof savedDrives === 'object') {
+        for (const k of ['aggression','attachment','curiosity','greed','social','survival','ambition']) {
+          if (typeof savedDrives[k] === 'number') mergedDrives[k] = savedDrives[k];
+        }
+      }
+      // Never restore commit lock across sessions
+      mergedDrives._commitUntil = 0;
+      mergedDrives._lastUpdated = 0;
+
       this.soul = {
         personality: data.soul.personality ?? this.soul.personality,
         relationships: data.soul.relationships ?? this.soul.relationships,
@@ -921,7 +765,10 @@ export class NPC extends Phaser.GameObjects.Sprite {
           ? data.soul.memories
           : this.soul.memories,
         learned_phrases: data.soul.learned_phrases ?? this.soul.learned_phrases ?? [],
+        drives: mergedDrives,
       };
+      // Update behavioral modifiers when personality type changes
+      this._personalityMod = getPersonalityModifiers(this.soul.personality.type);
       // Migrate old flat memories array to { global: [...] }
       if (Array.isArray(data.soul.memories)) {
         this.soul.memories = { global: data.soul.memories };
@@ -945,8 +792,6 @@ export class NPC extends Phaser.GameObjects.Sprite {
 
   update(delta) {
     if (this._dead) {
-      this._armorOverlay?.setVisible(false);
-      this._updateMeditationVisuals();
       return;
     }
     if (this._knockedOut) {
@@ -963,33 +808,6 @@ export class NPC extends Phaser.GameObjects.Sprite {
       this._kiBarBg?.setVisible(true);
       this._hpBar?.setDisplaySize(0, 4);
       this._kiBar?.setDisplaySize(0, 3);
-      syncArmorOverlay(this._armorOverlay, this, getNpcArmorFrameName(this, false, false), this.armorElite);
-      this._updateMeditationVisuals();
-      return;
-    }
-
-    if (this.meditating) {
-      this.stopMoving();
-      this.stop();
-      this.setFlipX(false);
-      this.setFrame(NFRAME_FACE_DOWN);
-      this.setTint(0x88bbff);
-      this._nameLabel?.setPosition(this.x, this.y - TILE_SIZE - 10);
-      this._bubble?.setPosition(this.x, this.y - TILE_SIZE - 22);
-      this._ring?.setPosition(this.x, this.y - 6);
-      this._ringPulse?.setPosition(this.x, this.y - 6);
-      this._hpBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
-      this._hpBar?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
-      this._kiBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
-      this._kiBar?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
-      syncArmorOverlay(this._armorOverlay, this, getNpcArmorFrameName(this, false, false), this.armorElite && !this._dead);
-      const hpPct = this.hp / this.maxHp;
-      this._hpBar?.setDisplaySize(40 * hpPct, 4);
-      this._hpBar?.setFillStyle(hpPct > 0.5 ? 0x44ff44 : hpPct > 0.25 ? 0xffaa00 : 0xff4444);
-      const kiPct = this.maxKi > 0 ? this.ki / this.maxKi : 0;
-      this._kiBar?.setDisplaySize(40 * kiPct, 3);
-      this._kiBar?.setFillStyle(kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa);
-      this._updateMeditationVisuals();
       return;
     }
 
@@ -1081,56 +899,26 @@ export class NPC extends Phaser.GameObjects.Sprite {
       }
     }
 
-    // Emotion-driven reactions — scan nearby remote players every 2s
-    this._emotionReactAccum += delta;
-    if (this._emotionReactAccum >= 2000) {
+    // Emotion-driven reactions — suppressed briefly after explicit player commands.
+    const manualCommandActive = (this._manualCommandUntil ?? 0) > Date.now();
+    if (manualCommandActive) {
+      this._emotionReactTarget = null;
       this._emotionReactAccum = 0;
-      this._emotionReactTarget = this._scanForEmotionReaction();
+    } else {
+      this._emotionReactAccum += delta;
+      if (this._emotionReactAccum >= 2000) {
+        this._emotionReactAccum = 0;
+        this._emotionReactTarget = this._scanForEmotionReaction();
+      }
     }
 
-    // Movement toward target (with fence pathfinding)
+    // Movement toward target
     if (this._moveTarget) {
-      // Determine immediate waypoint — use pathfinding if direct path is blocked
-      let goalX = this._moveTarget.x;
-      let goalY = this._moveTarget.y;
-
-      // Check if direct line to target crosses a fence
-      const directBlocked = this._isFenceBlocked(goalX, goalY) ||
-        this._isLineBlocked(this.x, this.y, goalX, goalY);
-
-      if (directBlocked) {
-        // Recompute path periodically (every 500ms or when target changed significantly)
-        const targetKey = `${Math.floor(goalX / TILE_SIZE)},${Math.floor(goalY / TILE_SIZE)}`;
-        if (!this._pathWaypoints || this._pathTargetKey !== targetKey ||
-            (this._pathAge = (this._pathAge ?? 0) + delta) > 500) {
-          this._pathWaypoints = this._findPath(this.x, this.y, goalX, goalY);
-          this._pathTargetKey = targetKey;
-          this._pathAge = 0;
-        }
-        // Follow waypoints
-        if (this._pathWaypoints && this._pathWaypoints.length > 0) {
-          goalX = this._pathWaypoints[0].x;
-          goalY = this._pathWaypoints[0].y;
-          const wpDist = Math.sqrt((this.x - goalX) ** 2 + (this.y - goalY) ** 2);
-          if (wpDist <= TILE_SIZE * 0.4) {
-            this._pathWaypoints.shift();
-          }
-        }
-      } else {
-        this._pathWaypoints = null;
-        this._pathTargetKey = null;
-      }
-
-      const dx = goalX - this.x;
-      const dy = goalY - this.y;
+      const dx = this._moveTarget.x - this.x;
+      const dy = this._moveTarget.y - this.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      // Check arrival against final target, not waypoint
-      const finalDx = this._moveTarget.x - this.x;
-      const finalDy = this._moveTarget.y - this.y;
-      const finalDist = Math.sqrt(finalDx * finalDx + finalDy * finalDy);
-
-      if (finalDist <= ARRIVE_D) {
+      if (dist <= ARRIVE_D) {
         this._moveTarget = null;
         this._pathWaypoints = null;
         this._playIdle();
@@ -1164,13 +952,6 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._hpBar?.setPosition(this.x - 20, this.y - TILE_SIZE - 2);
     this._kiBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
     this._kiBar?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
-    syncArmorOverlay(
-      this._armorOverlay,
-      this,
-      getNpcArmorFrameName(this, !!this._moveTarget, !!this.anims?.isPlaying),
-      this.armorElite && !this._dead
-    );
-    syncAuraOverlay(this._auraOverlay, this, (this.charging || this.chargePower > 0.01) && !this._dead && !this._knockedOut);
     syncBarrierOverlay(this._barrierOverlay, this);
 
     // Update HP bar width
@@ -1182,9 +963,8 @@ export class NPC extends Phaser.GameObjects.Sprite {
     // Update Ki bar width
     const kiPct = this.maxKi > 0 ? this.ki / this.maxKi : 0;
     this._kiBar?.setDisplaySize(40 * Phaser.Math.Clamp(kiPct, 0, 1), 3);
-    const kiColor = (this.charging || this.chargePower > 0.01) ? 0x67d8ff : kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa;
+    const kiColor = kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa;
     this._kiBar?.setFillStyle(kiColor);
-    this._updateMeditationVisuals();
   }
 
   // ── Animations ────────────────────────────────────────────────────────────
@@ -1227,17 +1007,13 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._bubbleTimer?.remove();
     this._nameLabel?.destroy();
     this._bubble?.destroy();
-    this._meditationLabel?.destroy();
-    this._meditationBar?.destroy();
-    this._meditationBarBg?.destroy();
     this._ring?.destroy();
     this._ringPulse?.destroy();
     this._hpBar?.destroy();
     this._hpBarBg?.destroy();
     this._kiBar?.destroy();
     this._kiBarBg?.destroy();
-    this._auraOverlay?.destroy();
-    this._armorOverlay?.destroy();
+    this._barrierOverlay?.destroy();
     super.destroy(fromScene);
   }
 }
@@ -1292,6 +1068,40 @@ const PERSONALITY_TYPES = {
   Pragmatist: { ranges: { cooperation: [0.50, 0.80], aggression: [0.15, 0.40], neuroticism: [0.10, 0.35] } },
 };
 
+// Personality-driven behavioral modifiers — these mechanically change how NPCs move, fight, and decide
+// speed: movement multiplier, meleeCd: melee cooldown mult, kiCd: ki blast cooldown mult,
+// followDist: how far from player the NPC orbits (mult on FOLLOW_DIST),
+// decisionSpeed: LLM decision cooldown mult (lower = decides faster, more impulsive),
+// bubbleDuration: speech bubble duration mult,
+// fallback: what task to do when LLM is down or confidence is low
+const PERSONALITY_MODIFIERS = {
+  Guardian:   { speed: 0.9,  meleeCd: 1.1,  kiCd: 1.2,  followDist: 0.8,  decisionSpeed: 1.0, bubbleDuration: 1.0, fallback: 'defend_player' },
+  Scout:      { speed: 1.2,  meleeCd: 1.0,  kiCd: 0.9,  followDist: 1.5,  decisionSpeed: 0.8, bubbleDuration: 0.6, fallback: 'idle' },
+  Berserker:  { speed: 1.1,  meleeCd: 0.7,  kiCd: 0.8,  followDist: 2.0,  decisionSpeed: 0.6, bubbleDuration: 0.5, fallback: 'attack_nearest_enemy' },
+  Caretaker:  { speed: 0.85, meleeCd: 1.3,  kiCd: 1.1,  followDist: 0.6,  decisionSpeed: 1.2, bubbleDuration: 1.4, fallback: 'follow' },
+  Paranoid:   { speed: 1.0,  meleeCd: 0.9,  kiCd: 1.0,  followDist: 0.5,  decisionSpeed: 0.5, bubbleDuration: 0.8, fallback: 'follow' },
+  Pragmatist: { speed: 1.0,  meleeCd: 1.0,  kiCd: 1.0,  followDist: 1.0,  decisionSpeed: 1.0, bubbleDuration: 0.7, fallback: 'gather' },
+};
+
+/** Get the behavioral modifier table for a personality type. */
+export function getPersonalityModifiers(typeName) {
+  return PERSONALITY_MODIFIERS[typeName] || PERSONALITY_MODIFIERS.Pragmatist;
+}
+
+function _makeDefaultDrives() {
+  return {
+    aggression: 0.0,
+    attachment: 0.0,
+    curiosity:  0.0,
+    greed:      0.0,
+    social:     0.0,
+    survival:   0.0,
+    ambition:   0.0,
+    _commitUntil: 0,
+    _lastUpdated: 0,
+  };
+}
+
 function _makeSoul(personalityType) {
   const r = (lo, hi) => parseFloat((lo + Math.random() * (hi - lo)).toFixed(2));
 
@@ -1312,6 +1122,7 @@ function _makeSoul(personalityType) {
     },
     memories: {},  // keyed by playerId or 'global'
     learned_phrases: [], // phrases picked up from owner's speech
+    drives: _makeDefaultDrives(),
   };
 }
 

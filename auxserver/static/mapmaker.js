@@ -22,6 +22,14 @@ let lineStart = null;
 let selectedBrush = null; // { type:'sheet', col, row } | { type:'custom', id }
 let lastSheetSelection = null;
 
+// Tile History — most-recent first, max 24 entries
+const TILE_HISTORY_MAX = 24;
+let tileHistory = []; // array of { col, row }
+
+// Collision State — editor-only overlay tiles, not written to placedTiles
+// Keys are "x,y" strings, values are the hex color string used for that tile
+let collisionTiles = new Map();
+
 // Layer State
 let activeLayer = 0;
 
@@ -32,6 +40,7 @@ let customSpriteIdCounter = 1;
 
 let isDrawing = false;
 let isErasing = false;
+let lastFloodTile = null; // track last tile flooded to avoid re-flooding same cell
 
 const img = new Image();
 img.src = '/static/Spritesheet/roguelikeSheet_transparent.png';
@@ -120,6 +129,42 @@ function setSelectedSheetTile(col, row) {
   lastSheetSelection = { col, row };
   selectedBrush = { type: 'sheet', col, row };
   updateSelectionDisplay();
+  pushTileHistory(col, row);
+}
+
+// ── Tile History ─────────────────────────────────────────────
+const tileHistoryEl = document.getElementById('tileHistory');
+
+function pushTileHistory(col, row) {
+  // Remove existing entry if present (dedup — move to front instead)
+  const idx = tileHistory.findIndex((t) => t.col === col && t.row === row);
+  if (idx !== -1) tileHistory.splice(idx, 1);
+  tileHistory.unshift({ col, row });
+  if (tileHistory.length > TILE_HISTORY_MAX) tileHistory.length = TILE_HISTORY_MAX;
+  renderTileHistory();
+}
+
+function renderTileHistory() {
+  if (!tileHistoryEl) return;
+  tileHistoryEl.innerHTML = '';
+  const active = selectedBrush?.type === 'sheet' ? selectedBrush : null;
+  for (const entry of tileHistory) {
+    const c = document.createElement('canvas');
+    c.className = 'tile-history-item';
+    c.width = TILE;
+    c.height = TILE;
+    if (active && active.col === entry.col && active.row === entry.row) {
+      c.classList.add('active');
+    }
+    const ctx = c.getContext('2d');
+    if (img.complete && img.naturalWidth) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, entry.col * SLOT, entry.row * SLOT, TILE, TILE, 0, 0, TILE, TILE);
+    }
+    c.title = `[${entry.col}, ${entry.row}]`;
+    c.addEventListener('click', () => setSelectedSheetTile(entry.col, entry.row));
+    tileHistoryEl.appendChild(c);
+  }
 }
 
 function setSelectedCustomSprite(id) {
@@ -444,16 +489,31 @@ function initSpriteEditor() {
   spriteEditorCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
+// Keep zoom canvas buffer in sync with its CSS size so it fills the column
+function syncZoomCanvasSize() {
+  const w = zCanvas.clientWidth || 160;
+  const h = zCanvas.clientHeight || 160;
+  if (zCanvas.width !== w || zCanvas.height !== h) {
+    zCanvas.width  = w;
+    zCanvas.height = h;
+    zCtx.imageSmoothingEnabled = false;
+  }
+}
+new ResizeObserver(syncZoomCanvasSize).observe(zCanvas);
+
 // --- Initialization ---
 img.onload = () => {
   sCanvas.width = img.width;
   sCanvas.height = img.height;
   sCtx.drawImage(img, 0, 0);
+  syncZoomCanvasSize();
   zCtx.imageSmoothingEnabled = false;
 
   initSpriteEditor();
+  initMapItems();
   updateDimensions();
   updateSelectionDisplay();
+  renderTileHistory();
 };
 
 window.setEditorMode = function (mode) {
@@ -477,6 +537,10 @@ window.setTool = function (tool) {
   lineStart = null;
   renderMap();
 };
+
+function getCollisionColor() {
+  return document.getElementById('collisionColor')?.value || '#ff0033';
+}
 
 window.toggleGridColor = function () {
   isGridWhite = !isGridWhite;
@@ -538,6 +602,7 @@ window.addEventListener('keyup', (e) => {
 
 // --- Centered Magnifier & Sheet Picker ---
 sCanvas.addEventListener('mousemove', (e) => {
+  syncZoomCanvasSize();
   const rect = sCanvas.getBoundingClientRect();
   const scaleX = img.width / rect.width;
   const scaleY = img.height / rect.height;
@@ -546,13 +611,16 @@ sCanvas.addEventListener('mousemove', (e) => {
   const col = Math.floor(px / SLOT);
   const row = Math.floor(py / SLOT);
 
-  const viewSize = 6 * SLOT;
+  // Show a 10×10 tile window centred on the hovered tile
+  const VIEW_TILES = 10;
+  const viewSize = VIEW_TILES * SLOT;
   const sx = col * SLOT - viewSize / 2 + SLOT / 2;
   const sy = row * SLOT - viewSize / 2 + SLOT / 2;
 
   zCtx.clearRect(0, 0, zCanvas.width, zCanvas.height);
   zCtx.drawImage(img, sx, sy, viewSize, viewSize, 0, 0, zCanvas.width, zCanvas.height);
 
+  // Red highlight box on the centre tile
   zCtx.strokeStyle = '#f00';
   zCtx.lineWidth = 2;
   const centerSize = (TILE / viewSize) * zCanvas.width;
@@ -574,7 +642,7 @@ sCanvas.addEventListener('mousedown', (e) => {
 
   const frame = row * cols + col;
   if (infoEl) {
-    infoEl.textContent = `col=${col}  row=${row}  frame=${frame}  (px ${col * SLOT}, ${row * SLOT})   COLS=${cols}`;
+    infoEl.textContent = `[${col},${row}] f${frame}`;
   }
 });
 
@@ -612,6 +680,16 @@ function setTileAt(x, y, brush = selectedBrush, layer = activeLayer) {
 }
 
 function doPaint(gx, gy) {
+  if (activeTool === 'collision') {
+    if (isErasing) {
+      collisionTiles.delete(`${gx},${gy}`);
+    } else if (isDrawing) {
+      collisionTiles.set(`${gx},${gy}`, getCollisionColor());
+    }
+    renderMap();
+    return;
+  }
+
   if (isErasing) {
     removeTileAt(gx, gy, activeLayer);
     renderMap();
@@ -624,7 +702,33 @@ function doPaint(gx, gy) {
   }
 }
 
+function floodFillCollision(startX, startY) {
+  const color = getCollisionColor();
+  const startKey = `${startX},${startY}`;
+  const startFilled = collisionTiles.has(startKey);
+  const startColor = startFilled ? collisionTiles.get(startKey) : null;
+  // If already the same color, nothing to do
+  if (startFilled && startColor === color) return;
+
+  const stack = [[startX, startY]];
+  const processed = new Set();
+  while (stack.length > 0) {
+    const [x, y] = stack.pop();
+    const key = `${x},${y}`;
+    if (x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT || processed.has(key)) continue;
+    const curFilled = collisionTiles.has(key);
+    const curColor = curFilled ? collisionTiles.get(key) : null;
+    // Continue flood into cells with same "state" as start
+    if (curFilled !== startFilled || (startFilled && curColor !== startColor)) continue;
+    processed.add(key);
+    collisionTiles.set(key, color);
+    stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+  }
+  renderMap();
+}
+
 function floodFill(startX, startY) {
+  if (activeTool === 'collision') { floodFillCollision(startX, startY); return; }
   if (!selectedBrush) return;
 
   const target = getTileAt(startX, startY, activeLayer);
@@ -655,7 +759,23 @@ function floodFill(startX, startY) {
 }
 
 function finalizeLine(endX, endY) {
-  if (!lineStart || !selectedBrush) return;
+  if (!lineStart) return;
+  if (activeTool === 'collision') {
+    const color = getCollisionColor();
+    const dx = Math.abs(endX - lineStart.x);
+    const dy = Math.abs(endY - lineStart.y);
+    if (dx > dy) {
+      const start = Math.min(lineStart.x, endX), end = Math.max(lineStart.x, endX);
+      for (let x = start; x <= end; x++) collisionTiles.set(`${x},${lineStart.y}`, color);
+    } else {
+      const start = Math.min(lineStart.y, endY), end = Math.max(lineStart.y, endY);
+      for (let y = start; y <= end; y++) collisionTiles.set(`${lineStart.x},${y}`, color);
+    }
+    lineStart = null;
+    renderMap();
+    return;
+  }
+  if (!selectedBrush) return;
 
   const dx = Math.abs(endX - lineStart.x);
   const dy = Math.abs(endY - lineStart.y);
@@ -726,11 +846,32 @@ mCanvas.addEventListener('mousedown', (e) => {
   const { gx, gy } = getGridCoords(e);
   if (gx < 0 || gy < 0 || gx >= MAP_WIDTH || gy >= MAP_HEIGHT) return;
 
+  // Map position picker — assign map grid coords to the active item slot
+  if (activeItemSlotId && e.button === 0) {
+    assignItemTile(gx, gy);
+    renderMap();
+    return;
+  }
+
+  // World object placement — click map to place selected world object
+  if (_activeWOAssetId && e.button === 0) {
+    placeWorldObjectAt(gx, gy);
+    return;
+  }
+
   if (activeTool === 'paint') {
     if (e.button === 0) isDrawing = true;
     if (e.button === 2) isErasing = true;
     doPaint(gx, gy);
+  } else if (activeTool === 'collision') {
+    if (e.button === 0) isDrawing = true;
+    if (e.button === 2) isErasing = true;
+    doPaint(gx, gy);
+  } else if (activeTool === 'portal' && e.button === 0) {
+    placePortalAt(gx, gy);
   } else if (activeTool === 'flood' && e.button === 0) {
+    isDrawing = true;
+    lastFloodTile = `${gx},${gy}`;
     floodFill(gx, gy);
   } else if (activeTool === 'line' && e.button === 0) {
     if (!lineStart) lineStart = { x: gx, y: gy };
@@ -757,6 +898,7 @@ window.addEventListener('mouseup', () => {
   isDrawing = false;
   isErasing = false;
   spriteDrawing = false;
+  lastFloodTile = null;
 
   if (isPanning) {
     isPanning = false;
@@ -779,17 +921,57 @@ window.addEventListener('mousemove', (e) => {
   }
 });
 
-// Local canvas mousemove for drawing previews
+// Local canvas mousemove for drawing previews + magnifier update
 mCanvas.addEventListener('mousemove', (e) => {
   if (isPanning || editorMode !== 'map') return;
 
   const { gx, gy } = getGridCoords(e);
 
-  if (activeTool === 'paint' && (isDrawing || isErasing)) {
+  if ((activeTool === 'paint' || activeTool === 'collision') && (isDrawing || isErasing)) {
     if (gx >= 0 && gy >= 0 && gx < MAP_WIDTH && gy < MAP_HEIGHT) doPaint(gx, gy);
+  } else if (activeTool === 'flood' && isDrawing) {
+    const key = `${gx},${gy}`;
+    if (key !== lastFloodTile && gx >= 0 && gy >= 0 && gx < MAP_WIDTH && gy < MAP_HEIGHT) {
+      lastFloodTile = key;
+      floodFill(gx, gy);
+    }
   } else if (activeTool === 'line' && lineStart) {
     renderLinePreview(gx, gy);
   }
+
+  // Update info bar with hovered tile coords
+  infoEl.textContent = `col=${gx}  row=${gy}` + (activeItemSlotId ? '  [click to place item here]' : '');
+
+  // Highlight tile under cursor when picking item position
+  if (activeItemSlotId && gx >= 0 && gy >= 0 && gx < MAP_WIDTH && gy < MAP_HEIGHT) {
+    renderMap();
+    mCtx.save();
+    mCtx.globalAlpha = 0.5;
+    mCtx.fillStyle = '#00ffff';
+    mCtx.fillRect(gx * TILE, gy * TILE, TILE, TILE);
+    mCtx.restore();
+  }
+
+  // Update zoom magnifier — centre on the tile under cursor (same coords as painting)
+  syncZoomCanvasSize();
+  const VIEW_TILES = 10;
+  const viewPx = VIEW_TILES * TILE;
+  // Centre of hovered tile in canvas-buffer pixels
+  const cx = (gx + 0.5) * TILE;
+  const cy = (gy + 0.5) * TILE;
+  const sx = cx - viewPx / 2;
+  const sy = cy - viewPx / 2;
+  zCtx.clearRect(0, 0, zCanvas.width, zCanvas.height);
+  zCtx.save();
+  zCtx.imageSmoothingEnabled = false;
+  zCtx.drawImage(mCanvas, sx, sy, viewPx, viewPx, 0, 0, zCanvas.width, zCanvas.height);
+  zCtx.restore();
+  // Red highlight on the centre tile
+  const tileScreenSize = (TILE / viewPx) * zCanvas.width;
+  const centerPos = (zCanvas.width - tileScreenSize) / 2;
+  zCtx.strokeStyle = '#f00';
+  zCtx.lineWidth = 2;
+  zCtx.strokeRect(centerPos, centerPos, tileScreenSize, tileScreenSize);
 });
 
 // --- Map Renderer ---
@@ -837,6 +1019,108 @@ function renderMap() {
         );
       }
     });
+
+  // Draw collision overlays — editor-only, semi-transparent colored cells
+  for (const [key, color] of collisionTiles) {
+    const [cx, cy] = key.split(',').map(Number);
+    // Fill with the chosen color at ~50% opacity
+    mCtx.save();
+    mCtx.globalAlpha = 0.45;
+    mCtx.fillStyle = color;
+    mCtx.fillRect(cx * TILE, cy * TILE, TILE, TILE);
+    mCtx.restore();
+    // Draw a small 'C' marker so it's obvious even on dark tiles
+    mCtx.fillStyle = 'rgba(255,255,255,0.75)';
+    mCtx.font = `bold ${Math.max(6, TILE - 6)}px monospace`;
+    mCtx.textAlign = 'center';
+    mCtx.textBaseline = 'middle';
+    mCtx.fillText('C', cx * TILE + TILE / 2, cy * TILE + TILE / 2);
+  }
+
+  // Draw spawn point overlays — map items with label 'spawn'
+  for (const entry of mapItems) {
+    if (entry.tileCol === null || entry.label.trim().toLowerCase() !== 'spawn') continue;
+    const px = entry.tileCol * TILE;
+    const py = entry.tileRow * TILE;
+    mCtx.save();
+    mCtx.globalAlpha = 0.55;
+    mCtx.fillStyle = '#44ff88';
+    mCtx.fillRect(px, py, TILE, TILE);
+    mCtx.restore();
+    mCtx.fillStyle = 'rgba(0,0,0,0.85)';
+    mCtx.font = `bold ${Math.max(5, TILE - 7)}px monospace`;
+    mCtx.textAlign = 'center';
+    mCtx.textBaseline = 'middle';
+    mCtx.fillText('S', px + TILE / 2, py + TILE / 2);
+  }
+
+  // Draw world object overlays — map items with label starting with 'worldobj:'
+  for (const entry of mapItems) {
+    if (entry.tileCol === null || !String(entry.label).startsWith('worldobj:')) continue;
+    const px = entry.tileCol * TILE;
+    const py = entry.tileRow * TILE;
+    mCtx.save();
+    mCtx.globalAlpha = 0.45;
+    mCtx.fillStyle = '#cc8844';
+    mCtx.fillRect(px, py, TILE, TILE);
+    mCtx.restore();
+    mCtx.fillStyle = 'rgba(255,255,255,0.9)';
+    mCtx.font = `bold ${Math.max(5, TILE - 7)}px monospace`;
+    mCtx.textAlign = 'center';
+    mCtx.textBaseline = 'middle';
+    mCtx.fillText('W', px + TILE / 2, py + TILE / 2);
+  }
+
+  // Draw portal overlays — map items with label starting with 'portal:'
+  for (const entry of mapItems) {
+    if (entry.tileCol === null || !String(entry.label).startsWith('portal:')) continue;
+    const px = entry.tileCol * TILE;
+    const py = entry.tileRow * TILE;
+    mCtx.save();
+    mCtx.globalAlpha = 0.55;
+    mCtx.fillStyle = '#aa44ff';
+    mCtx.fillRect(px, py, TILE, TILE);
+    mCtx.restore();
+    mCtx.fillStyle = 'rgba(255,255,255,0.9)';
+    mCtx.font = `bold ${Math.max(5, TILE - 7)}px monospace`;
+    mCtx.textAlign = 'center';
+    mCtx.textBaseline = 'middle';
+    mCtx.fillText('P', px + TILE / 2, py + TILE / 2);
+  }
+
+  // Draw minecart entrance overlays
+  for (const entry of mapItems) {
+    if (entry.tileCol === null || String(entry.label) !== 'minecart_entrance') continue;
+    const px = entry.tileCol * TILE;
+    const py = entry.tileRow * TILE;
+    mCtx.save();
+    mCtx.globalAlpha = 0.55;
+    mCtx.fillStyle = '#3366ff';
+    mCtx.fillRect(px, py, TILE, TILE);
+    mCtx.restore();
+    mCtx.fillStyle = 'rgba(255,255,255,0.9)';
+    mCtx.font = `bold ${Math.max(5, TILE - 7)}px monospace`;
+    mCtx.textAlign = 'center';
+    mCtx.textBaseline = 'middle';
+    mCtx.fillText('E', px + TILE / 2, py + TILE / 2);
+  }
+
+  // Draw minecart exit overlays
+  for (const entry of mapItems) {
+    if (entry.tileCol === null || !String(entry.label).startsWith('minecart_exit:')) continue;
+    const px = entry.tileCol * TILE;
+    const py = entry.tileRow * TILE;
+    mCtx.save();
+    mCtx.globalAlpha = 0.55;
+    mCtx.fillStyle = '#ff6633';
+    mCtx.fillRect(px, py, TILE, TILE);
+    mCtx.restore();
+    mCtx.fillStyle = 'rgba(255,255,255,0.9)';
+    mCtx.font = `bold ${Math.max(5, TILE - 7)}px monospace`;
+    mCtx.textAlign = 'center';
+    mCtx.textBaseline = 'middle';
+    mCtx.fillText('X', px + TILE / 2, py + TILE / 2);
+  }
 }
 
 // --- Toolbar Events ---
@@ -850,6 +1134,12 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     return;
   }
 
+  // Serialize collision tiles: array of {x, y, color}
+  const collisionPayload = Array.from(collisionTiles.entries()).map(([key, color]) => {
+    const [x, y] = key.split(',').map(Number);
+    return { x, y, color };
+  });
+
   const resp = await fetch('/save-map', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -859,6 +1149,8 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
       height: MAP_HEIGHT,
       tiles: placedTiles,
       customSprites: customSpritesPayloadForSave(),
+      collisionTiles: collisionPayload,
+      mapItems: mapItemsPayload(),
     }),
   });
 
@@ -905,13 +1197,38 @@ document.getElementById('loadBtn').addEventListener('click', async () => {
       layer: Number.isFinite(t.layer) ? t.layer : 0,
     }));
 
+  // Restore collision tiles
+  collisionTiles.clear();
+  if (Array.isArray(res.collisionTiles)) {
+    for (const ct of res.collisionTiles) {
+      if (Number.isFinite(ct?.x) && Number.isFinite(ct?.y)) {
+        collisionTiles.set(`${ct.x},${ct.y}`, ct.color || '#ff0033');
+      }
+    }
+  }
+
+  // Restore map items registry
+  hydrateMapItems(res.mapItems || []);
+
   updateDimensions();
+  // Scroll to the first tile's position
+  if (loadedTiles.length > 0) {
+    const minX = loadedTiles.reduce((a, t) => Math.min(a, t.x || 0), Infinity);
+    const minY = loadedTiles.reduce((a, t) => Math.min(a, t.y || 0), Infinity);
+    mapContainer.scrollLeft = Math.max(0, minX * TILE * mapZoom - 80);
+    mapContainer.scrollTop  = Math.max(0, minY * TILE * mapZoom - 80);
+  } else {
+    mapContainer.scrollLeft = 0;
+    mapContainer.scrollTop  = 0;
+  }
   alert(`Loaded "${name}"`);
 });
 
 document.getElementById('clearBtn').addEventListener('click', () => {
-  if (confirm('Wipe the entire map?')) {
+  if (confirm('Wipe the entire map (tiles + collision zones + items)?')) {
     placedTiles = [];
+    collisionTiles.clear();
+    hydrateMapItems([]);
     renderMap();
   }
 });
@@ -919,3 +1236,490 @@ document.getElementById('clearBtn').addEventListener('click', () => {
 // Prevent context menu on right-click (since RMB is erase)
 mCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 mapContainer.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// =============================================================================
+// Mix Palette — pick 2-10 tiles, then scatter them randomly/equally on the map
+// =============================================================================
+
+const mixSlotsEl   = document.getElementById('mixSlots');
+const mixHintEl    = document.getElementById('mixHint');
+const mixFillBtn   = document.getElementById('mixFillBtn');
+const mixSlotCount = document.getElementById('mixSlotCount');
+
+// Array of { col, row } | null, one entry per slot
+let mixPalette = [null, null, null, null]; // starts at 4 slots
+let mixActiveSlot = null; // index of the slot currently waiting for a tile pick
+
+function buildMixSlots() {
+  const count = parseInt(mixSlotCount.value, 10) || 4;
+  // Resize palette array — preserve existing assignments
+  while (mixPalette.length < count) mixPalette.push(null);
+  mixPalette = mixPalette.slice(0, count);
+  mixActiveSlot = null;
+
+  mixSlotsEl.innerHTML = '';
+  for (let i = 0; i < count; i++) {
+    const slot = document.createElement('div');
+    slot.className = 'mix-slot' + (mixPalette[i] ? ' filled' : '');
+    slot.dataset.index = i;
+    slot.title = `Slot ${i + 1} — click to select, then pick a tile`;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = TILE;
+    canvas.height = TILE;
+    canvas.className = 'mix-slot-canvas';
+    slot.appendChild(canvas);
+
+    const label = document.createElement('span');
+    label.className = 'mix-slot-label';
+    label.textContent = mixPalette[i] ? `${mixPalette[i].col},${mixPalette[i].row}` : '—';
+    slot.appendChild(label);
+
+    slot.addEventListener('click', () => {
+      // Deselect if clicking the active slot again
+      if (mixActiveSlot === i) {
+        mixActiveSlot = null;
+        updateMixSlotHighlights();
+        if (mixHintEl) mixHintEl.textContent = 'Click a slot, then pick a tile above';
+        return;
+      }
+      mixActiveSlot = i;
+      updateMixSlotHighlights();
+      if (mixHintEl) mixHintEl.textContent = `Slot ${i + 1} active — click a tile in the sheet above`;
+    });
+
+    mixSlotsEl.appendChild(slot);
+    drawMixSlot(i);
+  }
+}
+
+function updateMixSlotHighlights() {
+  const slots = mixSlotsEl.querySelectorAll('.mix-slot');
+  slots.forEach((s, i) => {
+    s.classList.toggle('active-slot', i === mixActiveSlot);
+  });
+}
+
+function drawMixSlot(index) {
+  const slotEl = mixSlotsEl.children[index];
+  if (!slotEl) return;
+  const canvas = slotEl.querySelector('.mix-slot-canvas');
+  const label  = slotEl.querySelector('.mix-slot-label');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, TILE, TILE);
+
+  const entry = mixPalette[index];
+  if (entry && img.complete) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, entry.col * SLOT, entry.row * SLOT, TILE, TILE, 0, 0, TILE, TILE);
+    if (label) label.textContent = `${entry.col},${entry.row}`;
+    slotEl.classList.add('filled');
+  } else {
+    ctx.fillStyle = '#1e1e1e';
+    ctx.fillRect(0, 0, TILE, TILE);
+    if (label) label.textContent = '—';
+    slotEl.classList.remove('filled');
+  }
+}
+
+// Called when user clicks the tilesheet — assign to active mix slot if one is waiting
+function assignMixSlot(col, row) {
+  if (mixActiveSlot === null) return false; // not waiting for a pick
+  mixPalette[mixActiveSlot] = { col, row };
+  drawMixSlot(mixActiveSlot);
+  if (mixHintEl) mixHintEl.textContent = `Slot ${mixActiveSlot + 1} set to [${col}, ${row}]`;
+  mixActiveSlot = null;
+  updateMixSlotHighlights();
+  return true; // consumed the click
+}
+
+// Mix Fill — scatter all filled palette tiles randomly+equally across the map
+function doMixFill() {
+  const filled = mixPalette.filter(Boolean);
+  if (filled.length === 0) {
+    if (mixHintEl) mixHintEl.textContent = 'Add tiles to the palette first!';
+    return;
+  }
+
+  // Build a round-robin sequence shuffled to distribute evenly
+  const totalCells = MAP_WIDTH * MAP_HEIGHT;
+  let slotIndex = 0;
+
+  for (let y = 0; y < MAP_HEIGHT; y++) {
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      // Every cell gets the next tile in round-robin order (equal distribution)
+      // Shuffle within groups of filled.length to add randomness while keeping equality
+      const tile = filled[slotIndex % filled.length];
+      slotIndex++;
+      setTileAt(x, y, { type: 'sheet', col: tile.col, row: tile.row }, activeLayer);
+    }
+  }
+
+  // Shuffle the placed tiles on this layer so the distribution looks random (not striped)
+  // We do this by building a shuffled assignment map instead
+  _mixFillShuffle(filled);
+
+  renderMap();
+  if (mixHintEl) mixHintEl.textContent = `Mix filled! ${filled.length} tile type${filled.length > 1 ? 's' : ''} across ${totalCells} cells`;
+}
+
+function _mixFillShuffle(filled) {
+  // Build all positions on the active layer
+  const positions = [];
+  for (let y = 0; y < MAP_HEIGHT; y++) {
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      positions.push({ x, y });
+    }
+  }
+
+  // Fisher-Yates shuffle positions
+  for (let i = positions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [positions[i], positions[j]] = [positions[j], positions[i]];
+  }
+
+  // Assign in round-robin order across shuffled positions — guarantees equal distribution
+  placedTiles = placedTiles.filter(t => (t.layer ?? 0) !== activeLayer);
+  positions.forEach((pos, idx) => {
+    const tile = filled[idx % filled.length];
+    placedTiles.push({ x: pos.x, y: pos.y, tileX: tile.col, tileY: tile.row, layer: activeLayer });
+  });
+}
+
+// Hook into the existing sheet canvas click to intercept for mix palette AND map items assignment
+sCanvas.addEventListener('mousedown', (e) => {
+  const rect = sCanvas.getBoundingClientRect();
+  const scaleX = img.width / rect.width;
+  const scaleY = img.height / rect.height;
+  const px = (e.clientX - rect.left) * scaleX;
+  const py = (e.clientY - rect.top) * scaleY;
+  const col = Math.floor(px / SLOT);
+  const row = Math.floor(py / SLOT);
+  assignMixSlot(col, row);
+  assignItemTile(col, row); // map items registry
+}, true); // capture phase so we run before the existing listener
+
+// Slot count change
+mixSlotCount.addEventListener('change', buildMixSlots);
+
+// Mix Fill button
+mixFillBtn.addEventListener('click', doMixFill);
+
+// Init on image load (img.onload already calls initSpriteEditor + updateDimensions)
+img.addEventListener('load', buildMixSlots);
+// Also init now if image already loaded (e.g. cache hit)
+if (img.complete) buildMixSlots();
+
+// =============================================================================
+// Map Items Registry
+// Each item: { id, tileCol, tileRow, label, collision }
+// tileCol/tileRow are the sprite sheet coords of the tile used to represent it.
+// Saved to <mapname>_items.json on the server separately from the main map.
+// =============================================================================
+
+const itemsListEl = document.getElementById('itemsList');
+let mapItems = [];          // array of { id, tileCol, tileRow, label, collision }
+let activeItemSlotId = null; // id of item entry currently waiting for a tile pick
+let _itemIdCounter = 1;
+
+function _newItemId() { return `item_${_itemIdCounter++}`; }
+
+function initMapItems() {
+  document.getElementById('addItemBtn').addEventListener('click', () => {
+    addItemEntry({ label: '', collision: false });
+  });
+  renderItemsList();
+}
+
+function addItemEntry({ id, tileCol, tileRow, label, collision } = {}) {
+  const entry = {
+    id: id || _newItemId(),
+    tileCol: tileCol ?? null,
+    tileRow: tileRow ?? null,
+    label:     label ?? '',
+    collision: collision ?? false,
+  };
+  mapItems.push(entry);
+  renderItemsList();
+  return entry;
+}
+
+function removeItemEntry(id) {
+  mapItems = mapItems.filter(e => e.id !== id);
+  if (activeItemSlotId === id) activeItemSlotId = null;
+  renderItemsList();
+}
+
+function renderItemsList() {
+  if (!itemsListEl) return;
+  itemsListEl.innerHTML = '';
+
+  if (mapItems.length === 0) {
+    const hint = document.createElement('div');
+    hint.style.cssText = 'color:#555;font-size:11px;padding:6px 4px;font-family:monospace;';
+    hint.textContent = 'Press + to add an item';
+    itemsListEl.appendChild(hint);
+    return;
+  }
+
+  for (const entry of mapItems) {
+    const row = document.createElement('div');
+    row.className = 'item-entry';
+    row.dataset.id = entry.id;
+
+    // ── Tile drop slot ──
+    const slot = document.createElement('div');
+    slot.className = 'item-tile-slot' + (entry.tileCol !== null ? ' has-tile' : '');
+    if (entry.id === activeItemSlotId) slot.classList.add('drop-target');
+    slot.title = entry.tileCol !== null
+      ? `Map position col=${entry.tileCol}, row=${entry.tileRow} — click then click map to re-assign`
+      : 'Click here, then click a tile on the map to assign position';
+
+    const slotCanvas = document.createElement('canvas');
+    slotCanvas.width  = TILE;
+    slotCanvas.height = TILE;
+    slot.appendChild(slotCanvas);
+    _drawItemSlotCanvas(slotCanvas, entry.tileCol, entry.tileRow, entry.label);
+
+    slot.addEventListener('click', () => {
+      if (activeItemSlotId === entry.id) {
+        activeItemSlotId = null;
+      } else {
+        activeItemSlotId = entry.id;
+      }
+      mCanvas.style.cursor = activeItemSlotId ? 'crosshair' : '';
+      renderItemsList();
+    });
+    row.appendChild(slot);
+
+    // ── Label input ──
+    const labelInput = document.createElement('input');
+    labelInput.type = 'text';
+    labelInput.className = 'item-label-input';
+    labelInput.placeholder = 'name…';
+    labelInput.value = entry.label;
+    labelInput.addEventListener('input', () => { entry.label = labelInput.value; });
+    row.appendChild(labelInput);
+
+    // ── Collision checkbox ──
+    const colWrap = document.createElement('div');
+    colWrap.className = 'item-col-wrap';
+    const colLabel = document.createElement('span');
+    colLabel.textContent = 'col';
+    const colCb = document.createElement('input');
+    colCb.type = 'checkbox';
+    colCb.className = 'item-col-cb';
+    colCb.checked = entry.collision;
+    colCb.title = 'Mark as collision tile';
+    colCb.addEventListener('change', () => { entry.collision = colCb.checked; });
+    colWrap.appendChild(colLabel);
+    colWrap.appendChild(colCb);
+    row.appendChild(colWrap);
+
+    // ── Remove button ──
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'item-remove-btn';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove';
+    removeBtn.addEventListener('click', () => removeItemEntry(entry.id));
+    row.appendChild(removeBtn);
+
+    itemsListEl.appendChild(row);
+  }
+}
+
+function _drawItemSlotCanvas(canvas, tileCol, tileRow, label) {
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, TILE, TILE);
+  const lbl = String(label || '');
+  const isPortal = lbl.startsWith('portal:');
+  const isSpawn  = lbl.trim().toLowerCase() === 'spawn';
+  const isWorldObj = lbl.startsWith('worldobj:');
+  const isMinecartExit = lbl.startsWith('minecart_exit:');
+  const isMinecartEntrance = lbl === 'minecart_entrance';
+  const isSpecial = isPortal || isSpawn || isWorldObj || isMinecartExit || isMinecartEntrance;
+  if (tileCol !== null && isSpecial) {
+    // Show a coloured pin for special items
+    const color = isPortal ? '#7733cc' : isWorldObj ? '#cc8844' : isSpawn ? '#22aa55'
+      : (isMinecartExit || isMinecartEntrance) ? '#cc6622' : '#446688';
+    const letter = isPortal ? 'P' : isWorldObj ? 'W' : isSpawn ? 'S'
+      : isMinecartExit ? 'X' : 'E';
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, TILE, TILE);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${TILE - 4}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(letter, TILE / 2, TILE / 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = `7px monospace`;
+    ctx.fillText(`${tileCol},${tileRow}`, TILE / 2, TILE - 3);
+  } else if (tileCol !== null) {
+    // Generic map item — show position marker (tileCol/tileRow are map coords, not spritesheet)
+    ctx.fillStyle = '#223344';
+    ctx.fillRect(0, 0, TILE, TILE);
+    ctx.fillStyle = '#88ccff';
+    ctx.font = `bold ${TILE - 4}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('I', TILE / 2, TILE / 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = `7px monospace`;
+    ctx.fillText(`${tileCol},${tileRow}`, TILE / 2, TILE - 3);
+  } else {
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, TILE, TILE);
+    ctx.fillStyle = '#333';
+    ctx.font = `${TILE - 2}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('?', TILE / 2, TILE / 2);
+  }
+}
+
+// Called on sheet click or map eyedrop — assign tile to the active item slot (if any)
+function assignItemTile(col, row) {
+  if (!activeItemSlotId) return false;
+  const entry = mapItems.find(e => e.id === activeItemSlotId);
+  if (!entry) { activeItemSlotId = null; return false; }
+  entry.tileCol = col;
+  entry.tileRow = row;
+  activeItemSlotId = null;
+  mCanvas.style.cursor = '';
+  renderItemsList();
+  return true;
+}
+
+// Serialize items for save
+function mapItemsPayload() {
+  return mapItems.map(e => ({
+    id: e.id,
+    tileCol: e.tileCol,
+    tileRow: e.tileRow,
+    label: e.label,
+    collision: e.collision,
+  }));
+}
+
+// Restore items after load
+function hydrateMapItems(items) {
+  mapItems = [];
+  _itemIdCounter = 1;
+  if (!Array.isArray(items)) { renderItemsList(); return; }
+  for (const raw of items) {
+    if (!raw || typeof raw !== 'object') continue;
+    const id = raw.id || _newItemId();
+    // Keep counter ahead of any loaded ids
+    const m = /_(\d+)$/.exec(id);
+    if (m) _itemIdCounter = Math.max(_itemIdCounter, Number(m[1]) + 1);
+    mapItems.push({
+      id,
+      tileCol:   raw.tileCol   ?? null,
+      tileRow:   raw.tileRow   ?? null,
+      label:     raw.label     ?? '',
+      collision: raw.collision ?? false,
+    });
+  }
+  renderItemsList();
+}
+
+// =============================================================================
+// Portal Tool
+// =============================================================================
+
+function placePortalAt(gx, gy) {
+  const target = prompt(`Portal at tile (col=${gx}, row=${gy})\n\nEnter target map name (e.g. cave_01):`, '');
+  if (!target || !target.trim()) return;
+  const mapName = target.trim();
+  addItemEntry({ tileCol: gx, tileRow: gy, label: `portal:${mapName}`, collision: false });
+  renderMap();
+}
+
+// =============================================================================
+// World Objects Picker — click to place registered world objects on the map
+// =============================================================================
+
+let _woAssets = [];           // cached asset definitions from server
+let _activeWOAssetId = null;  // which world object is selected for placement
+
+async function loadWorldObjectAssets() {
+  try {
+    const resp = await fetch('/api/assets/world-objects');
+    _woAssets = await resp.json();
+  } catch (e) {
+    _woAssets = [];
+  }
+  renderWOPicker();
+}
+
+function renderWOPicker() {
+  const list = document.getElementById('woPickerList');
+  if (!list) return;
+  list.innerHTML = '';
+
+  if (_woAssets.length === 0) {
+    const hint = document.createElement('div');
+    hint.style.cssText = 'color:#555;font-size:11px;padding:6px 4px;font-family:monospace;';
+    hint.textContent = 'No world objects defined';
+    list.appendChild(hint);
+    return;
+  }
+
+  for (const wo of _woAssets) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px;cursor:pointer;border-bottom:1px solid #1a1a2e;';
+    if (_activeWOAssetId === wo.id) {
+      row.style.background = '#2a3a2a';
+      row.style.borderLeft = '3px solid #66ff88';
+    }
+
+    // Tile preview
+    const cv = document.createElement('canvas');
+    cv.width = 20; cv.height = 20;
+    cv.style.cssText = 'image-rendering:pixelated;border:1px solid #333;flex-shrink:0;';
+    const sprite = wo.sprite || {};
+    if (sprite.type === 'tilemap' && img.complete) {
+      const ctx = cv.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, (sprite.tileCol || 0) * SLOT, (sprite.tileRow || 0) * SLOT, TILE, TILE, 0, 0, 20, 20);
+    }
+
+    const label = document.createElement('span');
+    label.style.cssText = 'color:#ddd;font-size:11px;font-family:monospace;';
+    label.textContent = wo.label || wo.id;
+
+    row.appendChild(cv);
+    row.appendChild(label);
+
+    row.addEventListener('click', () => {
+      if (_activeWOAssetId === wo.id) {
+        _activeWOAssetId = null;
+        mCanvas.style.cursor = '';
+      } else {
+        _activeWOAssetId = wo.id;
+        mCanvas.style.cursor = 'crosshair';
+      }
+      renderWOPicker();
+    });
+
+    list.appendChild(row);
+  }
+}
+
+function placeWorldObjectAt(gx, gy) {
+  if (!_activeWOAssetId) return false;
+  const wo = _woAssets.find(w => w.id === _activeWOAssetId);
+  if (!wo) return false;
+  addItemEntry({
+    tileCol: gx,
+    tileRow: gy,
+    label: `worldobj:${wo.id}`,
+    collision: wo.solid ?? true,
+  });
+  renderMap();
+  return true;
+}
+
+// Load world objects when tilesheet image loads
+img.addEventListener('load', loadWorldObjectAssets);

@@ -1,0 +1,14 @@
+{
+  "id": "raw_tin",
+  "label": "Raw Tin",
+  "category": "resource",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 44,
+    "tileRow": 10
+  },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#cccccc",
+  "description": "raw tin ore"
+}

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Asset Editor</title>
+  <link rel="stylesheet" href="/static/asseteditor.css" />
+</head>
+<body>
+  <div class="toolbar">
+    <strong>ASSET EDITOR</strong>
+    <button class="active" id="tabWO" onclick="switchTab('wo')">World Objects</button>
+    <button id="tabEQ" onclick="switchTab('eq')">Equipment</button>
+    <button id="tabIT" onclick="switchTab('it')">Items</button>
+  </div>
+
+  <div class="main-workspace">
+    <aside class="sidebar">
+      <div id="woSidebar">
+        <h3>World Objects</h3>
+        <button class="btn-new" onclick="newWorldObject()">+ New World Object</button>
+        <ul class="item-list" id="woList"></ul>
+      </div>
+      <div id="eqSidebar" style="display:none;">
+        <h3>Equipment</h3>
+        <button class="btn-new" onclick="newEquipment()">+ New Equipment</button>
+        <ul class="item-list" id="eqList"></ul>
+      </div>
+      <div id="itSidebar" style="display:none;">
+        <h3>Items</h3>
+        <button class="btn-new" onclick="newItem()">+ New Item</button>
+        <ul class="item-list" id="itList"></ul>
+      </div>
+    </aside>
+
+    <div class="editor-panel" id="editorPanel">
+      <div class="empty-state" id="emptyState">Select an item from the sidebar or create a new one.</div>
+      <div id="woEditor" style="display:none;"></div>
+      <div id="eqEditor" style="display:none;"></div>
+      <div id="itEditor" style="display:none;"></div>
+    </div>
+  </div>
+
+  <script src="/static/asseteditor.js"></script>
+</body>
+</html>

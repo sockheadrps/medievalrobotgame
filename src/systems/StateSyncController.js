@@ -1,7 +1,5 @@
 import { RemotePlayer } from '../entities/RemotePlayer.js';
 import { RemoteNPC } from '../entities/RemoteNPC.js';
-import { TILE_SIZE } from '../constants.js';
-
 export class StateSyncController {
   constructor(scene) {
     this.scene = scene;
@@ -20,62 +18,43 @@ export class StateSyncController {
       scene.player.y += (me.y - scene.player.y) * 0.3;
       scene.player.logs = me.logs ?? 0;
       scene.player.stones = me.stones ?? 0;
-      scene.player.bastalite = me.bastalite ?? 0;
-      scene.player.crystalPristine = me.crystal_pristine ?? 0;
-      scene.player.crystalNormal = me.crystal_normal ?? 0;
-      scene.player.crystalPoor = me.crystal_poor ?? 0;
-      scene.player.setArmorElite?.(!!me.armor_elite);
-      scene.player.armorEliteInv = !!me.armor_elite_inv;
+      scene.player.crystals = me.crystals ?? scene.player.crystals ?? 0;
+      scene.player.meat = me.meat ?? scene.player.meat ?? 0;
+      scene.player.feathers = me.feathers ?? scene.player.feathers ?? 0;
+      scene.player.vegetables = me.vegetables ?? scene.player.vegetables ?? 0;
+      scene.player.seeds = me.seeds ?? scene.player.seeds ?? 0;
+      scene.player.copper = me.copper ?? scene.player.copper ?? 0;
       scene.player.hp = me.hp ?? scene.player.hp;
       scene.player.maxHp = me.maxHp ?? scene.player.maxHp;
       scene.player.ki = me.ki ?? scene.player.ki;
       scene.player.maxKi = me.maxKi ?? scene.player.maxKi;
       scene.player.infKi = !!me.inf_ki;
       scene.player.blastLevel = me.blastLevel ?? scene.player.blastLevel;
-      scene.player.auraTint = me.aura_tint ?? scene.player.auraTint;
-      scene.player.auraAlpha = me.aura_alpha ?? scene.player.auraAlpha;
       scene.player.kiSkillLevel = me.kiSkillLevel ?? scene.player.kiSkillLevel;
       scene.player.kiSkillXp = me.kiSkillXp ?? scene.player.kiSkillXp;
-      scene.player.realmTier = me.realm_tier ?? me.realmTier ?? scene.player.realmTier;
-      scene.player.realmCrystalT1 = me.realm_crystal_t1 ?? scene.player.realmCrystalT1 ?? 0;
-      scene.player.kiUpgrades = (me.ki_upgrades && typeof me.ki_upgrades === 'object') ? { ...me.ki_upgrades } : (scene.player.kiUpgrades || {});
-      scene.player.kiMoves = Array.isArray(me.ki_moves) ? [...me.ki_moves] : (scene.player.kiMoves || []);
-      scene.player.kiDenominations = Array.isArray(me.ki_denominations) ? [...me.ki_denominations] : (scene.player.kiDenominations || []);
-      scene.player.kiKnownAugments = (me.ki_known_augments && typeof me.ki_known_augments === 'object') ? { ...me.ki_known_augments } : (scene.player.kiKnownAugments || {});
-      scene.player.kiEquippedAugments = (me.ki_equipped_augments && typeof me.ki_equipped_augments === 'object') ? { ...me.ki_equipped_augments } : (scene.player.kiEquippedAugments || {});
+      scene.player.kiBlastBonuses = (me.ki_blast_bonuses && typeof me.ki_blast_bonuses === 'object') ? { ...me.ki_blast_bonuses } : (scene.player.kiBlastBonuses || {});
+      if (Array.isArray(me.ki_moves)) scene.player.kiMoves = me.ki_moves;
       scene.player.str = me.str ?? scene.player.str;
       scene.player.def = me.def ?? scene.player.def;
       scene.player.level = me.level ?? scene.player.level;
       scene.player.xp = me.xp ?? scene.player.xp;
-      scene.player.setMeditationState?.(me);
-      scene.player.setChargeState?.(me);
       scene.player.barrierProcUntil = Number(me.barrier_proc_until || 0);
       scene.player.barrierProcFacing = me.barrier_proc_facing || scene.player.barrierProcFacing || 'down';
-      if (me.carrying) {
-        const offsetY = TILE_SIZE * 0.35;
-        if (me.carrying.type === 'player') {
-          const carried = scene._remotePlayers?.[me.carrying.id];
-          if (carried) {
-            carried._targetX = scene.player.x;
-            carried._targetY = scene.player.y + offsetY;
-          }
-        } else if (me.carrying.type === 'npc') {
-          const key = `${me.carrying.owner}_${me.carrying.id}`;
-          const carried = scene._remoteNPCSprites?.[key];
-          if (carried) {
-            carried._targetX = scene.player.x;
-            carried._targetY = scene.player.y + offsetY;
-          }
-        }
+      scene.player.equipment = me.equipment ?? scene.player.equipment ?? {};
+      scene.player.inventory = me.inventory ?? scene.player.inventory ?? {};
+
+      // Map change detection
+      const newMap = me.map ?? 'level_01';
+      if (newMap !== (scene._currentMap ?? 'level_01')) {
+        scene._changeMap(newMap);
       }
+
       if ((me.hp ?? prevPlayerHp) > prevPlayerHp) {
         scene.player.showHealEffect?.((me.hp ?? prevPlayerHp) - prevPlayerHp);
       }
 
-      if (me._ki_target_result) scene._handleKiTargetResult(me._ki_target_result);
       if (me._refine_result) scene._handleRefineResult(me._refine_result);
-      if (me._meditation_result) scene._handleMeditationResult(me._meditation_result);
-      if (me._shrine_result) scene._handleShrineResult(me._shrine_result);
+      if (me._crystal_result) scene._handleCrystalResult?.(me._crystal_result);
     }
 
     const seenPids = new Set();
@@ -106,10 +85,12 @@ export class StateSyncController {
     if (data.rocks) scene._syncRocks(data.rocks);
     scene._syncGroundItems(data.ground_items || []);
     scene._syncDummies(data.dummies || {});
-    scene._syncFences(data.fences || {});
-    scene._syncKiTargets(data.ki_targets || {});
     scene._syncAnvils(data.anvils || {});
-    scene._syncMeditationRealmScene();
+    scene._syncCampfires(data.campfires || {});
+    scene._syncAnimals(data.animals || []);
+    scene._syncCrops(data.crops || []);
+    scene._syncWorldObjects(data.world_objects || {});
+    scene._syncBuildings(data.buildings || {});
     this.syncRemoteNPCs(players);
     scene._handleReplicatedFxEvents(data.fx_events || []);
 
@@ -126,35 +107,23 @@ export class StateSyncController {
         npc.level = serverNPC.level ?? npc.level;
         npc.xp = serverNPC.xp ?? npc.xp;
         npc.maxLogs = serverNPC.maxLogs ?? npc.maxLogs;
-        npc.armorElite = !!serverNPC.armor_elite;
         if (serverNPC.has_ki_blast) npc._hasKiBlast = true;
         if (serverNPC.ki != null) npc.ki = serverNPC.ki;
         if (serverNPC.maxKi != null) npc.maxKi = serverNPC.maxKi;
         npc.infKi = !!serverNPC.inf_ki;
         if (serverNPC.blastLevel != null) npc.blastLevel = serverNPC.blastLevel;
-        if (serverNPC.aura_tint != null) npc.auraTint = serverNPC.aura_tint;
-        if (serverNPC.aura_alpha != null) npc.auraAlpha = serverNPC.aura_alpha;
-        if (serverNPC.kiSkillLevel != null) npc.kiSkillLevel = serverNPC.kiSkillLevel;
-        if (serverNPC.kiSkillXp != null) npc.kiSkillXp = serverNPC.kiSkillXp;
-        if (serverNPC.realm_tier != null || serverNPC.realmTier != null) npc.realmTier = serverNPC.realm_tier ?? serverNPC.realmTier;
-        if (serverNPC.realm_crystal_t1 != null) npc.realmCrystalT1 = serverNPC.realm_crystal_t1;
-        npc.kiUpgrades = (serverNPC.ki_upgrades && typeof serverNPC.ki_upgrades === 'object') ? { ...serverNPC.ki_upgrades } : (npc.kiUpgrades || {});
-        npc.kiMoves = Array.isArray(serverNPC.ki_moves) ? [...serverNPC.ki_moves] : (npc.kiMoves || []);
-        npc.kiDenominations = Array.isArray(serverNPC.ki_denominations) ? [...serverNPC.ki_denominations] : (npc.kiDenominations || []);
-        npc.kiKnownAugments = (serverNPC.ki_known_augments && typeof serverNPC.ki_known_augments === 'object') ? { ...serverNPC.ki_known_augments } : (npc.kiKnownAugments || {});
-        npc.kiEquippedAugments = (serverNPC.ki_equipped_augments && typeof serverNPC.ki_equipped_augments === 'object') ? { ...serverNPC.ki_equipped_augments } : (npc.kiEquippedAugments || {});
+        npc.kiBlastBonuses = (serverNPC.ki_blast_bonuses && typeof serverNPC.ki_blast_bonuses === 'object') ? { ...serverNPC.ki_blast_bonuses } : (npc.kiBlastBonuses || {});
+        if (Array.isArray(serverNPC.ki_moves)) npc.kiMoves = serverNPC.ki_moves;
         if (serverNPC.stones != null) npc.stones = serverNPC.stones;
-        if (serverNPC.bastalite != null) npc.bastalite = serverNPC.bastalite;
-        if (serverNPC.crystal_pristine != null) npc.crystalPristine = serverNPC.crystal_pristine;
-        if (serverNPC.crystal_normal != null) npc.crystalNormal = serverNPC.crystal_normal;
-        if (serverNPC.crystal_poor != null) npc.crystalPoor = serverNPC.crystal_poor;
-        npc.setMeditationState?.(serverNPC);
-        npc.setChargeState?.(serverNPC);
+        if (serverNPC.crystals != null) npc.crystals = serverNPC.crystals;
+        // Sync ore/resource inventory from server (updated by background worker ticks)
+        if (serverNPC.inventory && typeof serverNPC.inventory === 'object') {
+          npc._npcInventory = { ...serverNPC.inventory };
+        }
         npc.barrierProcUntil = Number(serverNPC.barrier_proc_until || 0);
         npc.barrierProcFacing = serverNPC.barrier_proc_facing || npc.barrierProcFacing || npc.getFacing?.() || 'down';
         npc.setKnockedOut?.(!!serverNPC.knocked_out, {
           knockedUntil: serverNPC.knocked_until ?? 0,
-          carriedBy: serverNPC.carried_by ?? null,
         });
         if (serverNPC.knocked_out && !wasKnocked) {
           scene._handleOwnNPCKnockoutTransition(npc, serverNPC);
@@ -169,7 +138,7 @@ export class StateSyncController {
           npc.hp = serverNPC.hp;
           npc.showHealEffect?.(healed);
         }
-        if (serverNPC.knocked_out || serverNPC.carried_by) {
+        if (serverNPC.knocked_out) {
           npc.x = serverNPC.x ?? npc.x;
           npc.y = serverNPC.y ?? npc.y;
         }
