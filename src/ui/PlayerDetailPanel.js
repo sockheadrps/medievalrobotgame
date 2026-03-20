@@ -331,6 +331,8 @@ export class PlayerDetailPanel {
         ${this._adjRow('Raw Copper', 'inv:raw_copper', 10, '#cc8844')}
         ${this._adjRow('Raw Tin', 'inv:raw_tin', 10, '#bbbbcc')}
         ${this._adjRow('Bronze Bar', 'inv:bronze_bar', 10, '#ddaa55')}
+        ${this._adjRow('Bronze Pick', 'inv:bronze_pickaxe', 1, '#ddaa55')}
+        ${this._adjRow('Iron Pick', 'inv:iron_pickaxe', 1, '#99aacc')}
       `;
       this._bindAdjButtons(give);
     }

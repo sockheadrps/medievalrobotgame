@@ -4028,20 +4028,51 @@ class GameState:
             else:
                 new_x = p["x"] + p["vx"] * dt
                 new_y = p["y"] + p["vy"] * dt
-                new_x = max(0, min(world_w, new_x))
-                new_y = max(0, min(world_h, new_y))
-                # Collision tile check with axis sliding
-                if COLLISION_TILES and _is_collision_tile(new_x, new_y):
-                    # Try sliding along X only
-                    if not _is_collision_tile(new_x, p["y"]):
-                        new_y = p["y"]
-                    # Try sliding along Y only
-                    elif not _is_collision_tile(p["x"], new_y):
-                        new_x = p["x"]
-                    # Fully blocked
-                    else:
-                        new_x = p["x"]
-                        new_y = p["y"]
+
+                player_map = p.get("map", "level_01")
+                if player_map == "cave_01":
+                    # Cave: expanded bounds for mine grid (-15..55 tiles)
+                    from services.mine_state import GRID_MIN, GRID_MAX
+                    mine_min = GRID_MIN * TILE_SIZE
+                    mine_max = GRID_MAX * TILE_SIZE
+                    new_x = max(mine_min, min(mine_max, new_x))
+                    new_y = max(mine_min, min(mine_max, new_y))
+                    # Mine wall collision
+                    mg = self.mine_grids.get(move_pid)
+                    if mg:
+                        dest_col = int(new_x // TILE_SIZE)
+                        dest_row = int(new_y // TILE_SIZE)
+                        if not mg.is_tile_open(dest_col, dest_row):
+                            cur_col = int(p["x"] // TILE_SIZE)
+                            cur_row = int(p["y"] // TILE_SIZE)
+                            # Only block if we're currently on an open tile
+                            # (prevents getting permanently stuck)
+                            if mg.is_tile_open(cur_col, cur_row):
+                                # Try sliding along X (keep new_x, revert Y)
+                                if mg.is_tile_open(dest_col, cur_row):
+                                    new_y = p["y"]
+                                # Try sliding along Y (revert X, keep new_y)
+                                elif mg.is_tile_open(cur_col, dest_row):
+                                    new_x = p["x"]
+                                # Fully blocked
+                                else:
+                                    new_x = p["x"]
+                                    new_y = p["y"]
+                else:
+                    new_x = max(0, min(world_w, new_x))
+                    new_y = max(0, min(world_h, new_y))
+                    # Collision tile check with axis sliding
+                    if COLLISION_TILES and _is_collision_tile(new_x, new_y):
+                        # Try sliding along X only
+                        if not _is_collision_tile(new_x, p["y"]):
+                            new_y = p["y"]
+                        # Try sliding along Y only
+                        elif not _is_collision_tile(p["x"], new_y):
+                            new_x = p["x"]
+                        # Fully blocked
+                        else:
+                            new_x = p["x"]
+                            new_y = p["y"]
                 # Fence/gate collision with axis sliding
                 if self._is_barrier_tile(new_x, new_y, move_pid):
                     if not self._is_barrier_tile(new_x, p["y"], move_pid):

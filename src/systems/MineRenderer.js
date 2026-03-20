@@ -7,6 +7,9 @@
  * - bedrock: unbreakable boundary
  * - unknown tiles: not rendered (black void)
  * - known but not visible: dimmed (alpha 0.35)
+ *
+ * Also creates Phaser static physics bodies for wall/hardwall/bedrock tiles
+ * so the player can't walk through unmined walls.
  */
 
 import {
@@ -34,6 +37,7 @@ const TYPE_FRAME_MAP = {
   bedrock:  MINE_FRAME_BEDROCK,
 };
 
+const WALL_TYPES = new Set(['wall', 'hardwall', 'bedrock']);
 const DIM_ALPHA = 0.35;
 
 export default class MineRenderer {
@@ -43,7 +47,13 @@ export default class MineRenderer {
     this._sprites = new Map();
     /** @type {Map<string, Phaser.GameObjects.Image>} ore overlay sprites */
     this._oreSprites = new Map();
+    /** @type {Map<string, Phaser.GameObjects.Rectangle>} physics bodies for wall tiles */
+    this._wallBodies = new Map();
+    /** @type {Phaser.Physics.Arcade.StaticGroup|null} */
+    this._wallGroup = null;
     this._active = false;
+    /** @type {Map<string, string>} key → tile type, for quick lookup */
+    this._tileTypes = new Map();
   }
 
   /**
@@ -55,11 +65,25 @@ export default class MineRenderer {
     if (!tiles || !tiles.length) return;
     this._active = true;
 
+    // Hide base cave tilemap sprites so they don't overlap mine tiles
+    if (this.scene._tileImages) {
+      for (const img of this.scene._tileImages) img?.setVisible(false);
+    }
+
+    // Ensure wall collision group exists
+    if (!this._wallGroup) {
+      this._wallGroup = this.scene.physics.add.staticGroup();
+      if (this.scene.player) {
+        this.scene.physics.add.collider(this.scene.player, this._wallGroup);
+      }
+    }
+
     const seen = new Set();
 
     for (const tile of tiles) {
       const key = `${tile.c},${tile.r}`;
       seen.add(key);
+      this._tileTypes.set(key, tile.t);
 
       const { x, y } = tilePos(tile.c, tile.r);
       const frame = TYPE_FRAME_MAP[tile.t] || MINE_FRAME_FLOOR;
@@ -108,17 +132,41 @@ export default class MineRenderer {
       } else if (oreSprite) {
         oreSprite.setVisible(false);
       }
+
+      // Physics body for wall tiles (collision)
+      const isWall = WALL_TYPES.has(tile.t);
+      let body = this._wallBodies.get(key);
+      if (isWall) {
+        if (!body) {
+          body = this.scene.add.rectangle(x, y, TILE_SIZE, TILE_SIZE);
+          this.scene.physics.add.existing(body, true); // true = static
+          this._wallGroup.add(body);
+          this._wallBodies.set(key, body);
+        }
+      } else {
+        // Tile became open (was mined) — remove physics body
+        if (body) {
+          body.destroy();
+          this._wallBodies.delete(key);
+        }
+      }
     }
 
-    // Remove sprites that are no longer in the tile set
+    // Remove sprites/bodies that are no longer in the tile set
     for (const [key, sprite] of this._sprites) {
       if (!seen.has(key)) {
         sprite.destroy();
         this._sprites.delete(key);
+        this._tileTypes.delete(key);
         const ore = this._oreSprites.get(key);
         if (ore) {
           ore.destroy();
           this._oreSprites.delete(key);
+        }
+        const body = this._wallBodies.get(key);
+        if (body) {
+          body.destroy();
+          this._wallBodies.delete(key);
         }
       }
     }
@@ -130,9 +178,21 @@ export default class MineRenderer {
   destroy() {
     for (const sprite of this._sprites.values()) sprite.destroy();
     for (const sprite of this._oreSprites.values()) sprite.destroy();
+    for (const body of this._wallBodies.values()) body.destroy();
     this._sprites.clear();
     this._oreSprites.clear();
+    this._wallBodies.clear();
+    this._tileTypes.clear();
+    if (this._wallGroup) {
+      this._wallGroup.clear(true, true);
+      this._wallGroup = null;
+    }
     this._active = false;
+
+    // Restore base tilemap sprites
+    if (this.scene._tileImages) {
+      for (const img of this.scene._tileImages) img?.setVisible(true);
+    }
   }
 
   get isActive() {

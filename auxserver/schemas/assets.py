@@ -10,10 +10,16 @@ from pydantic import BaseModel
 # ── World Objects ─────────────────────────────────────────────────────────────
 
 class SpriteRef(BaseModel):
-    type: str = "tilemap"          # "tilemap" (use tilesheet col/row) or "png" (custom image)
+    type: str = "tilemap"          # "tilemap" | "spritesheet" | "png"
     tileCol: Optional[int] = None
     tileRow: Optional[int] = None
-    png: Optional[str] = None      # filename inside the world_object folder
+    png: Optional[str] = None      # filename inside the asset folder
+    # Spritesheet-specific fields (type == "spritesheet")
+    file: Optional[str] = None     # spritesheet filename
+    frameW: int = 16               # cell width in pixels
+    frameH: int = 16               # cell height in pixels
+    spacing: int = 0               # gap between cells
+    frame: int = 0                 # selected frame index
 
 
 class Drop(BaseModel):

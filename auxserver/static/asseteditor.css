@@ -168,3 +168,18 @@ body { background: #0a0a1e; color: #ccc; font-family: 'Consolas', monospace; fon
 
 /* Build recipe list */
 .build-recipe-list { margin-top: 6px; }
+
+/* Spritesheet frame picker */
+.sheet-picker-wrap {
+  overflow: auto; max-width: calc(100% - 80px); max-height: 340px;
+  border: 1px solid #333; border-radius: 4px; background: #080818;
+  cursor: crosshair;
+}
+.sheet-picker-wrap canvas {
+  display: block; image-rendering: pixelated;
+}
+
+/* JSON preview in item editor */
+#it_jsonPreview {
+  tab-size: 2;
+}

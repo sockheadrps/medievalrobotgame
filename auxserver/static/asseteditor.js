@@ -271,6 +271,9 @@ async function deleteWO() {
 
 // ── Equipment Editor ─────────────────────────────────────────────────────────
 
+let _eqSheetImg = null;      // loaded spritesheet Image for current equipment
+let _eqSelectedFrame = null;  // currently clicked frame index in the sheet picker
+
 function newEquipment() {
   const id = prompt('Equipment ID (e.g. iron_helm):');
   if (!id) return;
@@ -287,6 +290,8 @@ function newEquipment() {
 
 function selectEQ(eq) {
   selectedEQ = JSON.parse(JSON.stringify(eq));
+  _eqSheetImg = null;
+  _eqSelectedFrame = null;
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('woEditor').style.display = 'none';
   document.getElementById('itEditor').style.display = 'none';
@@ -312,7 +317,6 @@ function renderEQEditor() {
     </div>
 
     <div class="form-row">
-      <div class="form-group"><label>Sprite Sheet (filename)</label><input id="eq_spriteSheet" value="${eq.spriteSheet || ''}" /></div>
       <div class="form-group"><label>Slot</label>
         <select id="eq_slot" onchange="toggleMiningFields()">
           <option value="chest" ${eq.slot === 'chest' ? 'selected' : ''}>Chest</option>
@@ -322,14 +326,50 @@ function renderEQEditor() {
           <option value="tool" ${eq.slot === 'tool' ? 'selected' : ''}>Tool</option>
         </select>
       </div>
+      <div class="form-group"><label>Source Template</label><input id="eq_sourceTemplate" value="${eq.sourceTemplate || 'baseplayer'}" /></div>
     </div>
 
+    <!-- ── Sprite Sheet ────────────────────────────────────── -->
+    <div class="section-header">Sprite Sheet</div>
     <div class="form-row">
-      <div class="form-group"><label>Frame Width</label><input type="number" id="eq_frameW" value="${eq.frameSize?.width ?? 32}" /></div>
-      <div class="form-group"><label>Frame Height</label><input type="number" id="eq_frameH" value="${eq.frameSize?.height ?? 32}" /></div>
-      <div class="form-group"><label>Total Frames</label><input type="number" id="eq_totalFrames" value="${eq.totalFrames ?? 1}" /></div>
+      <div class="form-group"><label>spriteSheet</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="text" id="eq_spriteSheet" value="${eq.spriteSheet || ''}" readonly style="flex:1;" />
+          <button type="button" class="btn-pick-tile" onclick="openEQSpritesheet()">Open PNG</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>frameSize.width</label><input type="number" id="eq_frameW" value="${eq.frameSize?.width ?? 32}" min="1" onchange="redrawEQSheetPicker()" /></div>
+      <div class="form-group"><label>frameSize.height</label><input type="number" id="eq_frameH" value="${eq.frameSize?.height ?? 32}" min="1" onchange="redrawEQSheetPicker()" /></div>
+      <div class="form-group"><label>totalFrames</label><input type="number" id="eq_totalFrames" value="${eq.totalFrames ?? 1}" min="1" /></div>
     </div>
 
+    <div style="display:flex;gap:12px;align-items:flex-start;margin:8px 0;">
+      <div>
+        <div style="color:#88aacc;font-size:10px;text-transform:uppercase;margin-bottom:4px;">Selected Frame</div>
+        <canvas id="eq_sheetPreview" class="tile-preview" width="64" height="64" style="width:64px;height:64px;"></canvas>
+        <div id="eq_frameInfo" style="color:#8a8;font-size:11px;margin-top:2px;"></div>
+      </div>
+      <div class="sheet-picker-wrap" id="eq_sheetPickerWrap">
+        <canvas id="eq_sheetPicker"></canvas>
+      </div>
+    </div>
+
+    <!-- ── Named Frames ────────────────────────────────────── -->
+    <div class="section-header">Named Frames
+      <span style="font-size:10px;color:#556;text-transform:none;letter-spacing:0;">— click a frame above, then assign an animation name</span>
+    </div>
+    <div id="eq_namedFramesList"></div>
+    <div class="form-row" style="margin-top:6px;">
+      <div class="form-group" style="flex:0 0 60px;"><label>Frame #</label><input type="number" id="eq_nfFrame" value="0" min="0" style="width:60px;" /></div>
+      <div class="form-group" style="flex:1;"><label>Animation Name</label><input type="text" id="eq_nfName" placeholder="e.g. face_down" /></div>
+      <div class="form-group" style="flex:0;align-self:flex-end;">
+        <button class="btn-add-row" onclick="addEQNamedFrame()">+ Assign</button>
+      </div>
+    </div>
+
+    <!-- ── Stats ───────────────────────────────────────────── -->
     <div class="section-header">Stats</div>
     <div class="form-row">
       <div class="form-group"><label>STR Bonus</label><input type="number" id="eq_strBonus" value="${stats.str_bonus ?? 0}" /></div>
@@ -350,6 +390,7 @@ function renderEQEditor() {
       <div class="form-group"><label>Durability (0=infinite)</label><input type="number" id="eq_durability" value="${stats.durability ?? 0}" min="0" /></div>
     </div>
 
+    <!-- ── Recipe ──────────────────────────────────────────── -->
     <div class="section-header">Recipe</div>
     <div class="form-row">
       <div class="form-group"><label>Station</label>
@@ -365,19 +406,196 @@ function renderEQEditor() {
     <div class="ingredients-list" id="eqIngredients"></div>
     <button class="btn-add-row" onclick="addEQIngredient()">+ Add Ingredient</button>
 
-    <div class="section-header">Named Frames</div>
-    <div class="form-group">
-      <label>JSON (frame_index: anim_name)</label>
-      <textarea id="eq_namedFrames" rows="6">${JSON.stringify(eq.namedFrames || {}, null, 2)}</textarea>
-    </div>
-
     <div style="margin-top:20px;">
       <button class="btn-save" onclick="saveEQ()">Save</button>
       <button class="btn-delete" onclick="deleteEQ()">Delete</button>
     </div>
   `;
   renderEQIngredients();
+  renderEQNamedFrames();
+  // Auto-load existing spritesheet
+  if (eq.spriteSheet && eq.id) {
+    loadEQSpritesheet(eq.spriteSheet);
+  }
 }
+
+// ── Equipment Spritesheet Picker ────────────────────────────────────────────
+
+function openEQSpritesheet() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/png';
+  input.onchange = async () => {
+    if (!input.files.length) return;
+    const file = input.files[0];
+    const id = document.getElementById('eq_id')?.value?.trim();
+    if (!id) { alert('Set an equipment ID first.'); return; }
+    // Upload to server
+    const form = new FormData();
+    form.append('file', file);
+    const resp = await fetch(`/api/assets/equipment/${id}/sprite`, { method: 'POST', body: form });
+    const result = await resp.json();
+    if (!result.ok) { alert('Upload failed'); return; }
+    document.getElementById('eq_spriteSheet').value = file.name;
+    // Load into canvas
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      _eqSheetImg = img;
+      redrawEQSheetPicker();
+    };
+    img.src = url;
+  };
+  input.click();
+}
+
+function loadEQSpritesheet(filename) {
+  const id = selectedEQ?.id;
+  if (!id || !filename) return;
+  const img = new Image();
+  img.onload = () => {
+    _eqSheetImg = img;
+    redrawEQSheetPicker();
+  };
+  img.onerror = () => { /* sheet not found, that's ok */ };
+  img.src = `/assets/equipment/${id}/${filename}`;
+}
+
+function redrawEQSheetPicker() {
+  const canvas = document.getElementById('eq_sheetPicker');
+  const preview = document.getElementById('eq_sheetPreview');
+  if (!canvas || !_eqSheetImg) return;
+
+  const fw = Number(document.getElementById('eq_frameW')?.value) || 32;
+  const fh = Number(document.getElementById('eq_frameH')?.value) || 32;
+  const img = _eqSheetImg;
+  const cols = Math.max(1, Math.floor(img.width / fw));
+  const rows = Math.max(1, Math.floor(img.height / fh));
+
+  const scale = Math.max(1, Math.min(3, Math.floor(500 / img.width)));
+  canvas.width = img.width * scale;
+  canvas.height = img.height * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  // Draw grid
+  ctx.strokeStyle = 'rgba(100,170,255,0.25)';
+  ctx.lineWidth = 1;
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r < rows; r++) {
+      ctx.strokeRect(c * fw * scale, r * fh * scale, fw * scale, fh * scale);
+    }
+  }
+
+  // Highlight frames that have named assignments
+  const nf = selectedEQ?.namedFrames || {};
+  for (const frameStr of Object.keys(nf)) {
+    const fi = Number(frameStr);
+    const fc = fi % cols;
+    const fr = Math.floor(fi / cols);
+    ctx.strokeStyle = 'rgba(102,255,136,0.6)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(fc * fw * scale + 1, fr * fh * scale + 1, fw * scale - 2, fh * scale - 2);
+  }
+
+  // Highlight selected frame
+  if (_eqSelectedFrame !== null) {
+    const selCol = _eqSelectedFrame % cols;
+    const selRow = Math.floor(_eqSelectedFrame / cols);
+    ctx.strokeStyle = '#ffcc00';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(selCol * fw * scale, selRow * fh * scale, fw * scale, fh * scale);
+  }
+
+  // Draw preview
+  if (preview && _eqSelectedFrame !== null) {
+    const selCol = _eqSelectedFrame % cols;
+    const selRow = Math.floor(_eqSelectedFrame / cols);
+    const pctx = preview.getContext('2d');
+    pctx.imageSmoothingEnabled = false;
+    pctx.clearRect(0, 0, preview.width, preview.height);
+    pctx.drawImage(img, selCol * fw, selRow * fh, fw, fh, 0, 0, preview.width, preview.height);
+  }
+
+  // Update frame info
+  const info = document.getElementById('eq_frameInfo');
+  if (info && _eqSelectedFrame !== null) {
+    const name = nf[String(_eqSelectedFrame)];
+    info.textContent = `Frame ${_eqSelectedFrame}` + (name ? ` = ${name}` : '');
+  }
+
+  // Click handler
+  canvas.onclick = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width / rect.width;
+    const sy = canvas.height / rect.height;
+    const px = (e.clientX - rect.left) * sx;
+    const py = (e.clientY - rect.top) * sy;
+    const clickCol = Math.floor(px / (fw * scale));
+    const clickRow = Math.floor(py / (fh * scale));
+    _eqSelectedFrame = clickRow * cols + clickCol;
+    document.getElementById('eq_nfFrame').value = _eqSelectedFrame;
+    redrawEQSheetPicker();
+  };
+}
+
+// ── Named Frames UI ─────────────────────────────────────────────────────────
+
+function renderEQNamedFrames() {
+  const container = document.getElementById('eq_namedFramesList');
+  if (!container) return;
+  container.innerHTML = '';
+  const nf = selectedEQ?.namedFrames || {};
+  const entries = Object.entries(nf);
+  if (entries.length === 0) {
+    container.innerHTML = '<div style="color:#556;font-size:11px;">No frames assigned yet.</div>';
+    return;
+  }
+  for (const [frameStr, animName] of entries) {
+    const row = document.createElement('div');
+    row.className = 'ingredient-row';
+    row.innerHTML = `
+      <span style="color:#88aacc;width:50px;font-size:11px;">#${frameStr}</span>
+      <input style="flex:1;" value="${animName}" onchange="updateEQNamedFrame('${frameStr}', this.value)" />
+      <button onclick="removeEQNamedFrame('${frameStr}')">x</button>
+    `;
+    // Hover to highlight in picker
+    row.onmouseenter = () => { _eqSelectedFrame = Number(frameStr); redrawEQSheetPicker(); };
+    container.appendChild(row);
+  }
+}
+
+function addEQNamedFrame() {
+  const frame = document.getElementById('eq_nfFrame').value.trim();
+  const name = document.getElementById('eq_nfName').value.trim();
+  if (!name) { alert('Enter an animation name.'); return; }
+  if (!selectedEQ.namedFrames) selectedEQ.namedFrames = {};
+  selectedEQ.namedFrames[frame] = name;
+  document.getElementById('eq_nfName').value = '';
+  renderEQNamedFrames();
+  redrawEQSheetPicker();
+}
+
+function updateEQNamedFrame(frameStr, newName) {
+  if (!selectedEQ.namedFrames) return;
+  if (newName.trim()) {
+    selectedEQ.namedFrames[frameStr] = newName.trim();
+  } else {
+    delete selectedEQ.namedFrames[frameStr];
+  }
+  renderEQNamedFrames();
+  redrawEQSheetPicker();
+}
+
+function removeEQNamedFrame(frameStr) {
+  delete selectedEQ.namedFrames[frameStr];
+  renderEQNamedFrames();
+  redrawEQSheetPicker();
+}
+
+// ── Equipment Ingredients ───────────────────────────────────────────────────
 
 function renderEQIngredients() {
   const container = document.getElementById('eqIngredients');
@@ -412,7 +630,6 @@ function removeEQIngredient(res) {
 }
 
 function updateEQIngredient(el) {
-  // Re-gather all ingredients from DOM
   const container = document.getElementById('eqIngredients');
   const rows = container.querySelectorAll('.ingredient-row');
   const newIngredients = {};
@@ -424,12 +641,10 @@ function updateEQIngredient(el) {
   selectedEQ.recipe.ingredients = newIngredients;
 }
 
-function gatherEQ() {
-  // Re-gather ingredients from DOM
-  updateEQIngredient(null);
-  let namedFrames = {};
-  try { namedFrames = JSON.parse(document.getElementById('eq_namedFrames').value); } catch (e) { /* keep existing */ }
+// ── Equipment Gather / Save / Delete ────────────────────────────────────────
 
+function gatherEQ() {
+  updateEQIngredient(null);
   return {
     id: document.getElementById('eq_id').value.trim(),
     label: document.getElementById('eq_label').value.trim(),
@@ -440,8 +655,8 @@ function gatherEQ() {
       height: Number(document.getElementById('eq_frameH').value),
     },
     totalFrames: Number(document.getElementById('eq_totalFrames').value),
-    namedFrames,
-    sourceTemplate: 'baseplayer',
+    namedFrames: selectedEQ?.namedFrames || {},
+    sourceTemplate: document.getElementById('eq_sourceTemplate')?.value?.trim() || 'baseplayer',
     recipe: {
       station: document.getElementById('eq_station').value,
       ingredients: selectedEQ.recipe?.ingredients || {},
@@ -489,6 +704,9 @@ async function deleteEQ() {
 
 // ── Item Editor ──────────────────────────────────────────────────────────────
 
+let _itSheetImg = null;   // loaded spritesheet Image for current item
+let _itSheetFile = null;  // filename of loaded spritesheet
+
 function renderITList() {
   const ul = document.getElementById('itList');
   ul.innerHTML = '';
@@ -505,7 +723,7 @@ function newItem() {
   const id = prompt('Item ID (e.g. copper):');
   if (!id) return;
   const it = {
-    id, label: id.charAt(0).toUpperCase() + id.slice(1),
+    id, label: id.charAt(0).toUpperCase() + id.slice(1).replace(/_/g, ' '),
     category: 'resource',
     sprite: { type: 'tilemap', tileCol: 0, tileRow: 0 },
     stackable: true, maxStack: 99,
@@ -516,6 +734,8 @@ function newItem() {
 
 function selectIT(it) {
   selectedIT = JSON.parse(JSON.stringify(it));
+  _itSheetImg = null;
+  _itSheetFile = null;
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('woEditor').style.display = 'none';
   document.getElementById('eqEditor').style.display = 'none';
@@ -530,90 +750,272 @@ function renderITEditor() {
   const it = selectedIT;
   if (!it) return;
   const el = document.getElementById('itEditor');
+  const sp = it.sprite || {};
   el.innerHTML = `
     <h3 style="color:#66aaff;margin-bottom:12px;">Item: ${it.id}</h3>
 
+    <!-- ── Identity ─────────────────────────────────────────── -->
+    <div class="section-header">Identity</div>
     <div class="form-row">
-      <div class="form-group"><label>ID</label><input id="it_id" value="${it.id}" /></div>
-      <div class="form-group"><label>Label</label><input id="it_label" value="${it.label || ''}" /></div>
+      <div class="form-group"><label>id</label><input id="it_id" value="${it.id}" /></div>
+      <div class="form-group"><label>label</label><input id="it_label" value="${it.label || ''}" /></div>
     </div>
-
     <div class="form-row">
-      <div class="form-group"><label>Category</label>
+      <div class="form-group"><label>category</label>
         <select id="it_category">
-          <option value="resource" ${it.category === 'resource' ? 'selected' : ''}>Resource</option>
-          <option value="consumable" ${it.category === 'consumable' ? 'selected' : ''}>Consumable</option>
-          <option value="quest" ${it.category === 'quest' ? 'selected' : ''}>Quest</option>
-          <option value="material" ${it.category === 'material' ? 'selected' : ''}>Material</option>
+          <option value="resource" ${it.category === 'resource' ? 'selected' : ''}>resource</option>
+          <option value="consumable" ${it.category === 'consumable' ? 'selected' : ''}>consumable</option>
+          <option value="quest" ${it.category === 'quest' ? 'selected' : ''}>quest</option>
+          <option value="material" ${it.category === 'material' ? 'selected' : ''}>material</option>
         </select>
       </div>
-      <div class="form-group"><label>Color</label><input type="color" id="it_color" value="${it.color || '#cccccc'}" /></div>
-    </div>
-
-    <div class="section-header">Sprite</div>
-    <div class="form-row">
-      <div class="form-group"><label>Type</label>
-        <select id="it_spriteType" onchange="toggleItemSpriteInputs()">
-          <option value="tilemap" ${it.sprite?.type === 'tilemap' ? 'selected' : ''}>Tilemap</option>
-          <option value="png" ${it.sprite?.type === 'png' ? 'selected' : ''}>Custom PNG</option>
-        </select>
-      </div>
-      <div class="form-group" id="it_tileColGroup"><label>Tile Col</label><input type="number" id="it_tileCol" value="${it.sprite?.tileCol ?? 0}" onchange="drawTilePreview('it_tilePreview', Number(this.value), Number(document.getElementById('it_tileRow').value))" /></div>
-      <div class="form-group" id="it_tileRowGroup"><label>Tile Row</label><input type="number" id="it_tileRow" value="${it.sprite?.tileRow ?? 0}" onchange="drawTilePreview('it_tilePreview', Number(document.getElementById('it_tileCol').value), Number(this.value))" /></div>
-      <div class="form-group"><label>Preview</label>
-        <div style="display:flex;align-items:center;">
-          <canvas id="it_tilePreview" class="tile-preview" width="48" height="48"></canvas>
-          <button type="button" class="btn-pick-tile" id="it_pickTileBtn" onclick="openTilePicker(
-            Number(document.getElementById('it_tileCol').value),
-            Number(document.getElementById('it_tileRow').value),
-            (col, row) => {
-              document.getElementById('it_tileCol').value = col;
-              document.getElementById('it_tileRow').value = row;
-              drawTilePreview('it_tilePreview', col, row);
-            }
-          )">Pick tile</button>
+      <div class="form-group"><label>color</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="color" id="it_color" value="${it.color || '#cccccc'}" style="width:40px;height:28px;padding:0;border:1px solid #444;" />
+          <input type="text" id="it_colorHex" value="${it.color || '#cccccc'}" style="width:80px;" oninput="document.getElementById('it_color').value=this.value" />
         </div>
       </div>
     </div>
-    <div class="form-group" id="it_pngGroup" style="display:none;">
-      <label>PNG file</label>
-      <input type="text" id="it_png" value="${it.sprite?.png || ''}" placeholder="filename.png" />
-      <input type="file" id="it_pngUpload" accept="image/png" style="margin-top:4px;" onchange="uploadItemSprite()" />
-    </div>
+    <div class="form-group"><label>description</label><textarea id="it_description" rows="2">${it.description || ''}</textarea></div>
 
-    <div class="section-header">Properties</div>
+    <!-- ── Stacking ─────────────────────────────────────────── -->
+    <div class="section-header">Stacking</div>
     <div class="form-row">
-      <div class="form-group"><label>Stackable</label>
+      <div class="form-group"><label>stackable</label>
         <select id="it_stackable">
-          <option value="true" ${it.stackable !== false ? 'selected' : ''}>Yes</option>
-          <option value="false" ${it.stackable === false ? 'selected' : ''}>No</option>
+          <option value="true" ${it.stackable !== false ? 'selected' : ''}>true</option>
+          <option value="false" ${it.stackable === false ? 'selected' : ''}>false</option>
         </select>
       </div>
-      <div class="form-group"><label>Max Stack</label><input type="number" id="it_maxStack" value="${it.maxStack ?? 99}" min="1" /></div>
+      <div class="form-group"><label>maxStack</label><input type="number" id="it_maxStack" value="${it.maxStack ?? 99}" min="1" /></div>
     </div>
 
-    <div class="form-group"><label>Description</label><textarea id="it_description" rows="2">${it.description || ''}</textarea></div>
+    <!-- ── Sprite ───────────────────────────────────────────── -->
+    <div class="section-header">Sprite</div>
+    <div class="form-row">
+      <div class="form-group"><label>sprite.type</label>
+        <select id="it_spriteType" onchange="toggleItemSpriteMode()">
+          <option value="tilemap" ${sp.type === 'tilemap' ? 'selected' : ''}>tilemap</option>
+          <option value="spritesheet" ${sp.type === 'spritesheet' ? 'selected' : ''}>spritesheet</option>
+          <option value="png" ${sp.type === 'png' ? 'selected' : ''}>png</option>
+        </select>
+      </div>
+    </div>
 
-    <div style="margin-top:20px;">
+    <!-- Tilemap mode -->
+    <div id="it_tilemapGroup">
+      <div class="form-row" style="align-items:flex-end;">
+        <div class="form-group"><label>sprite.tileCol</label><input type="number" id="it_tileCol" value="${sp.tileCol ?? 0}" onchange="drawTilePreview('it_tilePreview', Number(this.value), Number(document.getElementById('it_tileRow').value))" /></div>
+        <div class="form-group"><label>sprite.tileRow</label><input type="number" id="it_tileRow" value="${sp.tileRow ?? 0}" onchange="drawTilePreview('it_tilePreview', Number(document.getElementById('it_tileCol').value), Number(this.value))" /></div>
+        <div class="form-group"><label>Preview</label>
+          <div style="display:flex;align-items:center;">
+            <canvas id="it_tilePreview" class="tile-preview" width="48" height="48"></canvas>
+            <button type="button" class="btn-pick-tile" onclick="openTilePicker(
+              Number(document.getElementById('it_tileCol').value),
+              Number(document.getElementById('it_tileRow').value),
+              (col, row) => {
+                document.getElementById('it_tileCol').value = col;
+                document.getElementById('it_tileRow').value = row;
+                drawTilePreview('it_tilePreview', col, row);
+              }
+            )">Pick tile</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Spritesheet mode -->
+    <div id="it_sheetGroup" style="display:none;">
+      <div class="form-row">
+        <div class="form-group"><label>sprite.file</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="text" id="it_sheetFile" value="${sp.file || ''}" readonly style="flex:1;" />
+            <button type="button" class="btn-pick-tile" onclick="openItemSpritesheet()">Open PNG</button>
+          </div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>sprite.frameW</label><input type="number" id="it_frameW" value="${sp.frameW ?? 16}" min="1" onchange="redrawSheetPicker()" /></div>
+        <div class="form-group"><label>sprite.frameH</label><input type="number" id="it_frameH" value="${sp.frameH ?? 16}" min="1" onchange="redrawSheetPicker()" /></div>
+        <div class="form-group"><label>sprite.spacing</label><input type="number" id="it_spacing" value="${sp.spacing ?? 0}" min="0" onchange="redrawSheetPicker()" /></div>
+        <div class="form-group"><label>sprite.frame</label><input type="number" id="it_frame" value="${sp.frame ?? 0}" min="0" onchange="redrawSheetPicker()" /></div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;margin-top:8px;">
+        <canvas id="it_sheetPreview" class="tile-preview" width="64" height="64" style="width:64px;height:64px;"></canvas>
+        <div class="sheet-picker-wrap" id="it_sheetPickerWrap">
+          <canvas id="it_sheetPicker"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- PNG mode -->
+    <div id="it_pngGroup" style="display:none;">
+      <div class="form-group"><label>sprite.png</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="text" id="it_png" value="${sp.png || ''}" readonly style="flex:1;" />
+          <button type="button" class="btn-pick-tile" onclick="document.getElementById('it_pngUpload').click()">Open PNG</button>
+        </div>
+        <input type="file" id="it_pngUpload" accept="image/png" style="display:none;" onchange="uploadItemSprite()" />
+      </div>
+      <div id="it_pngPreviewWrap" style="margin-top:6px;"></div>
+    </div>
+
+    <!-- ── JSON Preview ─────────────────────────────────────── -->
+    <div class="section-header" style="cursor:pointer;user-select:none;" onclick="document.getElementById('it_jsonPreview').style.display = document.getElementById('it_jsonPreview').style.display === 'none' ? '' : 'none';">
+      JSON Preview <span style="font-size:10px;color:#556;">&#9660;</span>
+    </div>
+    <pre id="it_jsonPreview" style="display:none;background:#080818;border:1px solid #222;padding:8px;border-radius:4px;font-size:11px;color:#8a8;max-height:200px;overflow:auto;white-space:pre-wrap;"></pre>
+
+    <div style="margin-top:20px;display:flex;gap:8px;align-items:center;">
       <button class="btn-save" onclick="saveIT()">Save</button>
       <button class="btn-delete" onclick="deleteIT()">Delete</button>
+      <button class="btn-pick-tile" onclick="previewITJson()" style="margin-left:auto;">Refresh JSON</button>
     </div>
   `;
-  toggleItemSpriteInputs();
-  if (it.sprite?.type === 'tilemap') {
-    drawTilePreview('it_tilePreview', it.sprite?.tileCol ?? 0, it.sprite?.tileRow ?? 0);
+
+  // Sync color picker ↔ hex input
+  document.getElementById('it_color').addEventListener('input', () => {
+    document.getElementById('it_colorHex').value = document.getElementById('it_color').value;
+  });
+
+  toggleItemSpriteMode();
+
+  if (sp.type === 'tilemap') {
+    drawTilePreview('it_tilePreview', sp.tileCol ?? 0, sp.tileRow ?? 0);
+  } else if (sp.type === 'spritesheet' && sp.file) {
+    // Try to load existing spritesheet
+    loadItemSpritesheet(sp.file);
   }
 }
 
-function toggleItemSpriteInputs() {
+function toggleItemSpriteMode() {
   const type = document.getElementById('it_spriteType')?.value;
-  const isTilemap = type === 'tilemap';
-  document.getElementById('it_tileColGroup').style.display = isTilemap ? '' : 'none';
-  document.getElementById('it_tileRowGroup').style.display = isTilemap ? '' : 'none';
-  const pickBtn = document.getElementById('it_pickTileBtn');
-  if (pickBtn) pickBtn.style.display = isTilemap ? '' : 'none';
-  document.getElementById('it_pngGroup').style.display = isTilemap ? 'none' : '';
+  document.getElementById('it_tilemapGroup').style.display = type === 'tilemap' ? '' : 'none';
+  document.getElementById('it_sheetGroup').style.display = type === 'spritesheet' ? '' : 'none';
+  document.getElementById('it_pngGroup').style.display = type === 'png' ? '' : 'none';
 }
+
+function previewITJson() {
+  const data = gatherIT();
+  const el = document.getElementById('it_jsonPreview');
+  if (el) {
+    el.style.display = '';
+    el.textContent = JSON.stringify(data, null, 2);
+  }
+}
+
+// ── Spritesheet frame picker ────────────────────────────────────────────────
+
+function openItemSpritesheet() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/png';
+  input.onchange = async () => {
+    if (!input.files.length) return;
+    const file = input.files[0];
+    const id = document.getElementById('it_id')?.value?.trim();
+    if (!id) { alert('Set an item ID first.'); return; }
+    // Upload to server
+    const form = new FormData();
+    form.append('file', file);
+    const resp = await fetch(`/api/assets/items/${id}/sprite`, { method: 'POST', body: form });
+    const result = await resp.json();
+    if (!result.ok) { alert('Upload failed'); return; }
+    document.getElementById('it_sheetFile').value = file.name;
+    // Load into canvas
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      _itSheetImg = img;
+      _itSheetFile = file.name;
+      redrawSheetPicker();
+    };
+    img.src = url;
+  };
+  input.click();
+}
+
+function loadItemSpritesheet(filename) {
+  const id = selectedIT?.id;
+  if (!id || !filename) return;
+  const img = new Image();
+  img.onload = () => {
+    _itSheetImg = img;
+    _itSheetFile = filename;
+    redrawSheetPicker();
+  };
+  // Items are served from /static/items/{id}/{filename} — but they're in assets/items/
+  // We need a route to serve them. Use the existing file path pattern.
+  img.src = `/assets/items/${id}/${filename}`;
+}
+
+function redrawSheetPicker() {
+  const canvas = document.getElementById('it_sheetPicker');
+  const preview = document.getElementById('it_sheetPreview');
+  if (!canvas || !_itSheetImg) return;
+
+  const fw = Number(document.getElementById('it_frameW')?.value) || 16;
+  const fh = Number(document.getElementById('it_frameH')?.value) || 16;
+  const sp = Number(document.getElementById('it_spacing')?.value) || 0;
+  const selFrame = Number(document.getElementById('it_frame')?.value) || 0;
+
+  const img = _itSheetImg;
+  const slotW = fw + sp;
+  const slotH = fh + sp;
+  const cols = Math.max(1, Math.floor((img.width + sp) / slotW));
+  const rows = Math.max(1, Math.floor((img.height + sp) / slotH));
+
+  const scale = Math.max(1, Math.min(3, Math.floor(400 / img.width)));
+  canvas.width = img.width * scale;
+  canvas.height = img.height * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  // Draw grid
+  ctx.strokeStyle = 'rgba(100,170,255,0.25)';
+  ctx.lineWidth = 1;
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r < rows; r++) {
+      ctx.strokeRect(c * slotW * scale, r * slotH * scale, fw * scale, fh * scale);
+    }
+  }
+
+  // Highlight selected frame
+  const selCol = selFrame % cols;
+  const selRow = Math.floor(selFrame / cols);
+  ctx.strokeStyle = '#ffcc00';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(selCol * slotW * scale, selRow * slotH * scale, fw * scale, fh * scale);
+
+  // Draw preview of selected frame
+  if (preview) {
+    const pctx = preview.getContext('2d');
+    pctx.imageSmoothingEnabled = false;
+    pctx.clearRect(0, 0, preview.width, preview.height);
+    pctx.drawImage(img,
+      selCol * slotW, selRow * slotH, fw, fh,
+      0, 0, preview.width, preview.height
+    );
+  }
+
+  // Click handler
+  canvas.onclick = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width / rect.width;
+    const sy = canvas.height / rect.height;
+    const px = (e.clientX - rect.left) * sx;
+    const py = (e.clientY - rect.top) * sy;
+    const clickCol = Math.floor(px / (slotW * scale));
+    const clickRow = Math.floor(py / (slotH * scale));
+    const frame = clickRow * cols + clickCol;
+    document.getElementById('it_frame').value = frame;
+    redrawSheetPicker();
+  };
+}
+
+// ── Gather / Save / Delete ──────────────────────────────────────────────────
 
 function gatherIT() {
   const spriteType = document.getElementById('it_spriteType').value;
@@ -621,6 +1023,12 @@ function gatherIT() {
   if (spriteType === 'tilemap') {
     sprite.tileCol = Number(document.getElementById('it_tileCol').value);
     sprite.tileRow = Number(document.getElementById('it_tileRow').value);
+  } else if (spriteType === 'spritesheet') {
+    sprite.file = document.getElementById('it_sheetFile').value.trim();
+    sprite.frameW = Number(document.getElementById('it_frameW').value);
+    sprite.frameH = Number(document.getElementById('it_frameH').value);
+    sprite.spacing = Number(document.getElementById('it_spacing').value);
+    sprite.frame = Number(document.getElementById('it_frame').value);
   } else {
     sprite.png = document.getElementById('it_png').value.trim();
   }
@@ -631,7 +1039,7 @@ function gatherIT() {
     sprite,
     stackable: document.getElementById('it_stackable').value === 'true',
     maxStack: Number(document.getElementById('it_maxStack').value),
-    color: document.getElementById('it_color').value,
+    color: document.getElementById('it_colorHex').value.trim() || document.getElementById('it_color').value,
     description: document.getElementById('it_description').value.trim(),
   };
 }
@@ -666,7 +1074,14 @@ async function uploadItemSprite() {
   const resp = await fetch(`/api/assets/items/${id}/sprite`, { method: 'POST', body: form });
   const result = await resp.json();
   if (result.ok) {
-    document.getElementById('it_png').value = fileInput.files[0].name;
+    const fname = fileInput.files[0].name;
+    document.getElementById('it_png').value = fname;
+    // Show preview
+    const wrap = document.getElementById('it_pngPreviewWrap');
+    if (wrap) {
+      const url = URL.createObjectURL(fileInput.files[0]);
+      wrap.innerHTML = `<img src="${url}" style="max-width:128px;image-rendering:pixelated;border:1px solid #333;" />`;
+    }
   }
 }
 

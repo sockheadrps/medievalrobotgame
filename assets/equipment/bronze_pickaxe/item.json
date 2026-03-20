@@ -1,20 +1,20 @@
 {
   "id": "bronze_pickaxe",
   "label": "Bronze Pickaxe",
-  "spriteSheet": "",
+  "spriteSheet": "C:\\Users\\rpski\\code25\\futuregame\\assets\\equipment\\bronze_pickaxe\\bronzepick_directional.png",
   "slot": "tool",
   "frameSize": {
     "width": 32,
     "height": 32
   },
-  "totalFrames": 1,
+  "totalFrames": 4,
   "namedFrames": {},
   "sourceTemplate": "baseplayer",
   "recipe": {
     "station": "anvil",
     "ingredients": {
-      "raw_copper": 2,
-      "Wood": 1
+      "bronze_bar": 2,
+      "planks": 1
     },
     "required_level": 1
   },

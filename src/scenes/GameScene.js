@@ -704,10 +704,19 @@ export default class GameScene extends Phaser.Scene {
         this.player.x += mx * speed * dt;
         this.player.y += my * speed * dt;
         // Clamp to world bounds
-        const worldW = this._mapCols * TILE_SIZE;
-        const worldH = this._mapRows * TILE_SIZE;
-        this.player.x = Math.max(0, Math.min(worldW, this.player.x));
-        this.player.y = Math.max(0, Math.min(worldH, this.player.y));
+        if (this._currentMap === 'cave_01') {
+          const EXT = 15;
+          const minB = -EXT * TILE_SIZE;
+          const maxW = (this._mapCols + EXT) * TILE_SIZE;
+          const maxH = (this._mapRows + EXT) * TILE_SIZE;
+          this.player.x = Math.max(minB, Math.min(maxW, this.player.x));
+          this.player.y = Math.max(minB, Math.min(maxH, this.player.y));
+        } else {
+          const worldW = this._mapCols * TILE_SIZE;
+          const worldH = this._mapRows * TILE_SIZE;
+          this.player.x = Math.max(0, Math.min(worldW, this.player.x));
+          this.player.y = Math.max(0, Math.min(worldH, this.player.y));
+        }
         // Fence/gate collision — push back if overlapping
         this._resolveBarrierCollision(prevX, prevY);
       }
@@ -899,6 +908,24 @@ export default class GameScene extends Phaser.Scene {
     this._minecartMarkers = [];
   }
 
+  _applyMapBounds(mapName, cols, rows) {
+    if (mapName === 'cave_01') {
+      // Expand bounds for mineable area (-15..55 tiles beyond base 40x40)
+      const EXT = 15;
+      const minX = -EXT * TILE_SIZE;
+      const minY = -EXT * TILE_SIZE;
+      const totalW = (cols + EXT * 2) * TILE_SIZE;
+      const totalH = (rows + EXT * 2) * TILE_SIZE;
+      this.physics.world.setBounds(minX, minY, totalW, totalH);
+      this.cameras.main.setBounds(minX, minY, totalW, totalH);
+    } else {
+      const worldW = cols * TILE_SIZE;
+      const worldH = rows * TILE_SIZE;
+      this.physics.world.setBounds(0, 0, worldW, worldH);
+      this.cameras.main.setBounds(0, 0, worldW, worldH);
+    }
+  }
+
   _syncBuildingStored() {
     if (!this._conn?.connected) return;
     for (const [bid, entity] of Object.entries(this._buildingSprites)) {
@@ -1079,10 +1106,7 @@ export default class GameScene extends Phaser.Scene {
       // Update world bounds to match map
       this._mapCols = width;
       this._mapRows = height;
-      const worldW = width * TILE_SIZE;
-      const worldH = height * TILE_SIZE;
-      this.physics.world.setBounds(0, 0, worldW, worldH);
-      this.cameras.main.setBounds(0, 0, worldW, worldH);
+      this._applyMapBounds(this._currentMap, width, height);
 
       // Parse minecart exit tiles from map items
       this._minecartExitTiles = (mapData.mapItems || [])
@@ -1175,10 +1199,7 @@ export default class GameScene extends Phaser.Scene {
       this._tileImages = tileImages;
       this._mapCols = width;
       this._mapRows = height;
-      const worldW = width * TILE_SIZE;
-      const worldH = height * TILE_SIZE;
-      this.physics.world.setBounds(0, 0, worldW, worldH);
-      this.cameras.main.setBounds(0, 0, worldW, worldH);
+      this._applyMapBounds(newMap, width, height);
 
       // Parse minecart exit tiles from map items
       this._minecartExitTiles = (mapData.mapItems || [])

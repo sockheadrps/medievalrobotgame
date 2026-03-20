@@ -1,0 +1,48 @@
+{
+  "spriteSheet": "bronzepick_directional.png",
+  "source": {
+    "file": "bronzepick.png",
+    "frames": 2,
+    "frameSize": {
+      "width": 32,
+      "height": 32
+    },
+    "sourceFrameOrder": [
+      "frame_0",
+      "frame_1"
+    ]
+  },
+  "indexBase": 0,
+  "notes": "Mapped from bronzepick.png: up and left use source frame 0; down and right use source frame 1.",
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "sheetSize": {
+    "width": 128,
+    "height": 32
+  },
+  "layout": {
+    "columns": 4,
+    "rows": 1
+  },
+  "totalFrames": 4,
+  "directionOrder": [
+    "up",
+    "down",
+    "left",
+    "right"
+  ],
+  "frames": {
+    "up": 0,
+    "down": 1,
+    "left": 2,
+    "right": 3
+  },
+  "sourceFrameMap": {
+    "up": 0,
+    "down": 1,
+    "left": 0,
+    "right": 1
+  }
+}
