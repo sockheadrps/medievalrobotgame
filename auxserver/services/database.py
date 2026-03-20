@@ -129,6 +129,11 @@ def init_db():
             direction TEXT DEFAULT '',
             stored TEXT DEFAULT '{}'
         );
+
+        CREATE TABLE IF NOT EXISTS mine_states (
+            player_id TEXT PRIMARY KEY,
+            grid_json TEXT DEFAULT '{}'
+        );
     """)
     conn.commit()
 
@@ -641,6 +646,27 @@ def reset_game():
     """)
     conn.commit()
     print("[db] Game reset — all world state and player stats wiped")
+
+
+# ── Mine state persistence ────────────────────────────────────────────────────
+
+def save_mine_state(player_id: str, grid_json: str):
+    conn = _get_conn()
+    conn.execute("""
+        INSERT INTO mine_states (player_id, grid_json)
+        VALUES (?, ?)
+        ON CONFLICT(player_id) DO UPDATE SET grid_json=excluded.grid_json
+    """, (player_id, grid_json))
+    conn.commit()
+
+
+def load_mine_state(player_id: str) -> str | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT grid_json FROM mine_states WHERE player_id = ?",
+                       (player_id,)).fetchone()
+    if not row:
+        return None
+    return row["grid_json"]
 
 
 # ── Dev-mode seed accounts ────────────────────────────────────────────────────

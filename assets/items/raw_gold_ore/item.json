@@ -1,0 +1,10 @@
+{
+  "id": "raw_gold_ore",
+  "label": "Raw Gold Ore",
+  "category": "resource",
+  "sprite": { "type": "tilemap", "tileCol": 50, "tileRow": 9 },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#ffcc33",
+  "description": "Unrefined gold ore. Smelt 10 at a furnace to extract nuggets."
+}

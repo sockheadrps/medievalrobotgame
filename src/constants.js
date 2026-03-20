@@ -232,6 +232,15 @@ export const TRACK_FRAME_LOOKUP = {
   'left,up':     1124, 'down,right': 1124,
 };
 
+// --- Cave Mining ---
+export const MINE_FRAME_WALL     = 887;   // col=53 row=15 — grey rock (standard wall)
+export const MINE_FRAME_HARDWALL = 1060;  // col=34 row=18 — dark dense rock (depth 30+)
+export const MINE_FRAME_BEDROCK  = 1174;  // col=34 row=20 — unbreakable boundary
+export const MINE_FRAME_FLOOR    = 578;   // col=8  row=10 — cave floor
+export const MINE_FRAME_ORE_IRON = 1251;  // col=54 row=21 — iron ore overlay
+export const MINE_FRAME_ORE_GOLD = 554;   // col=50 row=9  — gold ore overlay (crystal sprite)
+export const MINE_FRAME_GEODE    = 366;   // col=24 row=6  — geode (chest sprite)
+
 // --- Grid helpers ---
 export function tilePos(col, row) {
   return {

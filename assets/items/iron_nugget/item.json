@@ -1,0 +1,10 @@
+{
+  "id": "iron_nugget",
+  "label": "Iron Nugget",
+  "category": "resource",
+  "sprite": { "type": "tilemap", "tileCol": 54, "tileRow": 20 },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#bbbbcc",
+  "description": "Refined iron. Used to craft tools and equipment."
+}

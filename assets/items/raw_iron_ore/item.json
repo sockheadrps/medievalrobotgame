@@ -1,0 +1,10 @@
+{
+  "id": "raw_iron_ore",
+  "label": "Raw Iron Ore",
+  "category": "resource",
+  "sprite": { "type": "tilemap", "tileCol": 54, "tileRow": 21 },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#aa7755",
+  "description": "Unrefined iron ore. Smelt 10 at a furnace to extract nuggets."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "iron_pickaxe",
+  "label": "Iron Pickaxe",
+  "spriteSheet": "",
+  "slot": "tool",
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "totalFrames": 1,
+  "namedFrames": {},
+  "sourceTemplate": "baseplayer",
+  "recipe": {
+    "station": "anvil",
+    "ingredients": {
+      "iron_nugget": 5,
+      "Wood": 2
+    },
+    "required_level": 10
+  },
+  "stats": {
+    "str_bonus": 0,
+    "def_bonus": 0,
+    "hp_bonus": 0,
+    "dmg_reduction_pct": 0,
+    "mining_power": 2,
+    "can_mine_hardwall": true,
+    "durability": 0
+  }
+}

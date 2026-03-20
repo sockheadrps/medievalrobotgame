@@ -1,0 +1,10 @@
+{
+  "id": "gold_nugget",
+  "label": "Gold Nugget",
+  "category": "resource",
+  "sprite": { "type": "tilemap", "tileCol": 50, "tileRow": 9 },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#ffdd44",
+  "description": "Refined gold. Valuable crafting material."
+}

@@ -1,0 +1,10 @@
+{
+  "id": "coal",
+  "label": "Coal",
+  "category": "resource",
+  "sprite": { "type": "tilemap", "tileCol": 53, "tileRow": 15 },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#444444",
+  "description": "Fuel for furnaces and smelting."
+}

@@ -1,0 +1,10 @@
+{
+  "id": "clay",
+  "label": "Clay",
+  "category": "resource",
+  "sprite": { "type": "tilemap", "tileCol": 7, "tileRow": 10 },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#cc9966",
+  "description": "Soft clay, used for crafting."
+}

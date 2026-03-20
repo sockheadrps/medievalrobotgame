@@ -1,0 +1,30 @@
+{
+  "id": "bronze_pickaxe",
+  "label": "Bronze Pickaxe",
+  "spriteSheet": "",
+  "slot": "tool",
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "totalFrames": 1,
+  "namedFrames": {},
+  "sourceTemplate": "baseplayer",
+  "recipe": {
+    "station": "anvil",
+    "ingredients": {
+      "raw_copper": 2,
+      "Wood": 1
+    },
+    "required_level": 1
+  },
+  "stats": {
+    "str_bonus": 0,
+    "def_bonus": 0,
+    "hp_bonus": 0,
+    "dmg_reduction_pct": 0,
+    "mining_power": 1,
+    "can_mine_hardwall": false,
+    "durability": 0
+  }
+}

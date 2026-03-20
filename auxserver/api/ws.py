@@ -249,6 +249,11 @@ async def game_loop():
             filtered_campfires = {cid: c for cid, c in clean_campfires.items()
                                   if c.get("map", "level_01") == recipient_map}
 
+            # fx_events: filter per-player for targeted events
+            pid_fx = [fx for fx in all_fx
+                      if fx.get("pid") == pid or fx.get("pid") is None
+                      or fx.get("type") not in ("chat_hint", "mine_update")]
+
             state = {
                 "type": "state",
                 "players": filtered_players,
@@ -260,7 +265,7 @@ async def game_loop():
                 "dummies": filtered_dummies,
                 "anvils": filtered_anvils,
                 "campfires": filtered_campfires,
-                "fx_events": all_fx if on_overworld else [],
+                "fx_events": pid_fx,
                 "animals": all_animals if on_overworld else [],
                 "crops": all_crops if on_overworld else [],
                 "world_objects": filtered_wo,

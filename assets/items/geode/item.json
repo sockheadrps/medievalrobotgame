@@ -1,0 +1,10 @@
+{
+  "id": "geode",
+  "label": "Geode",
+  "category": "resource",
+  "sprite": { "type": "tilemap", "tileCol": 24, "tileRow": 6 },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#9977cc",
+  "description": "A mysterious rock that may contain crystals. Process at a rock crusher to find out."
+}

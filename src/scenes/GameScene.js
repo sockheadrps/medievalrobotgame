@@ -27,6 +27,7 @@ import { InspectPanel } from '../ui/InspectPanel.js';
 import { DriveIndicator } from '../ui/DriveIndicator.js';
 import { PlacementSystem } from '../systems/PlacementSystem.js';
 import { TaskRecorder } from '../systems/TaskRecorder.js';
+import MineRenderer from '../systems/MineRenderer.js';
 import { Crate } from '../entities/Crate.js';
 import { Furnace } from '../entities/Furnace.js';
 import {
@@ -147,6 +148,7 @@ export default class GameScene extends Phaser.Scene {
     this._adminUi = new AdminPanelController(this);
     this._inventoryUi = new InventoryController(this);
     this._dialogue = new DialogueController(this);
+    this._mineRenderer = new MineRenderer(this);
 
     // Map dimensions — updated after map loads
     this._mapCols = MAP_COLS;
@@ -380,6 +382,17 @@ export default class GameScene extends Phaser.Scene {
 
         this._closeContextMenu();
         return;
+      }
+
+      // Mine tile click (left-click on cave_01 when not on an NPC/entity)
+      if (this._currentMap === 'cave_01' && this._mineRenderer.isActive && !isRightClick) {
+        const worldX = ptr.worldX;
+        const worldY = ptr.worldY;
+        const { col, row } = worldToTile(worldX, worldY);
+        if (this._mineRenderer.getTileKey(col, row)) {
+          this._conn?.send({ type: 'mine_tile', col, row });
+          return;
+        }
       }
 
       this._closeContextMenu();
@@ -1192,6 +1205,13 @@ export default class GameScene extends Phaser.Scene {
       }
       if (this.player) {
         this.physics.add.collider(this.player, this._collisionGroup);
+      }
+
+      // Mine renderer: request tiles when entering cave, destroy when leaving
+      if (newMap === 'cave_01') {
+        this._conn?.send({ type: 'request_mine_tiles' });
+      } else {
+        this._mineRenderer.destroy();
       }
     } catch (e) {
       console.warn('[map] Failed to change map:', e.message);
@@ -2760,6 +2780,14 @@ export default class GameScene extends Phaser.Scene {
         // Show speech bubble on the remote player sprite
         const rp = this._remotePlayers[evt.pid];
         if (rp) rp.showBubble?.(evt.text, 5000);
+      }
+      // Mine tile updates
+      if (evt?.type === 'mine_update' && evt.tiles) {
+        this._mineRenderer.updateTiles(evt.tiles);
+      }
+      // Chat hints (resource pickup messages, etc.)
+      if (evt?.type === 'chat_hint' && evt.text) {
+        this.chatBox?._addLog(evt.text, '#88ccff');
       }
     }
     return this._combatFx.handleReplicatedFxEvents(events);

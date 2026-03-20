@@ -19,6 +19,7 @@ from services.database import (
 from services.animal_service import animal_manager
 from services.crop_service import crop_manager
 from services.asset_registry import asset_registry
+from services.mine_state import MineGrid
 
 TILE_SIZE = 48
 PLAYER_SPEED = 160
@@ -398,6 +399,7 @@ class GameState:
         self.fx_events = []     # transient replicated visual effects
         self.pending_absorbs = []
         self.background_npcs = {}  # npc_id -> {pid, npc_id, map, task, last_tick}
+        self.mine_grids = {}       # pid -> MineGrid (loaded on cave entry)
         self.xp_multipliers = {
             "player": 1.0,
             "npc": 1.0,
@@ -500,13 +502,17 @@ class GameState:
         print("[game_state] In-memory state reset")
 
     def save_world(self):
-        """Persist ground items, dummies, anvils, campfires, and buildings to the database."""
+        """Persist ground items, dummies, anvils, campfires, buildings, and mine grids to the database."""
         try:
             save_ground_items(self.ground_items)
             save_dummies(self.dummies)
             save_anvils(self.anvils)
             save_campfires(self.campfires)
             save_buildings(self.buildings)
+            # Save mine grids
+            from services.database import save_mine_state
+            for pid, mg in self.mine_grids.items():
+                save_mine_state(pid, mg.to_json())
         except Exception as e:
             print(f"[game_state] Failed to save world state: {e}")
 
@@ -618,6 +624,20 @@ class GameState:
         elif msg_type == "mine_rock":
             rock_id = data.get("rock_id")
             self._try_mine_rock(pid, rock_id)
+
+        elif msg_type == "mine_tile":
+            col = data.get("col")
+            row = data.get("row")
+            if col is not None and row is not None:
+                self._try_mine_tile(pid, int(col), int(row))
+
+        elif msg_type == "request_mine_tiles":
+            tiles = self.get_mine_tiles_for_player(pid)
+            if tiles is not None:
+                self.fx_events.append({
+                    "type": "mine_update", "pid": pid,
+                    "tiles": tiles,
+                })
 
         elif msg_type == "attack_dummy":
             dummy_id = data.get("dummy_id")
@@ -2350,6 +2370,104 @@ class GameState:
             respawn_secs = random.uniform(wo_def.respawn_min, wo_def.respawn_max)
             wo["respawn_at"] = time.time() + respawn_secs
         print(f"[game_state] NPC {npc_id} mined world object {wo_id}, inv={npc_inv}")
+
+    # ── Cave Mining ───────────────────────────────────────────────────────
+
+    def _get_or_create_mine(self, pid: str) -> MineGrid:
+        """Get existing mine grid for player, or create + initialize one."""
+        if pid in self.mine_grids:
+            return self.mine_grids[pid]
+        # Try loading from DB
+        from services.database import load_mine_state, save_mine_state
+        saved = load_mine_state(pid)
+        if saved:
+            mg = MineGrid.from_json(pid, saved)
+        else:
+            mg = MineGrid(pid)
+            mg.initialize()
+            save_mine_state(pid, mg.to_json())
+        self.mine_grids[pid] = mg
+        return mg
+
+    def _try_mine_tile(self, pid: str, col: int, row: int):
+        """Player attempts to mine a wall tile in the cave."""
+        p = self.players.get(pid)
+        if not p:
+            return
+        # Must be on cave_01
+        if p.get("map", "level_01") != "cave_01":
+            return
+
+        mg = self._get_or_create_mine(pid)
+
+        # Check tile is mineable
+        if not mg.is_tile_mineable(col, row):
+            return
+
+        # Check adjacency (player must be within ~1.5 tiles)
+        px_col = int(p["x"] // TILE_SIZE)
+        px_row = int(p["y"] // TILE_SIZE)
+        if abs(px_col - col) > 1 or abs(px_row - row) > 1:
+            return
+
+        # Check pickaxe and hardwall permission
+        tile = mg.grid.get((col, row))
+        if not tile:
+            return
+
+        # Get equipped pickaxe stats
+        equipment = p.get("equipment", {})
+        tool = equipment.get("tool")
+        can_hardwall = False
+        if tool:
+            # Look up equipment definition for mining stats
+            eq_def = asset_registry.get_equipment(tool) if hasattr(asset_registry, 'get_equipment') else None
+            if eq_def and hasattr(eq_def, 'stats'):
+                can_hardwall = getattr(eq_def.stats, 'can_mine_hardwall', False)
+        else:
+            # Default bronze pickaxe (everyone starts with one)
+            can_hardwall = False
+
+        if tile["type"] == "hardwall" and not can_hardwall:
+            self.fx_events.append({
+                "type": "chat_hint", "pid": pid,
+                "text": "This rock is too dense for your pickaxe."
+            })
+            return
+
+        # Mine it!
+        drop = mg.mine_tile(col, row, can_mine_hardwall=can_hardwall)
+        if not drop:
+            return
+
+        # Award resources to player inventory
+        ore_type = drop.get("ore_type")
+        ore_amount = drop.get("ore_amount", 0)
+        if ore_type and ore_amount > 0:
+            inv = p.setdefault("inventory", {})
+            if ore_type == "stone":
+                p["stones"] = p.get("stones", 0) + ore_amount
+            else:
+                inv[ore_type] = inv.get(ore_type, 0) + ore_amount
+
+            self.fx_events.append({
+                "type": "chat_hint", "pid": pid,
+                "text": f"+{ore_amount} {ore_type.replace('_', ' ')}"
+            })
+
+        # Send updated mine tiles to player
+        self.fx_events.append({
+            "type": "mine_update", "pid": pid,
+            "tiles": mg.get_known_tiles(),
+        })
+
+    def get_mine_tiles_for_player(self, pid: str) -> list[dict] | None:
+        """Get mine tile data for a player on cave_01. Returns None if not in cave."""
+        p = self.players.get(pid)
+        if not p or p.get("map", "level_01") != "cave_01":
+            return None
+        mg = self._get_or_create_mine(pid)
+        return mg.get_known_tiles()
 
     def _npc_deposit_to_crate(self, pid, npc_id, building_id, resource, amount):
         """NPC deposits a resource into a crate/furnace building."""
