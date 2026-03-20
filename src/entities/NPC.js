@@ -12,10 +12,18 @@ import {
   KI_MAX_BASE, KI_MAX_PER_LEVEL, KI_REGEN_MS, KI_BLAST_BASE_COST, KI_BLAST_BASE_DMG, KI_BLAST_SCALE,
 } from '../constants.js';
 import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
+import { createEquipmentOverlay, syncEquipmentOverlay } from './EquipmentOverlay.js';
 
 const HP_REGEN_MS = 30000;
 const SCALE = TILE_SIZE / NPC_FRAME_H; // 48/32 = 1.5
 const ARRIVE_D = 8;
+
+// NPC frame → baseplayer frame mapping (for equipment overlay remap)
+const NPC_TO_BASE = {
+  0: 0, 1: 1, 2: 2, 3: 3,       // face down/up/right/left
+  36: 4, 37: 5, 38: 6, 39: 7,    // walk1 down/up/right/left
+  54: 26, 55: 25,                  // punch right/left
+};
 
 // Emotion decay — emotions drift toward baseline every DECAY_INTERVAL ms
 const EMOTION_DECAY_INTERVAL = 2000; // 2 seconds
@@ -79,7 +87,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._kiRegenAccum = 0;
     this.blastLevel = 0;
     this.crystals = 0;
-    this.kiMoves = [];
+    this.kiMoves = ['absorb'];
     this.kiBlastBonuses = { blast_speed: 0, blast_range: 0, blast_dmg: 0, blast_cooldown: 0, barrier_duration: 0, barrier_cooldown: 0 };
     this._emotionDecayAccum = 0;
     this._memoryDecayAccum = 0;
@@ -88,6 +96,10 @@ export class NPC extends Phaser.GameObjects.Sprite {
 
     // Intel — whether this NPC can see attacker stats (future item unlocks this)
     this._canSeeStats = false;
+
+    // Equipment
+    this.equipment = {};  // slot -> eq_id
+    this._equipOverlays = {};
 
     // Inventory — capacity scales with level
     this.logs    = 0;
@@ -352,11 +364,44 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._pathTargetKey = null;
   }
 
-  /** Try to move by (mx, my). */
+  /** Try to move by (mx, my), respecting fence/gate collision. */
   _tryMove(mx, my) {
-    this.x += mx;
-    this.y += my;
+    const newX = this.x + mx;
+    const newY = this.y + my;
+    const blocked = this._isBarrierAt(newX, newY);
+    if (blocked) {
+      // Try axis sliding
+      if (!this._isBarrierAt(newX, this.y)) {
+        this.x = newX;
+        return true;
+      }
+      if (!this._isBarrierAt(this.x, newY)) {
+        this.y = newY;
+        return true;
+      }
+      return false;
+    }
+    this.x = newX;
+    this.y = newY;
     return true;
+  }
+
+  /** Check if a position overlaps a fence/gate that blocks this NPC. */
+  _isBarrierAt(x, y) {
+    const scene = this.scene;
+    if (!scene?._buildingSprites) return false;
+    const TILE = 48; // TILE_SIZE
+    const col = Math.floor(x / TILE);
+    const row = Math.floor(y / TILE);
+    const ownerId = scene.playerId || 'default';
+    for (const entity of Object.values(scene._buildingSprites)) {
+      if (entity._kind !== 'fence' && entity._kind !== 'gate') continue;
+      if (entity.col !== col || entity.row !== row) continue;
+      // Owner's NPCs can pass through owner's gates
+      if (entity._kind === 'gate' && entity._owner === ownerId) continue;
+      return true;
+    }
+    return false;
   }
 
   /** Pathfinding stub — no obstacles currently. Returns null (direct path). */
@@ -715,7 +760,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
       name: this._name,
       x: this.x,
       y: this.y,
-      stats: { maxHp: this.maxHp, hp: this.hp, str: this.str, def: this.def, level: this.level, xp: this.xp, logs: this.logs, stones: this.stones, crystals: this.crystals, maxKi: this.maxKi, ki: this.ki, infKi: !!this.infKi, blastLevel: this.blastLevel, hasKiBlast: !!this._hasKiBlast, kiBlastBonuses: this.kiBlastBonuses ?? {} },
+      stats: { maxHp: this.maxHp, hp: this.hp, str: this.str, def: this.def, level: this.level, xp: this.xp, logs: this.logs, stones: this.stones, crystals: this.crystals, maxKi: this.maxKi, ki: this.ki, infKi: !!this.infKi, blastLevel: this.blastLevel, hasKiBlast: !!this._hasKiBlast, kiMoves: this.kiMoves ?? [], kiBlastBonuses: this.kiBlastBonuses ?? {}, equipment: this.equipment ?? {} },
       map: this._map || null,
       soul: this.soul,
     };
@@ -743,8 +788,10 @@ export class NPC extends Phaser.GameObjects.Sprite {
       this.ki    = data.stats.ki ?? this.ki;
       this.infKi = !!(data.stats.infKi ?? data.inf_ki ?? this.infKi);
       this.blastLevel = data.stats.blastLevel ?? this.blastLevel;
+      if (Array.isArray(data.stats.kiMoves)) this.kiMoves = data.stats.kiMoves;
       this.kiBlastBonuses = (data.stats.kiBlastBonuses && typeof data.stats.kiBlastBonuses === 'object') ? { ...this.kiBlastBonuses, ...data.stats.kiBlastBonuses } : this.kiBlastBonuses;
       if (data.stats.hasKiBlast) this._hasKiBlast = true;
+      if (data.stats.equipment) this.equipment = { ...data.stats.equipment };
     }
     if (data.soul) {
       const savedDrives = data.soul.drives;
@@ -953,6 +1000,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._kiBarBg?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
     this._kiBar?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
     syncBarrierOverlay(this._barrierOverlay, this);
+    this._syncEquipOverlays();
 
     // Update HP bar width
     const hpPct = this.hp / this.maxHp;
@@ -965,6 +1013,34 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._kiBar?.setDisplaySize(40 * Phaser.Math.Clamp(kiPct, 0, 1), 3);
     const kiColor = kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa;
     this._kiBar?.setFillStyle(kiColor);
+  }
+
+  _syncEquipOverlays() {
+    const equipData = this.equipment || {};
+    const textures = this.scene?._equipmentTextures || {};
+    for (const [slot, eqId] of Object.entries(equipData)) {
+      let overlay = this._equipOverlays[slot];
+      const texInfo = textures[eqId];
+      if (!texInfo || !this.scene.textures.exists(texInfo.textureKey)) {
+        if (overlay) overlay.setVisible(false);
+        continue;
+      }
+      // Build NPC-specific remap: NPC frame → armor frame
+      if (!overlay || overlay._textureKey !== texInfo.textureKey) {
+        if (overlay) overlay.destroy();
+        const npcRemap = {};
+        for (const [npcFrame, baseFrame] of Object.entries(NPC_TO_BASE)) {
+          const armorFrame = texInfo.remap[baseFrame];
+          if (armorFrame != null) npcRemap[Number(npcFrame)] = armorFrame;
+        }
+        overlay = createEquipmentOverlay(this.scene, this, texInfo.textureKey, npcRemap);
+        this._equipOverlays[slot] = overlay;
+      }
+      syncEquipmentOverlay(overlay, this);
+    }
+    for (const [slot, overlay] of Object.entries(this._equipOverlays)) {
+      if (!equipData[slot]) overlay.setVisible(false);
+    }
   }
 
   // ── Animations ────────────────────────────────────────────────────────────
@@ -1014,6 +1090,8 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._kiBar?.destroy();
     this._kiBarBg?.destroy();
     this._barrierOverlay?.destroy();
+    for (const overlay of Object.values(this._equipOverlays || {})) overlay?.destroy();
+    this._equipOverlays = {};
     super.destroy(fromScene);
   }
 }

@@ -7,7 +7,10 @@ import {
   FRAME_CHEST,
   FRAME_FURNACE,
   FRAME_LOG_CUTTER,
+  FRAME_ETRAINER,
   FRAME_TRACK_H,
+  FRAME_GATE,
+  FRAME_FENCE,
 } from '../constants.js';
 
 const TOP_HUD_MARGIN = 133;
@@ -22,6 +25,7 @@ const HOTBAR_ACTIONS = {
   place_anvil: { id: 'place_anvil', label: 'Anvil', frame: FRAME_ANVIL },
   use_crystal: { id: 'use_crystal', label: 'Crystal', frame: FRAME_CRYSTAL },
   ki_shot: { id: 'ki_shot', label: 'Ki Shot', frame: FRAME_CRYSTAL },
+  absorb: { id: 'absorb', label: 'Absorb', frame: FRAME_CRYSTAL },
   barrier: { id: 'barrier', label: 'Barrier', frame: FRAME_CRYSTAL },
   build_ki_target: { id: 'build_ki_target', label: 'Ki Target', frame: 526 },
   plant_seed: { id: 'plant_seed', label: 'Veg Seed', frame: FRAME_SEED },
@@ -29,12 +33,15 @@ const HOTBAR_ACTIONS = {
   place_crate: { id: 'place_crate', label: 'Crate', frame: FRAME_CHEST },
   place_furnace: { id: 'place_furnace', label: 'Furnace', frame: FRAME_FURNACE },
   place_log_cutter: { id: 'place_log_cutter', label: 'Log Cutter', frame: FRAME_LOG_CUTTER },
+  place_etrainer: { id: 'place_etrainer', label: 'Etrainer', frame: FRAME_ETRAINER },
   place_track: { id: 'place_track', label: 'Track', frame: FRAME_TRACK_H },
+  place_gate: { id: 'place_gate', label: 'Gate', frame: FRAME_GATE },
+  place_fence: { id: 'place_fence', label: 'Fence', frame: FRAME_FENCE },
   empty: { id: 'empty', label: 'Empty', frame: 6 },
 };
 
 const HOTBAR_DEFAULT_ASSIGNMENTS = ['drop_log', 'drop_stone', 'place_anvil', 'use_crystal', 'ki_shot', 'barrier'];
-const IMPLEMENTED_HOTBAR_MOVES = ['ki_shot', 'barrier'];
+const IMPLEMENTED_HOTBAR_MOVES = ['ki_shot', 'absorb', 'barrier'];
 
 export class InventoryController {
   constructor(scene) {
@@ -132,6 +139,7 @@ export class InventoryController {
       HOTBAR_ACTIONS.place_anvil,
       HOTBAR_ACTIONS.use_crystal,
       HOTBAR_ACTIONS.ki_shot,
+      HOTBAR_ACTIONS.absorb,
       HOTBAR_ACTIONS.barrier,
       HOTBAR_ACTIONS.build_ki_target,
       HOTBAR_ACTIONS.plant_seed,
@@ -139,7 +147,10 @@ export class InventoryController {
       HOTBAR_ACTIONS.place_crate,
       HOTBAR_ACTIONS.place_furnace,
       HOTBAR_ACTIONS.place_log_cutter,
+      HOTBAR_ACTIONS.place_etrainer,
       HOTBAR_ACTIONS.place_track,
+      HOTBAR_ACTIONS.place_gate,
+      HOTBAR_ACTIONS.place_fence,
       HOTBAR_ACTIONS.empty,
     ];
     return actions;
@@ -209,6 +220,7 @@ export class InventoryController {
     else if (item.id === 'place_anvil') this.placeAnvil();
     else if (item.id === 'use_crystal') this.useCrystal();
     else if (item.id === 'ki_shot') scene._fireKiBlast();
+    else if (item.id === 'absorb') scene._fireAbsorb();
     else if (item.id === 'barrier') scene.chatBox?._addLog(`${item.label} is passive or contextual.`, '#88bbff');
     else if (item.id === 'build_ki_target') this.buildKiTarget();
     else if (item.id === 'plant_seed') this.armPlantSeed();
@@ -216,7 +228,10 @@ export class InventoryController {
     else if (item.id === 'place_crate') this.toggleCratePlacement();
     else if (item.id === 'place_furnace') this.toggleFurnacePlacement();
     else if (item.id === 'place_log_cutter') this.toggleLogCutterPlacement();
+    else if (item.id === 'place_etrainer') this.toggleEtrainerPlacement();
     else if (item.id === 'place_track') this.toggleTrackPlacement();
+    else if (item.id === 'place_gate') this.toggleGatePlacement();
+    else if (item.id === 'place_fence') this.toggleFencePlacement();
   }
 
   toggleConveyorPlacement() {
@@ -259,6 +274,16 @@ export class InventoryController {
     }
   }
 
+  toggleEtrainerPlacement() {
+    const scene = this.scene;
+    if (!scene._placement) return;
+    if (scene._placement.isActive()) {
+      scene._placement.cancel();
+    } else {
+      scene._placement.startPlacing('etrainer');
+    }
+  }
+
   toggleTrackPlacement() {
     const scene = this.scene;
     if (!scene._placement) return;
@@ -266,6 +291,26 @@ export class InventoryController {
       scene._placement.cancel();
     } else {
       scene._placement.startPlacing('track');
+    }
+  }
+
+  toggleGatePlacement() {
+    const scene = this.scene;
+    if (!scene._placement) return;
+    if (scene._placement.isActive()) {
+      scene._placement.cancel();
+    } else {
+      scene._placement.startPlacing('gate');
+    }
+  }
+
+  toggleFencePlacement() {
+    const scene = this.scene;
+    if (!scene._placement) return;
+    if (scene._placement.isActive()) {
+      scene._placement.cancel();
+    } else {
+      scene._placement.startPlacing('fence');
     }
   }
 

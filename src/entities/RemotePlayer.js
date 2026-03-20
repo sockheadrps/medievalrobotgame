@@ -79,7 +79,7 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
     this.kiSkillLevel = 1;
     this.kiSkillXp = 0;
     this.kiBlastBonuses = {};
-    this.kiMoves = [];
+    this.kiMoves = ['absorb'];
 
     this.on('pointerdown', (pointer, _localX, _localY, event) => {
       this.scene?._handleRemoteEntityPointerDown?.(this, pointer, event);

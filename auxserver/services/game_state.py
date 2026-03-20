@@ -34,6 +34,7 @@ PLAYER_RESPAWN_TIME = 5.0
 KNOCKOUT_MIN_TIME = 10.0
 KNOCKOUT_MAX_TIME = 20.0
 PVP_XP_KILL = 25
+AI_RIVAL_PID = "__ai_rival__"
 
 # Ki / blast constants
 KI_MAX_BASE = 20
@@ -46,6 +47,8 @@ KI_SKILL_RESIST_PER_LEVEL = 0.01
 KI_SKILL_RESIST_CAP = 0.50
 KI_BLAST_RANGE = TILE_SIZE * 4  # longer range than melee
 KI_BLAST_COOLDOWN = 1.2  # seconds between blasts
+ABSORB_DURATION = 2.0
+DEFAULT_KI_MOVES = ["absorb"]
 
 SHEET_COLS = 57
 FRAME_TREE = 531  # tileX=18, tileY=9
@@ -73,6 +76,11 @@ REFINE_STONE_COST = 1       # stones consumed per refine attempt
 CRYSTAL_CHANCE = 0.30
 CRYSTAL_UPGRADE_CHANCE = 0.50
 CRYSTAL_UPGRADE_STATS = ["blast_speed", "blast_range", "blast_dmg", "blast_cooldown", "barrier_duration", "barrier_cooldown"]
+
+# Gate & Fence constants
+GATE_LOG_COST = 3
+FENCE_LOG_COST = 2
+FENCE_BASE_HP = 50
 
 # Ki Target constants
 KI_TARGET_HP = 5          # hits before it breaks
@@ -388,7 +396,14 @@ class GameState:
         self.buildings = {}     # building_id -> {id, kind, col, row, map, owner, direction, stored}
         self.pending_carts = [] # [{map, col, row, resource, amount}] — carts arriving via portal
         self.fx_events = []     # transient replicated visual effects
+        self.pending_absorbs = []
         self.background_npcs = {}  # npc_id -> {pid, npc_id, map, task, last_tick}
+        self.xp_multipliers = {
+            "player": 1.0,
+            "npc": 1.0,
+            "ai_player": 1.0,
+            "ai_npc": 1.0,
+        }
         self._last_save = 0     # timestamp of last DB save
         self._last_rock_spawn = time.time()  # last rock spawn check
         self._next_rock_id = 0
@@ -404,6 +419,17 @@ class GameState:
                 "chopped": False,
                 "regrow_at": None,
             })
+
+    def _ensure_default_ki_moves(self, actor):
+        if not actor:
+            return
+        moves = actor.get("ki_moves")
+        if not isinstance(moves, list):
+            moves = []
+        for move_id in DEFAULT_KI_MOVES:
+            if move_id not in moves:
+                moves.append(move_id)
+        actor["ki_moves"] = moves
 
     def _load_persisted(self):
         """Load ground items, dummies, anvils, campfires, and buildings from the database."""
@@ -453,7 +479,14 @@ class GameState:
         self.campfires.clear()
         self.buildings.clear()
         self.fx_events.clear()
+        self.pending_absorbs.clear()
         self.rocks.clear()
+        self.xp_multipliers = {
+            "player": 1.0,
+            "npc": 1.0,
+            "ai_player": 1.0,
+            "ai_npc": 1.0,
+        }
         _next_item_id = 0
         _next_dummy_id = 0
         _next_anvil_id = 0
@@ -511,7 +544,7 @@ class GameState:
                 "barrier_duration": 0,
                 "barrier_cooldown": 0,
             },
-            "ki_moves": [],
+            "ki_moves": list(DEFAULT_KI_MOVES),
             "dead": False,
             "knocked_out": False,
             "knocked_until": None,
@@ -523,7 +556,9 @@ class GameState:
             "map": "level_01",
             "equipment": {},   # slot -> item_id
             "inventory": {},   # item_id -> quantity (data-driven items)
+            "combat_mode": "kill",  # "kill" or "ko" — determines NPC defeat behavior
         }
+        self._ensure_default_ki_moves(self.players[pid])
         return self.players[pid]
 
     def remove_player(self, pid: str):
@@ -607,9 +642,15 @@ class GameState:
         elif msg_type == "place_building":
             self._place_building(pid, data)
 
+        elif msg_type == "attack_fence":
+            self._try_attack_fence(pid, data.get("building_id"))
+
         elif msg_type == "remove_building":
             bid = data.get("building_id")
             if bid and bid in self.buildings:
+                # If it's an etrainer, also remove the dummy entry
+                if self.buildings[bid].get("kind") == "etrainer":
+                    self.dummies.pop(bid, None)
                 del self.buildings[bid]
 
         elif msg_type == "update_building_stored":
@@ -746,6 +787,11 @@ class GameState:
             item_id = data.get("item_id")
             self._ki_blast_ground_item(pid, item_id, data.get("blast_mode", ""))
 
+        elif msg_type == "absorb_npc":
+            target_owner = data.get("owner_id")
+            target_npc_id = data.get("npc_id")
+            self._start_player_absorb(pid, target_owner, target_npc_id)
+
         elif msg_type == "npc_ki_blast_player":
             npc_id = data.get("npc_id")
             target_pid = data.get("target_id")
@@ -761,6 +807,12 @@ class GameState:
             npc_id = data.get("npc_id")
             target_id = data.get("target_id")
             self._npc_ki_blast_ki_target(pid, npc_id, target_id)
+
+        elif msg_type == "npc_absorb_npc":
+            npc_id = data.get("npc_id")
+            target_owner = data.get("target_owner")
+            target_npc_id = data.get("target_npc_id")
+            self._start_npc_absorb(pid, npc_id, target_owner, target_npc_id)
 
         elif msg_type == "npc_attack_player":
             target_pid = data.get("target_id")
@@ -800,6 +852,11 @@ class GameState:
 
         elif msg_type == "reset_blast_level":
             p["blastLevel"] = 0
+
+        elif msg_type == "set_combat_mode":
+            mode = data.get("mode", "kill")
+            if mode in ("kill", "ko"):
+                p["combat_mode"] = mode
 
         elif msg_type == "build_ki_target":
             self._try_build_ki_target(pid, data.get("x"), data.get("y"))
@@ -848,6 +905,29 @@ class GameState:
         elif msg_type == "craft_equipment":
             eq_id = data.get("equipment_id")
             self._try_craft_equipment(pid, eq_id)
+
+        elif msg_type == "equip_item":
+            self._try_equip_item(pid, data.get("equipment_id"))
+        elif msg_type == "unequip_item":
+            self._try_unequip_item(pid, data.get("slot"))
+        elif msg_type == "drop_equipment":
+            self._try_drop_equipment(pid, data.get("equipment_id"))
+        elif msg_type == "npc_pickup_equipment":
+            self._try_npc_pickup_equipment(pid, data.get("npc_id"), data.get("item_id"))
+
+        elif msg_type == "give_npc_equipment":
+            self._try_give_npc_equipment(pid, data.get("npc_id"), data.get("equipment_id"))
+        elif msg_type == "take_npc_equipment":
+            self._try_take_npc_equipment(pid, data.get("npc_id"), data.get("slot"))
+
+        elif msg_type == "carry_npc":
+            self._try_carry_npc(pid, data.get("owner_id"), data.get("npc_id"))
+        elif msg_type == "carry_own_npc":
+            self._try_carry_npc(pid, pid, data.get("npc_id"))
+        elif msg_type == "carry_player":
+            self._try_carry_player(pid, data.get("target_id"))
+        elif msg_type == "drop_carried":
+            self._drop_carried(pid)
 
         elif msg_type == "sync_npcs":
             npcs = data.get("npcs", {})
@@ -932,6 +1012,14 @@ class GameState:
             actor["feathers"] = actor.get("feathers", 0) + int(value)
         elif field == "blastLevel":
             actor["blastLevel"] = max(0, actor.get("blastLevel", 0) + int(value))
+        elif field == "xp_multiplier_set":
+            scope = str(data.get("scope", "") or "")
+            if scope in self.xp_multipliers:
+                try:
+                    new_value = float(data.get("multiplier", value))
+                except (TypeError, ValueError):
+                    new_value = self.xp_multipliers[scope]
+                self.xp_multipliers[scope] = max(0.0, min(100.0, round(new_value, 2)))
         elif field.startswith("inv:"):
             # Inventory items: field = "inv:raw_copper", etc.
             item_id = field[4:]
@@ -996,7 +1084,7 @@ class GameState:
         return max(0.15, KI_BLAST_COOLDOWN - bonus * 0.05)
 
     def _grant_xp(self, entity, amount):
-        xp = max(0, int(amount or 0))
+        xp = self._scale_xp_gain(entity, amount)
         if xp <= 0 or not entity:
             return False
         entity["xp"] = int(entity.get("xp", 0)) + xp
@@ -1031,7 +1119,7 @@ class GameState:
         entity["ki"] = min(current_ki, current_max)
 
     def _grant_ki_skill_xp(self, entity, amount):
-        xp = max(0, int(amount or 0))
+        xp = self._scale_xp_gain(entity, amount)
         if xp <= 0 or not entity:
             return False
         entity["kiSkillXp"] = int(entity.get("kiSkillXp", 0)) + xp
@@ -1043,6 +1131,22 @@ class GameState:
             entity["kiSkillLevel"] = int(entity.get("kiSkillLevel", 1)) + 1
             leveled = True
         return leveled
+
+    def _xp_scope_for_entity(self, entity):
+        if not entity:
+            return "player"
+        owner_id = entity.get("owner")
+        if owner_id:
+            return "ai_npc" if owner_id == AI_RIVAL_PID else "npc"
+        return "ai_player" if entity.get("id") == AI_RIVAL_PID else "player"
+
+    def _scale_xp_gain(self, entity, amount):
+        base = max(0.0, float(amount or 0))
+        if base <= 0 or not entity:
+            return 0
+        scope = self._xp_scope_for_entity(entity)
+        mult = float(self.xp_multipliers.get(scope, 1.0) or 0.0)
+        return max(0, int(round(base * max(0.0, mult))))
 
     # ── Barrier ────────────────────────────────────────────────────────────────
 
@@ -1165,7 +1269,7 @@ class GameState:
             "stones": 0,
             "crystals": 0,
             "ki_blast_bonuses": {s: 0 for s in CRYSTAL_UPGRADE_STATS},
-            "ki_moves": [],
+            "ki_moves": list(DEFAULT_KI_MOVES),
             "blastLevel": 0,
             "kiSkillLevel": 1,
             "kiSkillXp": 0,
@@ -1177,6 +1281,7 @@ class GameState:
             "inf_ki": False,
             "map": p.get("map", "level_01"),
         }
+        self._ensure_default_ki_moves(npc_state)
         p.setdefault("npcs", {})[npc_id] = npc_state
         p.setdefault("npc_ids", []).append(npc_id)
         print(f"[game_state] {pid} built NPC {npc_id} at ({nx:.0f}, {ny:.0f})")
@@ -1199,9 +1304,9 @@ class GameState:
             if existing:
                 # Preserve server-authoritative fields
                 for field in ("maxHp", "str", "def", "level", "xp", "maxLogs", "ki", "maxKi", "blastLevel",
-                             "stones", "crystals", "ki_blast_bonuses", "inf_ki",
+                             "stones", "crystals", "ki_blast_bonuses", "ki_moves", "inf_ki",
                              "kiSkillLevel", "kiSkillXp", "barrier_proc_until", "barrier_proc_facing",
-                             "inventory"):
+                             "inventory", "equipment"):
                     if field in existing:
                         npc_data[field] = existing[field]
                 if existing.get("has_ki_blast"):
@@ -1219,6 +1324,7 @@ class GameState:
                 npc_data["knocked_out"] = True
                 npc_data["knocked_until"] = existing.get("knocked_until")
                 npc_data["hp"] = existing.get("hp", 0)
+            self._ensure_default_ki_moves(npc_data)
             self._ensure_level_based_ki(npc_data)
             npc_data["owner"] = pid
             p.setdefault("npcs", {})[npc_id] = npc_data
@@ -1251,12 +1357,13 @@ class GameState:
         except (TypeError, ValueError):
             dummy_hp = 0
         dmg = max(1, npc_power + random.randint(0, max(1, npc_power // 2)))
-        dummy["hp"] = max(0, dummy_hp - dmg)
+        if not dummy.get("_etrainer"):
+            dummy["hp"] = max(0, dummy_hp - dmg)
         if dummy.get("owner") and dummy.get("owner") != owner_pid:
             npc_name = npc_state.get("name", npc_id)
             self._queue_ai_alert(dummy.get("owner"), f"{owner_pid}'s NPC {npc_name} hit my training dummy.", f"{owner_pid}'s NPC is hitting my dummy.", source_pid=owner_pid, action="hit_my_dummy")
         self._grant_xp(npc_state, 5)
-        if dummy["hp"] <= 0:
+        if dummy["hp"] <= 0 and not dummy.get("_etrainer"):
             if dummy.get("owner") and dummy.get("owner") != owner_pid:
                 npc_name = npc_state.get("name", npc_id)
                 self._queue_ai_alert(dummy.get("owner"), f"{owner_pid}'s NPC {npc_name} destroyed my training dummy.", f"{owner_pid}'s NPC broke my dummy.", source_pid=owner_pid, action="hit_my_dummy")
@@ -1345,7 +1452,7 @@ class GameState:
 
         if npc_state["hp"] <= 0:
             self._queue_ai_alert(target_owner_pid, f"{attacker_pid} knocked out my NPC {npc_name}.", f"You dropped {npc_name}.", source_pid=attacker_pid, action="kill_or_drop_my_npc")
-            self._knock_out_npc(npc_state)
+            self._knock_out_npc(npc_state, attacker_pid=attacker_pid)
 
     def _npc_attack_player(self, owner_pid, target_pid, npc_str, npc_id):
         """An NPC (owned by owner_pid) attacks a player."""
@@ -1419,7 +1526,7 @@ class GameState:
 
         if npc_state["hp"] <= 0:
             self._queue_ai_alert(target_owner_pid, f"{attacker_name} knocked out my NPC {npc_name}.", f"{attacker_name} dropped {npc_name}.", source_pid=owner_pid, action="kill_or_drop_my_npc")
-            self._knock_out_npc(npc_state)
+            self._knock_out_npc(npc_state, attacker_pid=owner_pid)
 
     def _npc_steal_logs(self, owner_pid, attacker_npc_id, target_owner_pid, target_npc_id, npc_str, steal_amount):
         """An NPC smacks another player's NPC and steals logs from it."""
@@ -1466,7 +1573,7 @@ class GameState:
             self._queue_ai_alert(target_owner_pid, f"My NPC {npc_name} was jumped and lost {stolen} logs.", f"They robbed {npc_name}.", source_pid=owner_pid, action="attack_my_npc")
 
         if npc_state["hp"] <= 0:
-            self._knock_out_npc(npc_state)
+            self._knock_out_npc(npc_state, attacker_pid=owner_pid)
 
     # ── Ki Blast Combat ────────────────────────────────────────────────────────
 
@@ -1537,6 +1644,24 @@ class GameState:
             "facing": actor.get("facing", "down"),
         })
 
+    def _queue_absorb_fx(self, actor, target, owner_pid=None, npc_id=None):
+        if not actor or not target:
+            return
+        start_x = float(actor.get("x", 0))
+        start_y = float(actor.get("y", 0)) - TILE_SIZE * 0.4
+        impact_x = float(target.get("x", start_x))
+        impact_y = float(target.get("y", start_y)) - TILE_SIZE * 0.4
+        self.fx_events.append({
+            "kind": "absorb",
+            "owner_pid": owner_pid,
+            "npc_id": npc_id,
+            "start_x": start_x,
+            "start_y": start_y,
+            "impact_x": impact_x,
+            "impact_y": impact_y,
+            "duration_ms": int(ABSORB_DURATION * 1000),
+        })
+
     def _try_ki_spend(self, entity, cost):
         """Deduct ki from entity if enough. Returns True on success."""
         if entity.get("inf_ki"):
@@ -1551,6 +1676,92 @@ class GameState:
         entity["blastLevel"] = entity.get("blastLevel", 0) + 1
         self._grant_ki_skill_xp(entity, 1)
         return True
+
+    def _get_actor_for_absorb(self, actor_pid, actor_npc_id=None):
+        if actor_npc_id:
+            owner = self.players.get(actor_pid)
+            return owner.get("npcs", {}).get(actor_npc_id) if owner else None
+        return self.players.get(actor_pid)
+
+    def _start_player_absorb(self, attacker_pid, target_owner_pid, target_npc_id):
+        attacker = self.players.get(attacker_pid)
+        if not attacker or attacker.get("dead") or attacker.get("knocked_out"):
+            return
+        self._ensure_default_ki_moves(attacker)
+        if "absorb" not in attacker.get("ki_moves", []):
+            return
+        self._start_absorb(attacker_pid, None, target_owner_pid, target_npc_id)
+
+    def _start_npc_absorb(self, owner_pid, npc_id, target_owner_pid, target_npc_id):
+        owner = self.players.get(owner_pid)
+        npc_state = owner.get("npcs", {}).get(npc_id) if owner else None
+        if not npc_state or npc_state.get("dead") or npc_state.get("knocked_out"):
+            return
+        self._ensure_default_ki_moves(npc_state)
+        if "absorb" not in npc_state.get("ki_moves", []):
+            return
+        self._start_absorb(owner_pid, npc_id, target_owner_pid, target_npc_id)
+
+    def _start_absorb(self, actor_pid, actor_npc_id, target_owner_pid, target_npc_id):
+        actor = self._get_actor_for_absorb(actor_pid, actor_npc_id)
+        target_owner = self.players.get(target_owner_pid)
+        target = target_owner.get("npcs", {}).get(target_npc_id) if target_owner else None
+        if not actor or not target:
+            return
+        if target.get("dead") or not target.get("knocked_out"):
+            return
+        if actor.get("map", "level_01") != target.get("map", "level_01"):
+            return
+        if dist(actor.get("x", 0), actor.get("y", 0), target.get("x", 0), target.get("y", 0)) > self._get_blast_range(actor):
+            return
+        cooldown_key = f"absorb_{target_owner_pid}_{target_npc_id}"
+        now = time.time()
+        last = actor.get("last_hit_by_player", {}).get(cooldown_key, 0)
+        if now - last < ABSORB_DURATION:
+            return
+        cost, _dmg = self._calc_blast_for_actor(actor)
+        if not self._try_ki_spend(actor, cost):
+            return
+        actor.setdefault("last_hit_by_player", {})[cooldown_key] = now
+        self._queue_absorb_fx(actor, target, owner_pid=actor_pid, npc_id=actor_npc_id)
+        self.pending_absorbs.append({
+            "resolve_at": now + ABSORB_DURATION,
+            "actor_pid": actor_pid,
+            "actor_npc_id": actor_npc_id,
+            "target_owner_pid": target_owner_pid,
+            "target_npc_id": target_npc_id,
+        })
+
+    def _resolve_pending_absorb(self, absorb):
+        actor = self._get_actor_for_absorb(absorb.get("actor_pid"), absorb.get("actor_npc_id"))
+        target_owner = self.players.get(absorb.get("target_owner_pid"))
+        target = target_owner.get("npcs", {}).get(absorb.get("target_npc_id")) if target_owner else None
+        if not actor or not target:
+            return
+        if actor.get("dead") or actor.get("knocked_out"):
+            return
+        if target.get("dead") or not target.get("knocked_out"):
+            return
+        if actor.get("map", "level_01") != target.get("map", "level_01"):
+            return
+        if dist(actor.get("x", 0), actor.get("y", 0), target.get("x", 0), target.get("y", 0)) > self._get_blast_range(actor):
+            return
+
+        str_gain = max(1, int(target.get("str", 1) or 1) // 2)
+        def_gain = max(1, int(target.get("def", 1) or 1) // 2)
+        ki_gain = max(1, int(target.get("kiSkillLevel", 1) or 1) // 2)
+        actor["str"] = int(actor.get("str", 1) or 1) + str_gain
+        actor["def"] = int(actor.get("def", 1) or 1) + def_gain
+        actor["kiSkillLevel"] = int(actor.get("kiSkillLevel", 1) or 1) + ki_gain
+        actor["kiSkillXp"] = min(int(actor.get("kiSkillXp", 0) or 0), max(0, actor["kiSkillLevel"] * 20 - 1))
+
+        target["hp"] = 0
+        target["dead"] = True
+        target["knocked_out"] = False
+        target["knocked_until"] = None
+        target["_task"] = "dead"
+        target.pop("_move_target", None)
+        target.pop("_on_arrive", None)
 
     def _ki_blast_player(self, attacker_pid, target_pid, blast_mode=""):
         """Player ki-blasts another player."""
@@ -1638,7 +1849,7 @@ class GameState:
 
         if npc_state["hp"] <= 0:
             self._queue_ai_alert(target_owner_pid, f"{attacker_pid} knocked out my NPC {npc_name} with a ki blast.", f"{attacker_pid} blasted {npc_name} down.", source_pid=attacker_pid, action="kill_or_drop_my_npc")
-            self._knock_out_npc(npc_state)
+            self._knock_out_npc(npc_state, attacker_pid=attacker_pid)
 
     def _ki_blast_dummy(self, pid, dummy_id, blast_mode=""):
         """Player ki-blasts a training dummy."""
@@ -1822,7 +2033,7 @@ class GameState:
 
         if npc_state["hp"] <= 0:
             self._queue_ai_alert(target_owner_pid, f"{attacker_name} knocked out my NPC {npc_name} with a ki blast.", f"{attacker_name} blasted {npc_name} down.", source_pid=owner_pid, action="kill_or_drop_my_npc")
-            self._knock_out_npc(npc_state)
+            self._knock_out_npc(npc_state, attacker_pid=owner_pid)
 
     # ── Knockout / Respawn ─────────────────────────────────────────────────────
 
@@ -1865,14 +2076,25 @@ class GameState:
         self._drop_player_resource(target, "stones", "Stone")
         self._drop_player_resource(target, "crystals", "Crystal")
 
-    def _knock_out_npc(self, npc_state):
-        npc_state["dead"] = True
+    def _knock_out_npc(self, npc_state, attacker_pid=None):
+        """Defeat an NPC. If the attacker's combat_mode is 'ko', knock out instead of kill."""
+        attacker = self.players.get(attacker_pid) if attacker_pid else None
+        mode = attacker.get("combat_mode", "kill") if attacker else "kill"
+
         npc_state["hp"] = 0
-        npc_state["knocked_out"] = False
-        npc_state["knocked_until"] = None
-        npc_state["_task"] = "dead"
         npc_state.pop("_move_target", None)
         npc_state.pop("_on_arrive", None)
+
+        if mode == "ko":
+            npc_state["dead"] = False
+            npc_state["knocked_out"] = True
+            npc_state["knocked_until"] = time.time() + self._knockout_duration()
+            npc_state["_task"] = None
+        else:
+            npc_state["dead"] = True
+            npc_state["knocked_out"] = False
+            npc_state["knocked_until"] = None
+            npc_state["_task"] = "dead"
 
     def _kill_player(self, target, killer=None):
         """Handle player death — drop all logs as ground items."""
@@ -2116,7 +2338,13 @@ class GameState:
         npc_inv = npc_state.setdefault("inventory", {})
         for drop in wo_def.drops:
             amount = random.randint(drop.min, drop.max)
-            npc_inv[drop.resource] = npc_inv.get(drop.resource, 0) + amount
+            res = str(drop.resource or "").lower()
+            if res in ("stone", "stones"):
+                npc_state["stones"] = int(npc_state.get("stones", 0) or 0) + amount
+            elif res in ("crystal", "crystals"):
+                npc_state["crystals"] = int(npc_state.get("crystals", 0) or 0) + amount
+            else:
+                npc_inv[drop.resource] = npc_inv.get(drop.resource, 0) + amount
         if wo["hp"] <= 0:
             wo["depleted"] = True
             respawn_secs = random.uniform(wo_def.respawn_min, wo_def.respawn_max)
@@ -2160,6 +2388,61 @@ class GameState:
         stored[resource] = stored.get(resource, 0) + transfer
         print(f"[game_state] NPC {npc_id} deposited {transfer}x {resource} into {building_id}")
 
+    # ── Carry System ────────────────────────────────────────────────────────────
+
+    def _try_carry_npc(self, pid, owner_id, npc_id):
+        """Player picks up a knocked-out NPC."""
+        p = self.players.get(pid)
+        if not p or p.get("dead") or p.get("knocked_out"):
+            return
+        if p.get("_carrying"):
+            return  # already carrying something
+        owner = self.players.get(owner_id)
+        if not owner:
+            return
+        npc = owner.get("npcs", {}).get(npc_id)
+        if not npc or not npc.get("knocked_out"):
+            return
+        # Range check
+        if dist(p["x"], p["y"], npc["x"], npc["y"]) > TILE_SIZE * 2:
+            return
+        p["_carrying"] = {"type": "npc", "owner_id": owner_id, "npc_id": npc_id}
+        npc["carried_by"] = pid
+
+    def _try_carry_player(self, pid, target_id):
+        """Player picks up a knocked-out player."""
+        p = self.players.get(pid)
+        if not p or p.get("dead") or p.get("knocked_out"):
+            return
+        if p.get("_carrying"):
+            return
+        target = self.players.get(target_id)
+        if not target or not target.get("knocked_out"):
+            return
+        if dist(p["x"], p["y"], target["x"], target["y"]) > TILE_SIZE * 2:
+            return
+        p["_carrying"] = {"type": "player", "target_id": target_id}
+        target["carried_by"] = pid
+
+    def _drop_carried(self, pid):
+        """Drop whatever the player is carrying."""
+        p = self.players.get(pid)
+        if not p:
+            return
+        carrying = p.pop("_carrying", None)
+        if not carrying:
+            return
+        if carrying["type"] == "npc":
+            owner = self.players.get(carrying["owner_id"])
+            if owner:
+                npc = owner.get("npcs", {}).get(carrying["npc_id"])
+                if npc:
+                    npc.pop("carried_by", None)
+        elif carrying["type"] == "player":
+            target = self.players.get(carrying["target_id"])
+            if target:
+                target.pop("carried_by", None)
+
     def _try_craft_equipment(self, pid, eq_id):
         """Attempt to craft and equip a piece of equipment at an anvil."""
         p = self.players.get(pid)
@@ -2185,24 +2468,212 @@ class GameState:
             self.fx_events.append({"type": "chat_hint", "pid": pid,
                                    "text": f"Need level {eq_def.recipe.required_level} to craft {eq_def.label}."})
             return
-        # Ingredient check
+        # Ingredient check — resources may be top-level (logs, stones) or in inventory
+        top_level = {"logs", "stones", "crystals", "copper", "meat", "feathers", "vegetables", "seeds"}
         for resource, needed in eq_def.recipe.ingredients.items():
-            if p.get(resource, 0) < needed:
+            if resource in top_level:
+                have = p.get(resource, 0)
+            else:
+                have = p.get("inventory", {}).get(resource, 0)
+            if have < needed:
                 self.fx_events.append({"type": "chat_hint", "pid": pid,
-                                       "text": f"Not enough {resource} (need {needed})."})
+                                       "text": f"Not enough {resource} (need {needed}, have {have})."})
                 return
         # Deduct ingredients
         for resource, needed in eq_def.recipe.ingredients.items():
-            p[resource] = p.get(resource, 0) - needed
-        # Equip
+            if resource in top_level:
+                p[resource] = p.get(resource, 0) - needed
+            else:
+                inv = p.setdefault("inventory", {})
+                inv[resource] = inv.get(resource, 0) - needed
+        # Add to inventory (not auto-equip)
+        inv = p.setdefault("inventory", {})
+        inv[eq_id] = inv.get(eq_id, 0) + 1
+        self.fx_events.append({"type": "chat_hint", "pid": pid,
+                               "text": f"Crafted {eq_def.label}! (added to inventory)"})
+
+    # ── Equipment inventory ────────────────────────────────────────────────────
+
+    def _try_equip_item(self, pid, eq_id):
+        """Equip an equipment item from player inventory."""
+        p = self.players.get(pid)
+        if not p or not eq_id or p.get("dead"):
+            return
+        eq_def = asset_registry.get_equipment(eq_id)
+        if not eq_def:
+            return
+        inv = p.get("inventory", {})
+        if inv.get(eq_id, 0) < 1:
+            return
+        # If something is already in that slot, swap it back to inventory
+        old_eq = p["equipment"].get(eq_def.slot)
+        if old_eq:
+            # Remove old equipment stat bonuses
+            old_def = asset_registry.get_equipment(old_eq)
+            if old_def and old_def.stats.hp_bonus > 0:
+                p["maxHp"] = max(1, p.get("maxHp", 20) - old_def.stats.hp_bonus)
+                p["hp"] = min(p["hp"], p["maxHp"])
+            inv[old_eq] = inv.get(old_eq, 0) + 1
+        # Equip new item
+        inv[eq_id] = inv.get(eq_id, 0) - 1
+        if inv[eq_id] <= 0:
+            del inv[eq_id]
         p["equipment"][eq_def.slot] = eq_id
         # Apply hp_bonus
-        hp_bonus = eq_def.stats.hp_bonus
-        if hp_bonus > 0:
-            p["maxHp"] = p.get("maxHp", 20) + hp_bonus
-            p["hp"] = min(p["hp"] + hp_bonus, p["maxHp"])
+        if eq_def.stats.hp_bonus > 0:
+            p["maxHp"] = p.get("maxHp", 20) + eq_def.stats.hp_bonus
+            p["hp"] = min(p["hp"] + eq_def.stats.hp_bonus, p["maxHp"])
         self.fx_events.append({"type": "chat_hint", "pid": pid,
-                               "text": f"Crafted {eq_def.label}!"})
+                               "text": f"Equipped {eq_def.label}."})
+
+    def _try_unequip_item(self, pid, slot):
+        """Unequip an item from a slot back to inventory."""
+        p = self.players.get(pid)
+        if not p or not slot or p.get("dead"):
+            return
+        eq_id = p["equipment"].get(slot)
+        if not eq_id:
+            return
+        eq_def = asset_registry.get_equipment(eq_id)
+        # Remove stat bonuses
+        if eq_def and eq_def.stats.hp_bonus > 0:
+            p["maxHp"] = max(1, p.get("maxHp", 20) - eq_def.stats.hp_bonus)
+            p["hp"] = min(p["hp"], p["maxHp"])
+        del p["equipment"][slot]
+        inv = p.setdefault("inventory", {})
+        inv[eq_id] = inv.get(eq_id, 0) + 1
+        label = eq_def.label if eq_def else eq_id
+        self.fx_events.append({"type": "chat_hint", "pid": pid,
+                               "text": f"Unequipped {label}."})
+
+    def _try_drop_equipment(self, pid, eq_id):
+        """Drop an equipment item from inventory onto the ground."""
+        p = self.players.get(pid)
+        if not p or not eq_id or p.get("dead"):
+            return
+        inv = p.get("inventory", {})
+        if inv.get(eq_id, 0) < 1:
+            return
+        inv[eq_id] = inv.get(eq_id, 0) - 1
+        if inv[eq_id] <= 0:
+            del inv[eq_id]
+        col = int(p["x"] // TILE_SIZE)
+        row = int(p["y"] // TILE_SIZE)
+        tx, ty = tile_pos(col, row)
+        item_id = _gen_item_id()
+        self.ground_items.append({
+            "id": item_id,
+            "x": tx, "y": ty,
+            "resource": eq_id,
+            "amount": 1,
+            "_placed": True,
+            "_equipment": True,
+            "map": p.get("map", "level_01"),
+        })
+        eq_def = asset_registry.get_equipment(eq_id)
+        label = eq_def.label if eq_def else eq_id
+        self.fx_events.append({"type": "chat_hint", "pid": pid,
+                               "text": f"Dropped {label}."})
+
+    def _try_npc_pickup_equipment(self, pid, npc_id, item_id):
+        """Have an owned NPC pick up a dropped equipment item and equip it."""
+        p = self.players.get(pid)
+        if not p or not npc_id or not item_id:
+            return
+        npc = p.get("npcs", {}).get(npc_id)
+        if not npc or npc.get("dead") or npc.get("knocked_out"):
+            return
+        # Find the ground item
+        gi = None
+        for item in self.ground_items:
+            if item["id"] == item_id and item.get("_equipment"):
+                gi = item
+                break
+        if not gi:
+            return
+        # Range check
+        if dist(npc["x"], npc["y"], gi["x"], gi["y"]) > TILE_SIZE * 2.5:
+            self.fx_events.append({"type": "chat_hint", "pid": pid,
+                                   "text": "NPC is too far from the item."})
+            return
+        eq_id = gi["resource"]
+        eq_def = asset_registry.get_equipment(eq_id)
+        if not eq_def:
+            return
+        # Remove ground item
+        self.ground_items = [i for i in self.ground_items if i["id"] != item_id]
+        # Equip on NPC (swap old if needed)
+        npc_eq = npc.setdefault("equipment", {})
+        old_eq = npc_eq.get(eq_def.slot)
+        if old_eq:
+            # Drop old equipment on ground
+            old_def = asset_registry.get_equipment(old_eq)
+            col = int(npc["x"] // TILE_SIZE)
+            row = int(npc["y"] // TILE_SIZE)
+            tx, ty = tile_pos(col, row)
+            self.ground_items.append({
+                "id": _gen_item_id(),
+                "x": tx, "y": ty,
+                "resource": old_eq,
+                "amount": 1,
+                "_placed": True,
+                "_equipment": True,
+                "map": p.get("map", "level_01"),
+            })
+        npc_eq[eq_def.slot] = eq_id
+        label = eq_def.label if eq_def else eq_id
+        self.fx_events.append({"type": "chat_hint", "pid": pid,
+                               "text": f"NPC equipped {label}."})
+
+    def _try_give_npc_equipment(self, pid, npc_id, eq_id):
+        """Player gives equipment from their inventory to an owned NPC."""
+        p = self.players.get(pid)
+        if not p or not npc_id or not eq_id or p.get("dead"):
+            return
+        npc = p.get("npcs", {}).get(npc_id)
+        if not npc or npc.get("dead") or npc.get("knocked_out"):
+            return
+        inv = p.get("inventory", {})
+        if inv.get(eq_id, 0) < 1:
+            self.fx_events.append({"type": "chat_hint", "pid": pid,
+                                   "text": "You don't have that item."})
+            return
+        eq_def = asset_registry.get_equipment(eq_id)
+        if not eq_def:
+            return
+        # Remove from player inventory
+        inv[eq_id] = inv.get(eq_id, 0) - 1
+        if inv[eq_id] <= 0:
+            del inv[eq_id]
+        # Equip on NPC (swap old to player inventory)
+        npc_eq = npc.setdefault("equipment", {})
+        old_eq = npc_eq.get(eq_def.slot)
+        if old_eq:
+            inv[old_eq] = inv.get(old_eq, 0) + 1
+        npc_eq[eq_def.slot] = eq_id
+        label = eq_def.label if eq_def else eq_id
+        self.fx_events.append({"type": "chat_hint", "pid": pid,
+                               "text": f"Gave {label} to NPC."})
+
+    def _try_take_npc_equipment(self, pid, npc_id, slot):
+        """Player takes equipment back from an owned NPC."""
+        p = self.players.get(pid)
+        if not p or not npc_id or not slot or p.get("dead"):
+            return
+        npc = p.get("npcs", {}).get(npc_id)
+        if not npc:
+            return
+        npc_eq = npc.get("equipment", {})
+        eq_id = npc_eq.get(slot)
+        if not eq_id:
+            return
+        del npc_eq[slot]
+        inv = p.setdefault("inventory", {})
+        inv[eq_id] = inv.get(eq_id, 0) + 1
+        eq_def = asset_registry.get_equipment(eq_id)
+        label = eq_def.label if eq_def else eq_id
+        self.fx_events.append({"type": "chat_hint", "pid": pid,
+                               "text": f"Took {label} from NPC."})
 
     # ── Dummy ──────────────────────────────────────────────────────────────────
 
@@ -2238,7 +2709,8 @@ class GameState:
         # Damage
         s = p["str"]
         dmg = max(1, s + random.randint(0, max(1, s // 2)))
-        dummy["hp"] = max(0, dummy["hp"] - dmg)
+        if not dummy.get("_etrainer"):
+            dummy["hp"] = max(0, dummy["hp"] - dmg)
 
         # Punch anim
         p["punching"] = True
@@ -2256,7 +2728,7 @@ class GameState:
             p["str"] += 1
             p["def"] += 1
 
-        if dummy["hp"] <= 0:
+        if dummy["hp"] <= 0 and not dummy.get("_etrainer"):
             dummy["dead"] = True
 
     def _try_build_dummy(self, pid, logs_used):
@@ -2442,10 +2914,11 @@ class GameState:
     # ── Anvil / Refining ───────────────────────────────────────────────────────
 
     def _place_building(self, pid, data):
-        """Place a building (conveyor, crate, furnace, log_cutter, track) at a grid tile."""
+        """Place a building (conveyor, crate, furnace, log_cutter, track, gate, fence) at a grid tile."""
         global _next_building_id
         kind = data.get("kind")
-        if kind not in ("conveyor", "crate", "furnace", "log_cutter", "track"):
+        if kind not in ("conveyor", "crate", "furnace", "log_cutter", "etrainer", "track", "gate", "fence"):
+            print(f"[game_state] _place_building rejected unknown kind={kind}")
             return
         col = data.get("col")
         row = data.get("row")
@@ -2454,11 +2927,22 @@ class GameState:
         p = self.players.get(pid)
         if not p:
             return
+
+        # Gate/fence cost logs
+        if kind == "gate":
+            if p.get("logs", 0) < GATE_LOG_COST:
+                return
+            p["logs"] -= GATE_LOG_COST
+        elif kind == "fence":
+            if p.get("logs", 0) < FENCE_LOG_COST:
+                return
+            p["logs"] -= FENCE_LOG_COST
+
         player_map = p.get("map", "level_01")
 
         _next_building_id += 1
         bid = f"bld_{_next_building_id}"
-        self.buildings[bid] = {
+        bld = {
             "id": bid,
             "kind": kind,
             "col": int(col),
@@ -2469,6 +2953,78 @@ class GameState:
             "label": "",
             "stored": {},
         }
+        # Fences have HP
+        if kind == "fence":
+            bld["hp"] = FENCE_BASE_HP
+            bld["maxHp"] = FENCE_BASE_HP
+        # Etrainer: also create a dummy entry with infinite HP
+        if kind == "etrainer":
+            dx, dy = tile_pos(int(col), int(row))
+            self.dummies[bid] = {
+                "id": bid,
+                "x": dx, "y": dy,
+                "maxHp": 999999,
+                "hp": 999999,
+                "owner": pid,
+                "dead": False,
+                "last_hit_by": {},
+                "_etrainer": True,
+                "map": player_map,
+            }
+        self.buildings[bid] = bld
+        print(f"[game_state] {pid} placed {kind} at ({col},{row}) -> {bid}")
+
+    def _is_barrier_tile(self, x, y, pid):
+        """Check if position (x,y) overlaps a fence or a gate not owned by pid."""
+        col = int(x // TILE_SIZE)
+        row = int(y // TILE_SIZE)
+        player_map = self.players.get(pid, {}).get("map", "level_01")
+        for b in self.buildings.values():
+            if b["kind"] not in ("fence", "gate"):
+                continue
+            if b.get("map", "level_01") != player_map:
+                continue
+            if b["col"] != col or b["row"] != row:
+                continue
+            # Gates let owner through
+            if b["kind"] == "gate" and b.get("owner") == pid:
+                continue
+            return True
+        return False
+
+    def _try_attack_fence(self, pid, bid):
+        """Player punches a fence. STR-based damage."""
+        p = self.players.get(pid)
+        if not p or p.get("dead"):
+            return
+        if not bid or bid not in self.buildings:
+            return
+        bld = self.buildings[bid]
+        if bld.get("kind") != "fence":
+            return
+        # Must be on same map
+        if p.get("map", "level_01") != bld.get("map", "level_01"):
+            return
+        # Range check
+        bx, by = tile_pos(bld["col"], bld["row"])
+        d = dist(p["x"], p["y"], bx, by)
+        if d > TILE_SIZE * 2.0:
+            return
+        # Cooldown — reuse punch cooldown
+        now = time.time()
+        if now - p.get("_last_fence_hit", 0) < 0.5:
+            return
+        p["_last_fence_hit"] = now
+        # Punch anim
+        p["punching"] = True
+        p["punch_until"] = now + 0.3
+        # Damage = STR + random(0..STR/2)
+        s = max(1, int(p.get("str", 1)))
+        dmg = s + random.randint(0, max(1, s // 2))
+        bld["hp"] = max(0, bld.get("hp", FENCE_BASE_HP) - dmg)
+        # Destroy fence if HP <= 0
+        if bld["hp"] <= 0:
+            del self.buildings[bid]
 
     def _try_build_anvil(self, pid):
         """Build an anvil costing 5 stones, placed 2 tiles to the right of the player."""
@@ -2729,6 +3285,17 @@ class GameState:
                     return
                 d = dist(p["x"], p["y"], item["x"], item["y"])
                 if d > TILE_SIZE * 1.5:
+                    return
+                # Equipment items go to inventory
+                if item.get("_equipment"):
+                    eq_id = item["resource"]
+                    inv = p.setdefault("inventory", {})
+                    inv[eq_id] = inv.get(eq_id, 0) + 1
+                    self.ground_items.remove(item)
+                    eq_def = asset_registry.get_equipment(eq_id)
+                    label = eq_def.label if eq_def else eq_id
+                    self.fx_events.append({"type": "chat_hint", "pid": pid,
+                                           "text": f"Picked up {label}."})
                     return
                 if item["resource"] == "Stone":
                     p["stones"] = p.get("stones", 0) + 1
@@ -3177,6 +3744,12 @@ class GameState:
                 p["knocked_out"] = False
                 p["knocked_until"] = None
                 p["hp"] = max(1, p["maxHp"] // 2)
+                # Auto-drop if being carried
+                if p.get("carried_by"):
+                    carrier = self.players.get(p["carried_by"])
+                    if carrier:
+                        carrier.pop("_carrying", None)
+                    p.pop("carried_by", None)
 
         # Knockout recovery — NPCs
         for owner in self.players.values():
@@ -3185,8 +3758,47 @@ class GameState:
                     npc["knocked_out"] = False
                     npc["knocked_until"] = None
                     npc["hp"] = max(1, npc.get("maxHp", 1) // 2)
+                    # Auto-drop if being carried
+                    if npc.get("carried_by"):
+                        carrier = self.players.get(npc["carried_by"])
+                        if carrier:
+                            carrier.pop("_carrying", None)
+                        npc.pop("carried_by", None)
+
+        # Carry position sync — carried entities follow their carrier
+        for carry_pid, p in self.players.items():
+            carrying = p.get("_carrying")
+            if not carrying:
+                continue
+            if carrying["type"] == "npc":
+                owner = self.players.get(carrying["owner_id"])
+                target = owner.get("npcs", {}).get(carrying["npc_id"]) if owner else None
+            elif carrying["type"] == "player":
+                target = self.players.get(carrying["target_id"])
+            else:
+                target = None
+            if not target:
+                p.pop("_carrying", None)
+                continue
+            # If target woke up, drop them
+            if not target.get("knocked_out"):
+                target.pop("carried_by", None)
+                p.pop("_carrying", None)
+                continue
+            # Move carried entity to carrier position (offset slightly)
+            target["x"] = p["x"]
+            target["y"] = p["y"] - 10
 
         # Ki regen — scales with level.
+        if self.pending_absorbs:
+            remaining_absorbs = []
+            for absorb in self.pending_absorbs:
+                if now >= absorb.get("resolve_at", 0):
+                    self._resolve_pending_absorb(absorb)
+                else:
+                    remaining_absorbs.append(absorb)
+            self.pending_absorbs = remaining_absorbs
+
         KI_REGEN_BASE = 1.0 / 15.0
         KI_REGEN_LEVEL_SCALE = 1.08
 
@@ -3285,7 +3897,7 @@ class GameState:
         # Move players
         world_w = MAP_COLS * TILE_SIZE
         world_h = MAP_ROWS * TILE_SIZE
-        for p in self.players.values():
+        for move_pid, p in self.players.items():
             if p.get("dead") or p.get("knocked_out"):
                 p["vx"] = 0
                 p["vy"] = 0
@@ -3312,6 +3924,15 @@ class GameState:
                     else:
                         new_x = p["x"]
                         new_y = p["y"]
+                # Fence/gate collision with axis sliding
+                if self._is_barrier_tile(new_x, new_y, move_pid):
+                    if not self._is_barrier_tile(new_x, p["y"], move_pid):
+                        new_y = p["y"]
+                    elif not self._is_barrier_tile(p["x"], new_y, move_pid):
+                        new_x = p["x"]
+                    else:
+                        new_x = p["x"]
+                        new_y = p["y"]
                 p["x"] = new_x
                 p["y"] = new_y
                 # Portal check
@@ -3325,7 +3946,7 @@ class GameState:
                     p["vy"] = 0
 
         # Move NPCs with _move_target (server-side NPC movement for AI-owned NPCs)
-        for owner in self.players.values():
+        for npc_owner_pid, owner in self.players.items():
             for npc in owner.get("npcs", {}).values():
                 if npc.get("dead") or npc.get("knocked_out"):
                     continue
@@ -3333,9 +3954,9 @@ class GameState:
                 if not mt:
                     continue
                 tx, ty = mt
-                dx = tx - npc["x"]
-                dy = ty - npc["y"]
-                d = (dx * dx + dy * dy) ** 0.5
+                dx_npc = tx - npc["x"]
+                dy_npc = ty - npc["y"]
+                d = (dx_npc * dx_npc + dy_npc * dy_npc) ** 0.5
                 if d < 20:  # arrival threshold
                     npc["x"] = tx
                     npc["y"] = ty
@@ -3346,8 +3967,19 @@ class GameState:
                         cb()
                 else:
                     speed = NPC_SPEED * dt
-                    npc["x"] += (dx / d) * speed
-                    npc["y"] += (dy / d) * speed
+                    new_nx = npc["x"] + (dx_npc / d) * speed
+                    new_ny = npc["y"] + (dy_npc / d) * speed
+                    # Fence/gate collision for NPCs (owner's gates let them through)
+                    if self._is_barrier_tile(new_nx, new_ny, npc_owner_pid):
+                        if not self._is_barrier_tile(new_nx, npc["y"], npc_owner_pid):
+                            new_ny = npc["y"]
+                        elif not self._is_barrier_tile(npc["x"], new_ny, npc_owner_pid):
+                            new_nx = npc["x"]
+                        else:
+                            new_nx = npc["x"]
+                            new_ny = npc["y"]
+                    npc["x"] = new_nx
+                    npc["y"] = new_ny
                 npc.setdefault("map", "level_01")
                 portal = _check_portal(npc)
                 if portal:

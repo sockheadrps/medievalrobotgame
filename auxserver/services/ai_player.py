@@ -14,7 +14,10 @@ import httpx
 
 from core.config import BASE_DIR
 from services.llm_gateway import chat_completion
-from services.game_state import game, TILE_SIZE, TREE_CHOP_DIST, ROCK_MINE_DIST, PVP_ATTACK_RANGE
+from services.game_state import (
+    game, TILE_SIZE, TREE_CHOP_DIST, ROCK_MINE_DIST, WORLD_OBJ_MINE_DIST,
+    PVP_ATTACK_RANGE, WORLD_OBJECT_INSTANCES,
+)
 from services.prompt_loader import render_prompt
 from services.soul_service import extract_soul_json
 from services.accounts import load_player
@@ -24,10 +27,14 @@ PID = "__ai_rival__"
 THINK_INTERVAL = 10.0  # seconds between brain cycles
 ARRIVAL_THRESHOLD = 20  # px — must be smaller than PICKUP_DIST (28.8px)
 SPAWN_MARGIN = 6  # tiles away from center minimum
+NPC_THREAT_RADIUS_TILES = 5
 MEMORY_FILE = BASE_DIR / "data" / "ai_rival_memory.json"
 DIARY_INTERVAL = 5  # write a diary entry every N think cycles
 MAX_EVENT_LOG = 30  # ring buffer size
 MAX_DIARY = 10  # max diary entries kept
+REFINE_BATCH_SIZE = 100
+TARGET_NPC_COUNT = 5
+EARLY_GAME_NPC_TARGET = 3
 
 VALID_GOALS = {
     "gather_logs", "build_npc", "train_combat", "gather_stones",
@@ -74,7 +81,7 @@ class AIMemory:
             "current_objective": "gather_logs_for_first_npc",
             "objectives": [
                 {"goal": "gather_logs", "target_amount": 10, "status": "in_progress"},
-                {"goal": "build_npc", "target": 1, "status": "pending"},
+                {"goal": "build_npc", "target": EARLY_GAME_NPC_TARGET, "status": "pending"},
                 {"goal": "build_dummy", "target": 1, "status": "pending"},
                 {"goal": "gather_stones", "target_amount": 5, "status": "pending"},
                 {"goal": "build_anvil", "target": 1, "status": "pending"},
@@ -194,8 +201,23 @@ class AIMemory:
             "last_action": existing.get("last_action", ""),
             "notes": list(existing.get("notes", []))[-8:],
         }
+        self._refresh_attitude(rel)
         self.relationships[pid] = rel
         return rel
+
+    def _refresh_attitude(self, rel: dict):
+        if not isinstance(rel, dict):
+            return
+        if (
+            rel.get("attacks_on_me", 0) > 0
+            or rel.get("attacks_on_npcs", 0) > 0
+            or rel.get("knockouts_inflicted", 0) > 0
+            or rel.get("hostile_messages", 0) > 0
+            or rel.get("threat_score", 0) >= 5
+        ):
+            rel["attitude"] = "hostile"
+        elif rel.get("attitude") != "friendly":
+            rel["attitude"] = "neutral"
 
     def log_event(self, text: str):
         """Record a timestamped event."""
@@ -208,6 +230,7 @@ class AIMemory:
         """Update how we feel about a specific player."""
         rel = self._get_rel(pid)
         rel["attitude"] = attitude
+        self._refresh_attitude(rel)
         rel["reason"] = reason or rel.get("reason", "")
         rel["last_seen"] = time.strftime("%H:%M:%S")
         rel["encounter_count"] = rel.get("encounter_count", 0) + 1
@@ -223,6 +246,7 @@ class AIMemory:
             rel["hostile_messages"] = rel.get("hostile_messages", 0) + 1
             rel["threat_score"] = rel.get("threat_score", 0) + 2
             rel["reason"] = rel.get("reason") or "Sent hostile messages."
+        self._refresh_attitude(rel)
         rel.setdefault("notes", []).append(f"msg: {text[:100]}")
         rel["notes"] = rel["notes"][-8:]
 
@@ -247,6 +271,7 @@ class AIMemory:
             rel["attacks_on_npcs"] = rel.get("attacks_on_npcs", 0) + 1
             rel["knockouts_inflicted"] = rel.get("knockouts_inflicted", 0) + 1
             rel["threat_score"] = rel.get("threat_score", 0) + 9
+        self._refresh_attitude(rel)
         rel.setdefault("notes", []).append(f"{action}: {detail[:100]}")
         rel["notes"] = rel["notes"][-8:]
 
@@ -287,6 +312,7 @@ class AIMemory:
         if self.relationships:
             lines = []
             for pid, rel in self.relationships.items():
+                self._refresh_attitude(rel)
                 lines.append(f"- {pid}: {rel['attitude']}"
                              f" (seen {rel.get('encounter_count', 1)}x"
                              f", threat={rel.get('threat_score', 0)}"
@@ -335,6 +361,7 @@ class AIMemory:
         if self.relationships:
             lines = []
             for pid, rel in self.relationships.items():
+                self._refresh_attitude(rel)
                 lines.append(f"- {pid}: {rel['attitude']}"
                              f" (seen {rel.get('encounter_count', 1)}x"
                              f", threat={rel.get('threat_score', 0)}"
@@ -423,6 +450,7 @@ class AIPlayer:
         self._continuous_action = None  # {"type": "mine_rock"|"chop", "target_id": ..., "cooldown": float, "last": 0}
         self._prev_stats = {}     # snapshot for detecting changes
         self._inbox: list[dict] = []  # incoming messages from players
+        self._training_core_ids: list[str] = []
         self.memory = AIMemory()
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -469,7 +497,7 @@ class AIPlayer:
                         "logs": 0, "maxLogs": 10,
                         "stones": 0, "crystals": 0,
                         "ki_blast_bonuses": {s: 0 for s in ("blast_speed", "blast_range", "blast_dmg", "blast_cooldown", "barrier_duration", "barrier_cooldown")},
-                        "ki_moves": [],
+                        "ki_moves": ["absorb"],
                         "blastLevel": 0,
                         "kiSkillLevel": 1,
                         "kiSkillXp": 0,
@@ -543,6 +571,23 @@ class AIPlayer:
         self.start()
         print("[AIPlayer] Full reset complete.")
 
+    def _current_attitude(self) -> str:
+        relationships = self.memory.relationships or {}
+        if relationships:
+            top_rel = max(
+                relationships.values(),
+                key=lambda rel: (
+                    int(rel.get("threat_score", 0) or 0),
+                    int(rel.get("attacks_on_me", 0) or 0) + int(rel.get("attacks_on_npcs", 0) or 0),
+                ),
+            )
+            self.memory._refresh_attitude(top_rel)
+            if top_rel.get("attitude") == "hostile":
+                return "hostile"
+            if top_rel.get("attitude") == "friendly":
+                return "friendly"
+        return self._last_decision.get("attitude", "neutral")
+
     def get_dashboard_state(self) -> dict:
         """Return a snapshot of the AI player's state for the dashboard."""
         p = game.players.get(PID, {})
@@ -567,7 +612,7 @@ class AIPlayer:
                 "identity": self.memory.identity,
                 "strategy": self.memory.strategy,
                 "plan": self.memory.plan,
-                "current_attitude": self._last_decision.get("attitude", "neutral"),
+                "current_attitude": self._current_attitude(),
                 "memory_summary": self.memory.format_for_dashboard(),
                 "relationship_count": len(self.memory.relationships or {}),
                 "has_full_npc_soul": False,
@@ -664,14 +709,6 @@ class AIPlayer:
                     decision["goal"] = "talk"
                 if not decision.get("reason"):
                     decision["reason"] = "Responding to a direct player message."
-            self._last_decision = decision
-
-            goal = decision.get("goal", "explore")
-            reason = decision.get("reason", "")
-            print(f"[AIPlayer] Think #{self._think_count}: goal={goal} reason={reason[:80]}")
-
-            # Log the decision as an event
-            self.memory.log_event(f"Decided: {goal} — {reason[:100]}")
 
             # Update attitude/identity from LLM response
             attitude = decision.get("attitude", "neutral")
@@ -684,6 +721,14 @@ class AIPlayer:
 
             # Execute the decision
             self._execute(decision)
+            self._last_decision = decision
+
+            goal = decision.get("goal", "explore")
+            reason = decision.get("reason", "")
+            print(f"[AIPlayer] Think #{self._think_count}: goal={goal} reason={reason[:80]}")
+
+            # Log the final executed decision after server-side overrides.
+            self.memory.log_event(f"Decided: {goal} — {reason[:100]}")
 
             # Periodic diary: every DIARY_INTERVAL cycles, ask LLM to summarize
             if self._think_count % DIARY_INTERVAL == 0:
@@ -783,6 +828,7 @@ class AIPlayer:
             plan["phase"] = "early_game"
         if crystals >= 3 and len(alive_npcs) >= 3:
             plan["phase"] = "late_game"
+        desired_npc_count = EARLY_GAME_NPC_TARGET if plan["phase"] == "early_game" else TARGET_NPC_COUNT
 
         threats = []
         alliances = []
@@ -794,6 +840,7 @@ class AIPlayer:
         plan["threats"] = threats[:8]
         plan["alliances"] = alliances[:8]
 
+        build_objective = None
         for objective in plan.get("objectives", []):
             goal = objective.get("goal")
             status = objective.get("status", "pending")
@@ -801,8 +848,10 @@ class AIPlayer:
                 target_amount = objective.get("target_amount") or 10
                 objective["status"] = "completed" if logs >= target_amount else ("in_progress" if status != "completed" else status)
             elif goal == "build_npc":
-                target_count = objective.get("target") or 1
+                objective["target"] = desired_npc_count
+                target_count = objective["target"]
                 objective["status"] = "completed" if len(alive_npcs) >= target_count else ("in_progress" if logs >= 10 or len(alive_npcs) > 0 else "pending")
+                build_objective = objective
             elif goal == "build_dummy":
                 target_count = objective.get("target") or 1
                 objective["status"] = "completed" if dummy_count >= target_count else ("in_progress" if len(alive_npcs) > 0 else "pending")
@@ -814,6 +863,13 @@ class AIPlayer:
             elif goal == "refine_crystals":
                 target_amount = objective.get("target") or objective.get("target_amount") or 3
                 objective["status"] = "completed" if crystals >= target_amount else ("in_progress" if anvil_count > 0 else "pending")
+
+        if build_objective is None:
+            plan.setdefault("objectives", []).insert(1, {
+                "goal": "build_npc",
+                "target": desired_npc_count,
+                "status": "completed" if len(alive_npcs) >= desired_npc_count else ("in_progress" if logs >= 10 or len(alive_npcs) > 0 else "pending"),
+            })
 
         current_objective = None
         for objective in plan.get("objectives", []):
@@ -860,6 +916,12 @@ class AIPlayer:
         recent_text = self.memory.get_recent_events_text()
         if recent_text == "Nothing notable happened.":
             return
+        nearest_rock = self._find_nearest_rock()
+        if nearest_rock:
+            rock_line = f"Nearest available rock: id {nearest_rock['id']} at {round(_dist(p['x'], p['y'], nearest_rock['x'], nearest_rock['y']))}px."
+        else:
+            rock_line = "Nearest available rock: none."
+        available_rock_count = self._count_available_rocks(p.get("map", "level_01"))
 
         prompt = (
             "You are an AI player keeping a game diary. "
@@ -879,7 +941,9 @@ class AIPlayer:
             f"Current strategy: {self.memory.strategy or 'none'}\n"
             f"Current plan phase: {(self.memory.plan or {}).get('phase', 'unknown')}\n"
             f"Current objective: {(self.memory.plan or {}).get('current_objective', 'unknown')}\n"
-            f"Plan resource targets: {json.dumps((self.memory.plan or {}).get('resource_targets', {}))}\n\n"
+            f"Plan resource targets: {json.dumps((self.memory.plan or {}).get('resource_targets', {}))}\n"
+            f"Available rock count: {available_rock_count}\n"
+            f"{rock_line}\n\n"
             "Write the diary entry (plain text, no JSON):"
         )
 
@@ -974,16 +1038,34 @@ class AIPlayer:
         nearby_trees.sort(key=lambda t: t["distance"])
         nearby_trees = nearby_trees[:8]
 
-        # Nearby rocks (within 1500px — wider range since rocks are scarcer than trees)
+        # Nearby rocks (spawned rocks + mapmaker world-object rocks)
         nearby_rocks = []
         for r in game.rocks:
             if r.get("mined"):
                 continue
             d = _dist(px, py, r["x"], r["y"])
             if d < 1500:
-                nearby_rocks.append({"id": r["id"], "x": r["x"], "y": r["y"], "distance": round(d)})
+                nearby_rocks.append({"id": r["id"], "type": "rock", "x": r["x"], "y": r["y"], "distance": round(d)})
+        for wo_id, wo in WORLD_OBJECT_INSTANCES.items():
+            if wo.get("depleted") or wo.get("asset_id") != "rock":
+                continue
+            if wo.get("map", "level_01") != p.get("map", "level_01"):
+                continue
+            d = _dist(px, py, wo["x"], wo["y"])
+            if d < 1500:
+                nearby_rocks.append({"id": wo_id, "type": "world_object_rock", "x": wo["x"], "y": wo["y"], "distance": round(d)})
         nearby_rocks.sort(key=lambda r: r["distance"])
         nearby_rocks = nearby_rocks[:6]
+        nearest_global_rock = self._find_nearest_rock()
+        available_rock_count = (
+            sum(1 for r in game.rocks if not r.get("mined"))
+            + sum(
+                1 for wo in WORLD_OBJECT_INSTANCES.values()
+                if not wo.get("depleted")
+                and wo.get("asset_id") == "rock"
+                and wo.get("map", "level_01") == p.get("map", "level_01")
+            )
+        )
 
         # Other players (not self)
         nearby_players = []
@@ -1011,6 +1093,7 @@ class AIPlayer:
 
         tracked_players = []
         for pid, rel in (self.memory.relationships or {}).items():
+            self.memory._refresh_attitude(rel)
             tracked_players.append({
                 "id": pid,
                 "attitude": rel.get("attitude", "neutral"),
@@ -1051,11 +1134,20 @@ class AIPlayer:
             "npcs": npcs,
             "nearby_trees": nearby_trees,
             "nearby_rocks": nearby_rocks,
+            "nearest_global_rock": (
+                {
+                    "id": nearest_global_rock["id"],
+                    "x": nearest_global_rock["x"],
+                    "y": nearest_global_rock["y"],
+                    "distance": round(_dist(px, py, nearest_global_rock["x"], nearest_global_rock["y"])),
+                } if nearest_global_rock else None
+            ),
+            "available_rock_count": available_rock_count,
             "nearby_players": nearby_players,
             "nearby_dummies": nearby_dummies,
             "nearby_anvils": nearby_anvils,
             "tracked_players": tracked_players,
-            "attitude": self._last_decision.get("attitude", "neutral"),
+            "attitude": self._current_attitude(),
             "think_count": self._think_count,
             "last_goal": self._last_decision.get("goal", "none"),
             "plan": json.dumps(self.memory.plan, indent=2),
@@ -1176,6 +1268,7 @@ class AIPlayer:
         my_npcs = state_ctx.get("npcs", [])
         nearby_trees = state_ctx.get("nearby_trees", [])
         nearby_rocks = state_ctx.get("nearby_rocks", [])
+        nearest_global_rock = state_ctx.get("nearest_global_rock")
         nearby_anvils = state_ctx.get("nearby_anvils", [])
 
         # Simple priority: build NPC > gather logs > gather stones > refine > explore
@@ -1198,8 +1291,12 @@ class AIPlayer:
         if nearby_rocks:
             rock = nearby_rocks[0]
             return {**FALLBACK_DECISION, "goal": "gather_stones",
-                    "target": {"type": "rock", "id": str(rock["id"])},
+                    "target": {"type": str(rock.get("type") or "rock"), "id": str(rock["id"])},
                     "reason": "Mine nearest rock."}
+        if nearest_global_rock:
+            return {**FALLBACK_DECISION, "goal": "gather_stones",
+                    "target": {"type": str(nearest_global_rock.get("type") or "rock"), "id": str(nearest_global_rock["id"])},
+                    "reason": "No local rocks; travel to the nearest available rock."}
         return {**FALLBACK_DECISION, "goal": "explore", "reason": "Nothing nearby, exploring."}
 
     # ── Action execution ───────────────────────────────────────────────────────
@@ -1215,20 +1312,31 @@ class AIPlayer:
         ca = self._continuous_action
         if ca:
             same_action = (
-                (goal == "gather_stones" and ca["type"] == "mine_rock") or
+                (goal == "gather_stones" and ca["type"] in ("mine_rock", "mine_world_object_rock")) or
                 (goal == "gather_logs" and ca["type"] == "chop") or
                 (goal == "refine" and ca["type"] == "refine")
             )
             if not same_action:
                 self._continuous_action = None
         current_objective = str((self.memory.plan or {}).get("current_objective", "") or "")
+        plan_phase = str((self.memory.plan or {}).get("phase", "early_game") or "early_game")
+        nearest_global_rock = self._find_nearest_rock()
+        stones_needed = int((self.memory.plan or {}).get("resource_targets", {}).get("stones", 0) or 0)
+        need_more_stones = (
+            stones_needed > 0
+            and p.get("stones", 0) < stones_needed
+            and nearest_global_rock is not None
+        )
+        desired_npc_count = EARLY_GAME_NPC_TARGET if plan_phase == "early_game" else TARGET_NPC_COUNT
 
         # Sanity overrides — catch cases where the LLM ignores obvious next steps
         npc_count = len([n for n in p.get("npcs", {}).values() if not n.get("dead")])
-        if goal == "gather_logs" and p["logs"] >= 10 and npc_count < 3:
+        if p["logs"] >= 10 and npc_count < desired_npc_count and goal not in ("attack_player", "build_anvil"):
             goal = "build_npc"
             decision["goal"] = goal
-            self.memory.log_event("Override: have enough logs, building NPC instead.")
+            self.memory.log_event(
+                f"Override: below NPC target ({npc_count}/{desired_npc_count}) with enough logs, building NPC."
+            )
         elif goal == "gather_logs" and p["logs"] >= 5 and npc_count > 0 and not game.dummies:
             goal = "build_dummy"
             decision["goal"] = goal
@@ -1273,18 +1381,32 @@ class AIPlayer:
             decision["goal"] = goal
             self.memory.log_event("Override: current plan requires logs for a dummy, gathering logs.")
 
-        # Override: plan needs stones but AI is stuck training/exploring with 0 stones
-        # The LLM can't see rocks beyond 600px, but _find_nearest_rock() searches globally
-        stones_needed = (self.memory.plan or {}).get("resource_targets", {}).get("stones", 0)
+        # Override: if the plan currently needs stones and a rock exists anywhere, gather stones
+        # unless a nearby threat is forcing combat.
         if (
-            stones_needed > 0
-            and p.get("stones", 0) < stones_needed
-            and goal in ("train_combat", "explore")
-            and self._find_nearest_rock() is not None
+            need_more_stones
+            and current_objective in ("gather_stones", "build_anvil", "refine_crystals", "build_dummy")
+            and goal not in ("attack_player", "talk")
+            and not self._hostile_player_nearby()
         ):
             goal = "gather_stones"
             decision["goal"] = goal
-            self.memory.log_event(f"Override: plan needs {stones_needed} stones (have {p.get('stones', 0)}), going to find rocks.")
+            decision["target"] = {"type": str(nearest_global_rock.get("type") or "rock"), "id": str(nearest_global_rock["id"])}
+            self.memory.log_event(
+                f"Override: objective {current_objective} still needs stones, heading to rock {nearest_global_rock['id']}."
+            )
+
+        # Override: plan needs stones but AI is stuck training/exploring
+        if (
+            need_more_stones
+            and goal in ("train_combat", "explore")
+        ):
+            goal = "gather_stones"
+            decision["goal"] = goal
+            decision["target"] = {"type": str(nearest_global_rock.get("type") or "rock"), "id": str(nearest_global_rock["id"])}
+            self.memory.log_event(
+                f"Override: plan needs {stones_needed} stones (have {p.get('stones', 0)}), going to rock {nearest_global_rock['id']}."
+            )
 
 
         px, py = p["x"], p["y"]
@@ -1385,6 +1507,7 @@ class AIPlayer:
         px, py = p["x"], p["y"]
 
         rock = None
+        rock_wo = None
         if target and target.get("type") == "rock" and target.get("id") is not None:
             try:
                 rid = target["id"]
@@ -1394,12 +1517,36 @@ class AIPlayer:
                         break
             except (ValueError, TypeError):
                 pass
+        elif target and target.get("type") == "world_object_rock" and target.get("id"):
+            wo = WORLD_OBJECT_INSTANCES.get(target["id"])
+            if wo and not wo.get("depleted") and wo.get("asset_id") == "rock" and wo.get("map", "level_01") == p.get("map", "level_01"):
+                rock_wo = wo
 
-        if not rock:
-            rock = self._find_nearest_rock()
+        if not rock and not rock_wo:
+            nearest = self._find_nearest_rock()
+            if nearest:
+                if nearest.get("type") == "world_object_rock":
+                    rock_wo = nearest
+                else:
+                    rock = nearest
 
-        if not rock:
+        if not rock and not rock_wo:
             self._do_explore()
+            return
+
+        if rock_wo:
+            wo_id = rock_wo["id"]
+            d = _dist(px, py, rock_wo["x"], rock_wo["y"])
+
+            def _start_world_mining(target_wo_id=wo_id):
+                game.handle_input(PID, {"type": "stop"})
+                game.handle_input(PID, {"type": "interact_world_object", "wo_id": target_wo_id})
+                self._continuous_action = {"type": "mine_world_object_rock", "target_id": target_wo_id, "cooldown": 1.0, "last": time.time()}
+
+            if d <= WORLD_OBJ_MINE_DIST:
+                _start_world_mining()
+            else:
+                self._move_toward(rock_wo["x"], rock_wo["y"], running=d > 200, on_arrive=_start_world_mining)
             return
 
         rock_id = rock["id"]
@@ -1470,8 +1617,12 @@ class AIPlayer:
 
         def _start_refining(aid=anvil_id):
             game.handle_input(PID, {"type": "stop"})
-            game.handle_input(PID, {"type": "refine_rock", "anvil_id": aid})
-            self._continuous_action = {"type": "refine", "target_id": aid, "cooldown": 1.5, "last": time.time()}
+            batch = min(int(p.get("stones", 0) or 0), REFINE_BATCH_SIZE)
+            for _ in range(batch):
+                game.handle_input(PID, {"type": "refine_rock", "anvil_id": aid})
+            self._continuous_action = None
+            if batch > 1:
+                self.memory.log_event(f"Batch refined {batch} stones at {aid}.")
 
         if d <= refine_range:
             _start_refining()
@@ -1540,7 +1691,7 @@ class AIPlayer:
         d = _dist(px, py, dummy["x"], dummy["y"])
         if d <= PVP_ATTACK_RANGE:
             game.handle_input(PID, {"type": "stop"})
-            game.handle_input(PID, {"type": "attack_player", "target_id": dummy["id"]})
+            game.handle_input(PID, {"type": "attack_dummy", "dummy_id": dummy["id"]})
         else:
             self._move_toward(dummy["x"], dummy["y"])
 
@@ -1565,7 +1716,9 @@ class AIPlayer:
         if not p:
             return
 
+        commands = self._ensure_stone_gatherer(commands)
         my_npcs = p.get("npcs", {})
+        commands = self._prioritize_training_core(commands, my_npcs)
         assigned_ids = set()
         for cmd in commands:
             npc_id = cmd.get("npc_id", "")
@@ -1603,6 +1756,123 @@ class AIPlayer:
 
         self._assign_fallback_npc_tasks(my_npcs, assigned_ids)
 
+    def _desired_training_core_size(self, living_count: int) -> int:
+        if living_count <= 1:
+            return 1
+        return min(4, max(2, living_count - 1))
+
+    def _select_training_core(self, my_npcs: dict) -> set[str]:
+        living = [
+            (npc_id, npc) for npc_id, npc in my_npcs.items()
+            if npc and not npc.get("dead") and not npc.get("knocked_out")
+        ]
+        desired = self._desired_training_core_size(len(living))
+        if desired <= 0:
+            self._training_core_ids = []
+            return set()
+
+        current_ids = [npc_id for npc_id in self._training_core_ids if any(npc_id == lid for lid, _ in living)]
+        ranked_ids = [
+            npc_id for npc_id, _npc in sorted(
+                living,
+                key=lambda entry: (
+                    -(int(entry[1].get("level", 1) or 1)),
+                    -(int(entry[1].get("xp", 0) or 0)),
+                    -(int(entry[1].get("str", 1) or 1)),
+                    entry[0],
+                ),
+            )
+        ]
+        for npc_id in ranked_ids:
+            if npc_id not in current_ids:
+                current_ids.append(npc_id)
+            if len(current_ids) >= desired:
+                break
+        self._training_core_ids = current_ids[:desired]
+        return set(self._training_core_ids)
+
+    def _prioritize_training_core(self, commands: list, my_npcs: dict):
+        p = game.players.get(PID)
+        if not p:
+            return commands
+        if not any(not dd.get("dead") for dd in game.dummies.values()):
+            return commands
+
+        train_core_ids = self._select_training_core(my_npcs)
+        if not train_core_ids:
+            return commands
+
+        current_objective = str((self.memory.plan or {}).get("current_objective", "") or "")
+        stone_target = int((self.memory.plan or {}).get("resource_targets", {}).get("stones", 5) or 0)
+        need_stones = (
+            p.get("stones", 0) < stone_target
+            and self._count_available_rocks(p.get("map", "level_01")) > 0
+            and current_objective in ("gather_stones", "build_anvil", "refine_crystals", "build_dummy")
+        )
+
+        prioritized = []
+        commanded_ids = set()
+        for cmd in list(commands or []):
+            if not isinstance(cmd, dict):
+                continue
+            npc_id = cmd.get("npc_id", "")
+            task = cmd.get("task", "idle")
+            if npc_id:
+                commanded_ids.add(npc_id)
+
+            if npc_id in train_core_ids and task not in ("attack",):
+                prioritized.append({**cmd, "task": "train"})
+                continue
+
+            if task == "train" and npc_id not in train_core_ids:
+                prioritized.append({**cmd, "task": "gather_stones" if need_stones else "gather"})
+                continue
+
+            prioritized.append(cmd)
+
+        for npc_id in train_core_ids:
+            if npc_id not in commanded_ids:
+                prioritized.append({"npc_id": npc_id, "task": "train"})
+        return prioritized
+
+    def _ensure_stone_gatherer(self, commands: list):
+        """If the plan still needs stones, force at least one living NPC onto gather_stones."""
+        p = game.players.get(PID)
+        if not p:
+            return commands
+        rocks_exist = self._count_available_rocks(p.get("map", "level_01")) > 0
+        if not rocks_exist:
+            return commands
+
+        current_objective = str((self.memory.plan or {}).get("current_objective", "") or "")
+        stone_target = int((self.memory.plan or {}).get("resource_targets", {}).get("stones", 5) or 0)
+        need_stones = p.get("stones", 0) < stone_target and current_objective in (
+            "gather_stones", "build_anvil", "refine_crystals", "build_dummy"
+        )
+        if not need_stones:
+            return commands
+
+        cmds = list(commands or [])
+        if any(cmd.get("task") == "gather_stones" for cmd in cmds if isinstance(cmd, dict)):
+            return cmds
+
+        my_npcs = p.get("npcs", {})
+        candidate_id = None
+        for npc_id, npc in my_npcs.items():
+            if not npc or npc.get("dead") or npc.get("knocked_out"):
+                continue
+            current_task = npc.get("_task", "idle")
+            if current_task in ("attack",):
+                continue
+            candidate_id = npc_id
+            break
+        if not candidate_id:
+            return cmds
+
+        cmds.append({"npc_id": candidate_id, "task": "gather_stones"})
+        self.memory.log_event(f"Override: assigned {my_npcs[candidate_id].get('name', candidate_id)} to gather stones.")
+        return cmds
+
     def _assign_fallback_npc_tasks(self, my_npcs: dict, assigned_ids: set[str]):
         """Keep every living NPC busy even when the LLM omits npc_commands."""
         p = game.players.get(PID)
@@ -1617,8 +1887,9 @@ class AIPlayer:
             return
 
         dummies_exist = any(not dd.get("dead") for dd in game.dummies.values())
-        enemies_nearby = self._find_nearest_player() is not None
-        rocks_exist = any(not r.get("mined") for r in game.rocks)
+        nearby_enemy = self._find_nearest_player(max_dist_tiles=NPC_THREAT_RADIUS_TILES)
+        enemies_nearby = nearby_enemy is not None
+        rocks_exist = self._count_available_rocks(p.get("map", "level_01")) > 0
         current_objective = str((self.memory.plan or {}).get("current_objective", "") or "")
         stones = p.get("stones", 0)
         stone_target = (self.memory.plan or {}).get("resource_targets", {}).get("stones", 5)
@@ -1626,11 +1897,19 @@ class AIPlayer:
             "gather_stones", "build_anvil", "refine_crystals", "build_dummy"
         )
 
-        train_budget = 1 if dummies_exist else 0
-        if dummies_exist and len(living) >= 3:
-            train_budget = max(1, len(living) // 2)
-        stone_budget = 1 if need_stones and len(living) >= 2 else 0
+        train_core_ids = self._select_training_core(my_npcs) if dummies_exist else set()
+        train_budget = len(train_core_ids)
+        stone_budget = 0
+        if need_stones:
+            if len(living) <= 1:
+                stone_budget = 1
+            elif len(living) == 2:
+                stone_budget = 1
+            else:
+                stone_budget = max(1, min(len(living) - 1, math.ceil(len(living) * 0.5)))
         assignment_notes = []
+
+        living.sort(key=lambda entry: (0 if entry[0] in train_core_ids else 1, entry[0]))
 
         for npc_id, npc in living:
             if npc_id in assigned_ids:
@@ -1639,7 +1918,10 @@ class AIPlayer:
             current_task = npc.get("_task", "idle")
             has_move = bool(npc.get("_move_target"))
             if current_task not in ("idle", "", None) and has_move:
-                continue
+                if npc_id in train_core_ids and current_task != "train":
+                    pass
+                else:
+                    continue
 
             if enemies_nearby:
                 npc["_task"] = "attack"
@@ -1647,14 +1929,14 @@ class AIPlayer:
                 assignment_notes.append(f"{npc.get('name', npc_id)} attacking nearby enemy")
                 continue
 
-            if stone_budget > 0 and current_task != "gather":
+            if stone_budget > 0 and current_task not in ("gather_stones", "attack"):
                 npc["_task"] = "gather_stones"
                 self._npc_gather_stones(npc, npc_id)
                 stone_budget -= 1
                 assignment_notes.append(f"{npc.get('name', npc_id)} gathering stones")
                 continue
 
-            if dummies_exist and train_budget > 0 and current_task != "gather":
+            if dummies_exist and train_budget > 0 and npc_id in train_core_ids and current_task != "gather":
                 npc["_task"] = "train"
                 self._npc_train(npc, npc_id)
                 train_budget -= 1
@@ -1672,6 +1954,7 @@ class AIPlayer:
     def _npc_gather(self, npc, npc_id):
         """Send NPC to nearest unchopped tree, chop on arrival, deposit when full, repeat."""
         p = game.players.get(PID)
+        npc.pop("_resource_target_id", None)
 
         def _find_and_go():
             nx, ny = npc.get("x", 0), npc.get("y", 0)
@@ -1715,23 +1998,81 @@ class AIPlayer:
         p = game.players.get(PID)
 
         def _find_and_mine():
+            if npc.get("dead") or npc.get("knocked_out"):
+                return
             nx, ny = npc.get("x", 0), npc.get("y", 0)
+            current_target_id = npc.get("_resource_target_id")
+            current_target_type = npc.get("_resource_target_type")
             best_rock = None
-            best_dist = float("inf")
-            for r in game.rocks:
-                if r.get("mined"):
-                    continue
-                d = _dist(nx, ny, r["x"], r["y"])
-                if d < best_dist:
-                    best_dist = d
-                    best_rock = r
-            if not best_rock:
+            best_world_rock = None
+            if current_target_id is not None and current_target_type == "rock":
+                for r in game.rocks:
+                    if r["id"] == current_target_id and not r.get("mined"):
+                        best_rock = r
+                        break
+            elif current_target_id is not None and current_target_type == "world_object_rock":
+                wo = WORLD_OBJECT_INSTANCES.get(current_target_id)
+                if wo and not wo.get("depleted") and wo.get("asset_id") == "rock" and wo.get("map", "level_01") == npc.get("map", p.get("map", "level_01")):
+                    best_world_rock = wo
+            if best_rock is None:
+                best_dist = float("inf")
+                for r in game.rocks:
+                    if r.get("mined"):
+                        continue
+                    d = _dist(nx, ny, r["x"], r["y"])
+                    if d < best_dist:
+                        best_dist = d
+                        best_rock = r
+                for wo_id, wo in WORLD_OBJECT_INSTANCES.items():
+                    if wo.get("depleted") or wo.get("asset_id") != "rock":
+                        continue
+                    if wo.get("map", "level_01") != npc.get("map", p.get("map", "level_01")):
+                        continue
+                    d = _dist(nx, ny, wo["x"], wo["y"])
+                    if d < best_dist:
+                        best_dist = d
+                        best_rock = None
+                        best_world_rock = {"id": wo_id, **wo}
+            if not best_rock and not best_world_rock:
                 # No rocks available — fall back to gathering logs
+                npc.pop("_resource_target_id", None)
+                npc.pop("_resource_target_type", None)
                 npc["_task"] = "gather"
                 self._npc_gather(npc, npc_id)
                 return
 
+            if best_world_rock:
+                wo_id = best_world_rock["id"]
+                npc["_resource_target_id"] = wo_id
+                npc["_resource_target_type"] = "world_object_rock"
+
+                def on_arrive_world_mine():
+                    game.handle_input(PID, {
+                        "type": "npc_interact_world_object",
+                        "wo_id": wo_id,
+                        "npc_id": npc_id,
+                    })
+                    if p and npc.get("stones", 0) >= 3:
+                        p["stones"] = p.get("stones", 0) + npc["stones"]
+                        deposited = npc["stones"]
+                        npc["stones"] = 0
+                        self.memory.log_event(f"NPC {npc.get('name', npc_id)} deposited {deposited} stones")
+                    current = WORLD_OBJECT_INSTANCES.get(wo_id)
+                    if current and not current.get("depleted") and current.get("asset_id") == "rock":
+                        npc["_move_target"] = (current["x"], current["y"])
+                        npc["_on_arrive"] = on_arrive_world_mine
+                        return
+                    npc.pop("_resource_target_id", None)
+                    npc.pop("_resource_target_type", None)
+                    _find_and_mine()
+
+                npc["_move_target"] = (best_world_rock["x"], best_world_rock["y"])
+                npc["_on_arrive"] = on_arrive_world_mine
+                return
+
             rock_id = best_rock["id"]
+            npc["_resource_target_id"] = rock_id
+            npc["_resource_target_type"] = "rock"
 
             def on_arrive_mine():
                 game.handle_input(PID, {
@@ -1745,6 +2086,13 @@ class AIPlayer:
                     deposited = npc["stones"]
                     npc["stones"] = 0
                     self.memory.log_event(f"NPC {npc.get('name', npc_id)} deposited {deposited} stones")
+                current = next((r for r in game.rocks if r["id"] == rock_id), None)
+                if current and not current.get("mined") and current.get("hits_left", 1) > 0:
+                    npc["_move_target"] = (current["x"], current["y"])
+                    npc["_on_arrive"] = on_arrive_mine
+                    return
+                npc.pop("_resource_target_id", None)
+                npc.pop("_resource_target_type", None)
                 # Continue mining or find next rock
                 _find_and_mine()
 
@@ -1772,30 +2120,42 @@ class AIPlayer:
 
     def _npc_train(self, npc, npc_id):
         """Send NPC to nearest training dummy."""
-        best_dummy = None
-        best_dist = float("inf")
-        nx, ny = npc.get("x", 0), npc.get("y", 0)
-        for did, dd in game.dummies.items():
-            if dd.get("dead"):
-                continue
-            d = _dist(nx, ny, dd["x"], dd["y"])
-            if d < best_dist:
-                best_dist = d
-                best_dummy = dd
-                best_did = did
-        if not best_dummy:
-            return
+        def _find_and_train():
+            best_dummy = None
+            best_dist = float("inf")
+            nx, ny = npc.get("x", 0), npc.get("y", 0)
+            best_did = None
+            for did, dd in game.dummies.items():
+                if dd.get("dead"):
+                    continue
+                d = _dist(nx, ny, dd["x"], dd["y"])
+                if d < best_dist:
+                    best_dist = d
+                    best_dummy = dd
+                    best_did = did
+            if not best_dummy or not best_did:
+                npc.pop("_move_target", None)
+                npc.pop("_on_arrive", None)
+                return
 
-        def on_arrive_train():
-            game.handle_input(PID, {
-                "type": "npc_attack_dummy",
-                "dummy_id": best_did,
-                "str": npc.get("str", 1),
-                "npc_id": npc_id,
-            })
+            def on_arrive_train():
+                game.handle_input(PID, {
+                    "type": "npc_attack_dummy",
+                    "dummy_id": best_did,
+                    "str": npc.get("str", 1),
+                    "npc_id": npc_id,
+                })
+                current = game.dummies.get(best_did)
+                if current and not current.get("dead"):
+                    npc["_move_target"] = (current["x"], current["y"])
+                    npc["_on_arrive"] = on_arrive_train
+                    return
+                _find_and_train()
 
-        npc["_move_target"] = (best_dummy["x"], best_dummy["y"])
-        npc["_on_arrive"] = on_arrive_train
+            npc["_move_target"] = (best_dummy["x"], best_dummy["y"])
+            npc["_on_arrive"] = on_arrive_train
+
+        _find_and_train()
 
     # ── Movement ───────────────────────────────────────────────────────────────
 
@@ -1825,6 +2185,16 @@ class AIPlayer:
                         d = _dist(p["x"], p["y"], rock["x"], rock["y"])
                         if d <= ROCK_MINE_DIST:
                             game.handle_input(PID, {"type": "mine_rock", "rock_id": target_id})
+                        else:
+                            self._continuous_action = None
+                    else:
+                        self._continuous_action = None
+                elif action_type == "mine_world_object_rock":
+                    wo = WORLD_OBJECT_INSTANCES.get(target_id)
+                    if wo and not wo.get("depleted") and wo.get("asset_id") == "rock" and wo.get("map", "level_01") == p.get("map", "level_01"):
+                        d = _dist(p["x"], p["y"], wo["x"], wo["y"])
+                        if d <= WORLD_OBJ_MINE_DIST:
+                            game.handle_input(PID, {"type": "interact_world_object", "wo_id": target_id})
                         else:
                             self._continuous_action = None
                     else:
@@ -1950,10 +2320,29 @@ class AIPlayer:
             d = _dist(px, py, r["x"], r["y"])
             if d < best_dist:
                 best_dist = d
-                best = r
+                best = {**r, "type": "rock"}
+        for wo_id, wo in WORLD_OBJECT_INSTANCES.items():
+            if wo.get("depleted") or wo.get("asset_id") != "rock":
+                continue
+            if wo.get("map", "level_01") != p.get("map", "level_01"):
+                continue
+            d = _dist(px, py, wo["x"], wo["y"])
+            if d < best_dist:
+                best_dist = d
+                best = {"id": wo_id, "x": wo["x"], "y": wo["y"], "type": "world_object_rock"}
         return best
 
-    def _find_nearest_player(self):
+    def _count_available_rocks(self, map_name=None):
+        total = sum(1 for r in game.rocks if not r.get("mined"))
+        total += sum(
+            1 for wo in WORLD_OBJECT_INSTANCES.values()
+            if not wo.get("depleted")
+            and wo.get("asset_id") == "rock"
+            and (map_name is None or wo.get("map", "level_01") == map_name)
+        )
+        return total
+
+    def _find_nearest_player(self, max_dist_tiles=None):
         """Find the nearest live human player."""
         p = game.players.get(PID)
         if not p:
@@ -1969,6 +2358,8 @@ class AIPlayer:
             if op.get("is_ai_rival"):
                 continue
             d = _dist(px, py, op["x"], op["y"])
+            if max_dist_tiles is not None and d > max_dist_tiles * TILE_SIZE:
+                continue
             if d < best_dist:
                 best_dist = d
                 best = op

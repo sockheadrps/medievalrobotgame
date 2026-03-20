@@ -147,3 +147,24 @@ body { background: #0a0a1e; color: #ccc; font-family: 'Consolas', monospace; fon
   padding: 4px 10px; cursor: pointer; border-radius: 3px; font-size: 11px;
   margin-left: 6px;
 }
+
+/* Station recipe cards */
+.station-recipes-list { margin-top: 6px; }
+.recipe-card {
+  background: #0e0e20; border: 1px solid #2a2a3e; border-radius: 4px;
+  padding: 10px; margin-bottom: 8px;
+}
+.recipe-card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px; color: #88aacc; font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.recipe-card-header button {
+  background: #442222; color: #ff8888; border: 1px solid #553333;
+  padding: 2px 8px; cursor: pointer; border-radius: 2px; font-size: 11px;
+}
+.recipe-card .form-row { margin-bottom: 4px; }
+.recipe-card .form-group { margin-bottom: 6px; }
+
+/* Build recipe list */
+.build-recipe-list { margin-top: 6px; }

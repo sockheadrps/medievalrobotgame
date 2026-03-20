@@ -53,6 +53,11 @@ export const NRG_KEY      = 'nrg_blast';
 export const NRG_PATH     = 'assets/nrg/7.png';
 export const NRG_FRAME_W  = 32;
 export const NRG_FRAME_H  = 32;
+export const ABSORB_KEY      = 'absorb_fx';
+export const ABSORB_PATH     = 'assets/absorb/15.png';
+export const ABSORB_FRAME_W  = 32;
+export const ABSORB_FRAME_H  = 32;
+export const ABSORB_FRAMES   = 12;
 export const BARRIER_KEY     = 'barrier_fx';
 export const BARRIER_PATH    = 'assets/barrier.png';
 export const BARRIER_FRAME_W = 32;
@@ -196,8 +201,16 @@ export const CONV_FRAME_LOOKUP = {
   'left,up':     1147,
 };
 
+// --- Gate & Fence ---
+export const FRAME_GATE      = 1334; // col=46 row=23
+export const FRAME_FENCE     = 1335; // col=47 row=23
+export const FENCE_BASE_HP   = 50;
+export const GATE_LOG_COST   = 3;
+export const FENCE_LOG_COST  = 2;
+
 // --- Log Cutting Station ---
 export const FRAME_LOG_CUTTER = 1250; // col=53 row=21
+export const FRAME_ETRAINER   = 587;  // col=17 row=10 — eternal training dummy
 
 // --- Minecart Tracks ---
 export const FRAME_TRACK_H = 1069;  // col=43 row=18 — horizontal track

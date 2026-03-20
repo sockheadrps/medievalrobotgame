@@ -103,7 +103,7 @@ Output ONLY the category name. Nothing else.`,
 Available: [{"task": "gather", "item": "wood"}], [{"task": "idle"}]`,
 
   combat: `Convert the player's combat instruction into a JSON task list. Output ONLY a JSON array.
-Available: attack_nearest_enemy, defend_player, train, idle`,
+Available: attack_nearest_enemy, absorb_npc, defend_player, train, idle`,
 
   follow: `Convert the player's follow instruction into a JSON task list. Output ONLY a JSON array.
 Available: [{"task": "follow"}], [{"task": "idle"}]`,
@@ -114,7 +114,7 @@ Available: [{"task": "follow"}], [{"task": "idle"}]`,
   Available: [{"task": "idle"}]`,
 
   fallback: `Convert player instructions into a JSON task list. Output ONLY a JSON array.
-Available tasks: gather, follow, attack_nearest_enemy, defend_player, train, give_logs, idle`,
+Available tasks: gather, follow, attack_nearest_enemy, absorb_npc, defend_player, train, give_logs, idle`,
 };
 
 // ── Prompt builders ─────────────────────────────────────────────────────────
@@ -397,7 +397,7 @@ Respond ONLY with JSON (no markdown):
 // ── Valid tasks for validation ──────────────────────────────────────────────
 
 const VALID_CATEGORIES = new Set(['gather', 'combat', 'follow', 'idle', 'build', 'chat']);
-const VALID_TASKS = new Set(['gather', 'gather_stone', 'gather_all', 'follow', 'idle', 'attack_nearest_enemy', 'attack_player', 'attack_npc', 'defend_player', 'train', 'give_logs']);
+const VALID_TASKS = new Set(['gather', 'gather_stone', 'gather_all', 'follow', 'idle', 'attack_nearest_enemy', 'attack_player', 'attack_npc', 'absorb_npc', 'defend_player', 'train', 'give_logs']);
 
 // ── JSON extraction helpers ─────────────────────────────────────────────────
 
@@ -666,7 +666,11 @@ function _sanitizeDecision(raw, statePacket) {
   const hasThreats = Array.isArray(statePacket?.nearby_threats) && statePacket.nearby_threats.length > 0;
 
   if (typeof out.primary_intent !== 'string' || (allowed.size > 0 && !allowed.has(out.primary_intent))) {
-    out.primary_intent = allowed.has('follow') ? 'follow' : (statePacket?.allowed_actions?.[0] ?? 'follow');
+    if (allowed.has('wander_explore')) out.primary_intent = 'wander_explore';
+    else if (allowed.has('gather_wood')) out.primary_intent = 'gather_wood';
+    else if (allowed.has('observe')) out.primary_intent = 'observe';
+    else if (allowed.has('follow')) out.primary_intent = 'follow';
+    else out.primary_intent = statePacket?.allowed_actions?.[0] ?? 'wander_explore';
   }
   if (typeof out.secondary_intent !== 'string' || (allowed.size > 0 && !allowed.has(out.secondary_intent))) {
     out.secondary_intent = null;

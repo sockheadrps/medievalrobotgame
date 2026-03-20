@@ -8,6 +8,9 @@ export class StateSyncController {
   applyServerState(data) {
     const scene = this.scene;
     scene._lastServerState = data;
+    scene._xpMultipliers = (data.xp_multipliers && typeof data.xp_multipliers === 'object')
+      ? { ...data.xp_multipliers }
+      : (scene._xpMultipliers || { player: 1, npc: 1, ai_player: 1, ai_npc: 1 });
     if (scene.playerId === 'default') return;
 
     const players = data.players || {};
@@ -40,8 +43,10 @@ export class StateSyncController {
       scene.player.xp = me.xp ?? scene.player.xp;
       scene.player.barrierProcUntil = Number(me.barrier_proc_until || 0);
       scene.player.barrierProcFacing = me.barrier_proc_facing || scene.player.barrierProcFacing || 'down';
+      scene.player.combatMode = me.combat_mode ?? scene.player.combatMode ?? 'kill';
       scene.player.equipment = me.equipment ?? scene.player.equipment ?? {};
       scene.player.inventory = me.inventory ?? scene.player.inventory ?? {};
+      scene.player._carrying = !!me.carrying;
 
       // Map change detection
       const newMap = me.map ?? 'level_01';
@@ -119,6 +124,10 @@ export class StateSyncController {
         // Sync ore/resource inventory from server (updated by background worker ticks)
         if (serverNPC.inventory && typeof serverNPC.inventory === 'object') {
           npc._npcInventory = { ...serverNPC.inventory };
+        }
+        // Sync equipment from server
+        if (serverNPC.equipment && typeof serverNPC.equipment === 'object') {
+          npc.equipment = { ...serverNPC.equipment };
         }
         npc.barrierProcUntil = Number(serverNPC.barrier_proc_until || 0);
         npc.barrierProcFacing = serverNPC.barrier_proc_facing || npc.barrierProcFacing || npc.getFacing?.() || 'down';

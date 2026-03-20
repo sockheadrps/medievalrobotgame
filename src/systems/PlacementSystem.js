@@ -87,6 +87,7 @@ export class PlacementSystem {
     this._phase = PHASE_START;
     const labels = {
       crate: 'crate', furnace: 'furnace', log_cutter: 'log cutter',
+      etrainer: 'etrainer', gate: 'gate', fence: 'fence',
     };
     const singlePlace = labels[type];
     const msg = singlePlace
@@ -178,7 +179,7 @@ export class PlacementSystem {
     const { col, row } = worldToTile(wx, wy);
 
     // Single-click placement for crate / furnace / log_cutter — send to server
-    if ((this._buildType === 'crate' || this._buildType === 'furnace' || this._buildType === 'log_cutter') && this._phase === PHASE_START) {
+    if ((this._buildType === 'crate' || this._buildType === 'furnace' || this._buildType === 'log_cutter' || this._buildType === 'etrainer' || this._buildType === 'gate' || this._buildType === 'fence') && this._phase === PHASE_START) {
       if (!this._grid.isFree(col, row)) return;
       this._sendPlaceBuilding(this._buildType, col, row);
       return;

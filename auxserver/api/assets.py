@@ -9,6 +9,7 @@ from services.asset_service import (
     list_equipment, save_equipment, delete_equipment,
     save_uploaded_sprite,
     list_items, save_item, delete_item, save_item_sprite,
+    list_stations, save_station, delete_station,
 )
 
 router = APIRouter(prefix="/api/assets", tags=["assets"])
@@ -93,3 +94,23 @@ async def upload_item_sprite(item_id: str, file: UploadFile = File(...)):
     content = await file.read()
     path = save_item_sprite(item_id, file.filename, content)
     return {"ok": True, "path": path}
+
+
+# ── Crafting Stations ────────────────────────────────────────────────────────
+
+@router.get("/stations")
+async def get_stations():
+    return list_stations()
+
+
+@router.post("/stations")
+async def post_station(request: Request):
+    data = await request.json()
+    save_station(data)
+    return {"ok": True}
+
+
+@router.delete("/stations/{station_id}")
+async def del_station(station_id: str):
+    deleted = delete_station(station_id)
+    return {"ok": deleted}

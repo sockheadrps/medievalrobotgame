@@ -14,6 +14,7 @@ const MOVE_LABELS = {
   ki_shot: 'Ki Shot',
   scatter_shot: 'Scatter Shot',
   explosive_shot: 'Explosive Shot',
+  absorb: 'Absorb',
   barrier: 'Barrier',
   sense_ki: 'Sense Ki',
 };

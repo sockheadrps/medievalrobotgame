@@ -327,16 +327,34 @@ def list_players() -> list[str]:
 
 def save_npc(npc_id: str, name: str, x: float, y: float, stats: dict, soul: dict) -> dict:
     conn = _get_conn()
-    conn.execute("""
-        INSERT INTO npcs (id, name, x, y, stats, soul)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            name=excluded.name, x=excluded.x, y=excluded.y,
-            stats=excluded.stats, soul=excluded.soul
-    """, (npc_id, name, x, y, json.dumps(stats), json.dumps(soul)))
+    # If soul is empty, only update stats/position (don't clobber existing soul data)
+    if not soul:
+        conn.execute("""
+            INSERT INTO npcs (id, name, x, y, stats, soul)
+            VALUES (?, ?, ?, ?, ?, '{}')
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name, x=excluded.x, y=excluded.y,
+                stats=excluded.stats
+        """, (npc_id, name, x, y, json.dumps(stats)))
+    else:
+        conn.execute("""
+            INSERT INTO npcs (id, name, x, y, stats, soul)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name, x=excluded.x, y=excluded.y,
+                stats=excluded.stats, soul=excluded.soul
+        """, (npc_id, name, x, y, json.dumps(stats), json.dumps(soul)))
     conn.commit()
     print(f"[db] Saved NPC {npc_id}")
     return {"ok": True, "id": npc_id}
+
+
+def delete_npc(npc_id: str):
+    """Remove an NPC from the database (e.g. when killed)."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM npcs WHERE id = ?", (npc_id,))
+    conn.commit()
+    print(f"[db] Deleted NPC {npc_id}")
 
 
 def load_npc(npc_id: str) -> dict | None:
@@ -372,24 +390,45 @@ def list_npcs() -> list[str]:
 def save_ground_items(items: list):
     conn = _get_conn()
     conn.execute("DELETE FROM ground_items")
+    # Ensure equipment and map columns exist
+    try:
+        conn.execute("ALTER TABLE ground_items ADD COLUMN equipment INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE ground_items ADD COLUMN map TEXT DEFAULT 'level_01'")
+    except Exception:
+        pass
     for item in items:
         conn.execute("""
-            INSERT INTO ground_items (id, x, y, resource, amount, placed)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO ground_items (id, x, y, resource, amount, placed, equipment, map)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (item["id"], item["x"], item["y"],
               item.get("resource", "Wood"), item.get("amount", 1),
-              1 if item.get("_placed") else 0))
+              1 if item.get("_placed") else 0,
+              1 if item.get("_equipment") else 0,
+              item.get("map", "level_01")))
     conn.commit()
 
 
 def load_ground_items() -> list:
     conn = _get_conn()
     rows = conn.execute("SELECT * FROM ground_items").fetchall()
-    return [{
-        "id": r["id"], "x": r["x"], "y": r["y"],
-        "resource": r["resource"], "amount": r["amount"],
-        "_placed": bool(r["placed"]),
-    } for r in rows]
+    result = []
+    for r in rows:
+        item = {
+            "id": r["id"], "x": r["x"], "y": r["y"],
+            "resource": r["resource"], "amount": r["amount"],
+            "_placed": bool(r["placed"]),
+        }
+        # equipment and map columns may not exist in older DBs
+        keys = r.keys() if hasattr(r, 'keys') else []
+        if "equipment" in keys and r["equipment"]:
+            item["_equipment"] = True
+        if "map" in keys:
+            item["map"] = r["map"] or "level_01"
+        result.append(item)
+    return result
 
 
 def save_fences(fences: dict):

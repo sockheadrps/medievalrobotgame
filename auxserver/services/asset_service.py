@@ -6,7 +6,7 @@ import json
 import shutil
 from pathlib import Path
 
-from core.config import WORLD_OBJECTS_DIR, EQUIPMENT_DIR, ITEMS_DIR, ASSETS_DIR
+from core.config import WORLD_OBJECTS_DIR, EQUIPMENT_DIR, ITEMS_DIR, STATIONS_DIR, ASSETS_DIR
 
 
 def list_world_objects() -> list[dict]:
@@ -123,6 +123,43 @@ def save_item_sprite(item_id: str, filename: str, content: bytes) -> str:
     dest = folder / filename
     dest.write_bytes(content)
     return str(dest.relative_to(ASSETS_DIR))
+
+
+# ── Crafting Stations ────────────────────────────────────────────────────────
+
+def list_stations() -> list[dict]:
+    """Return all crafting station configs."""
+    results = []
+    if not STATIONS_DIR.exists():
+        return results
+    for folder in sorted(STATIONS_DIR.iterdir()):
+        if not folder.is_dir():
+            continue
+        cfg = folder / "station.json"
+        if cfg.exists():
+            data = json.loads(cfg.read_text(encoding="utf-8-sig"))
+            results.append(data)
+    return results
+
+
+def save_station(data: dict) -> None:
+    """Save a crafting station definition (creates folder if needed)."""
+    station_id = data.get("id")
+    if not station_id:
+        raise ValueError("Station must have an 'id'")
+    folder = STATIONS_DIR / station_id
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "station.json").write_text(
+        json.dumps(data, indent=2), encoding="utf-8"
+    )
+
+
+def delete_station(station_id: str) -> bool:
+    folder = STATIONS_DIR / station_id
+    if folder.exists() and folder.is_dir():
+        shutil.rmtree(folder)
+        return True
+    return False
 
 
 def save_uploaded_sprite(eq_id: str, filename: str, content: bytes) -> str:

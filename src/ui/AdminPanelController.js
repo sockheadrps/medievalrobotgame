@@ -7,8 +7,16 @@ const IMPLEMENTED_KI_MOVES = [
   { id: 'ki_shot', label: 'Ki Shot' },
   { id: 'scatter_shot', label: 'Scatter Shot' },
   { id: 'explosive_shot', label: 'Explosive Shot' },
+  { id: 'absorb', label: 'Absorb' },
   { id: 'barrier', label: 'Barrier' },
   { id: 'sense_ki', label: 'Sense Ki' },
+];
+
+const XP_MULTIPLIER_ROWS = [
+  { id: 'player', label: 'Players' },
+  { id: 'npc', label: 'Player NPCs' },
+  { id: 'ai_player', label: 'AI Rival' },
+  { id: 'ai_npc', label: 'AI NPCs' },
 ];
 
 export class AdminPanelController {
@@ -49,6 +57,20 @@ export class AdminPanelController {
     });
   }
 
+  getXpMultipliers() {
+    return this.scene._xpMultipliers || { player: 1, npc: 1, ai_player: 1, ai_npc: 1 };
+  }
+
+  setXpMultiplier(scope, nextValue, opts = {}) {
+    const { rerender = true } = opts;
+    const scene = this.scene;
+    const current = this.getXpMultipliers();
+    const clamped = Math.max(0, Math.min(100, Math.round(nextValue * 100) / 100));
+    scene._xpMultipliers = { ...current, [scope]: clamped };
+    this.sendAdmin('xp_multiplier_set', clamped, { scope, multiplier: clamped });
+    if (rerender) this.renderAdminPanel();
+  }
+
   renderAdminPanel() {
     const scene = this.scene;
     if (scene._adminPanel) {
@@ -61,6 +83,7 @@ export class AdminPanelController {
     const W = scene._screenWidth();
     const H = scene._screenHeight();
     const page = scene._adminPage || 1;
+    const maxPage = 3;
     const targetNpc = this.getAdminTargetNpc();
     const actor = this.getAdminTargetActor();
     const targetName = targetNpc ? targetNpc.getName() : 'Player';
@@ -95,9 +118,10 @@ export class AdminPanelController {
       { label: 'Spawn Dummy', action: () => scene._conn.send({ type: 'build_dummy', logs: 20 }) },
       { label: 'Place Anvil', action: () => scene._placeAnvil() },
     ];
-    const panelW = 240;
+    const panelW = page === 3 ? 320 : 240;
     const page2Rows = 2 + IMPLEMENTED_KI_MOVES.length;
-    const panelH = 38 + (page === 1 ? items.length : page2Rows) * 32 + 8;
+    const page3Rows = 2 + XP_MULTIPLIER_ROWS.length + 1;
+    const panelH = 38 + (page === 1 ? items.length : (page === 2 ? page2Rows : page3Rows)) * 32 + 8;
     const px = W / 2 - panelW / 2;
     const py = H / 2 - panelH / 2;
     const els = [];
@@ -105,7 +129,7 @@ export class AdminPanelController {
     const bg = scene.addHud(scene.add.rectangle(px, py, panelW, panelH, 0x111122, 0.95)
       .setDepth(60).setOrigin(0, 0));
     els.push(bg);
-    const title = scene.addHud(scene.add.text(px + panelW / 2, py + 12, `ADMIN P${page}  [Q close, ←/→ page]`, {
+    const title = scene.addHud(scene.add.text(px + panelW / 2, py + 12, `ADMIN P${page}/${maxPage}  [Q close, ←/→ page]`, {
       fontSize: '13px', color: '#ffcc44',
     }).setDepth(61).setOrigin(0.5, 0));
     els.push(title);
@@ -126,7 +150,7 @@ export class AdminPanelController {
 
     if (page === 1) {
       items.forEach((item, i) => addActionButton(py + 38 + i * (btnH + 4), item.label, item.action));
-    } else {
+    } else if (page === 2) {
       let row = 0;
       const addLabel = (text, color = '#ccddff') => {
         const by = py + 38 + row * (btnH + 4);
@@ -171,6 +195,49 @@ export class AdminPanelController {
         }, 72);
         row += 1;
       }
+    } else {
+      let row = 0;
+      const multipliers = this.getXpMultipliers();
+      const addLabel = (text, color = '#ccddff') => {
+        const by = py + 38 + row * (btnH + 4);
+        const lbl = scene.addHud(scene.add.text(px + 14, by + btnH / 2, text, {
+          fontSize: '13px', color,
+        }).setDepth(62).setOrigin(0, 0.5));
+        els.push(lbl);
+        row += 1;
+        return by;
+      };
+      const addMiniButton = (x, y, label, action, width = 38) => {
+        const btn = scene.addHud(scene.add.rectangle(x, y, width, 24, 0x223344, 1)
+          .setDepth(61).setOrigin(0, 0).setInteractive({ useHandCursor: true }));
+        const txt = scene.addHud(scene.add.text(x + width / 2, y + 12, label, {
+          fontSize: '12px', color: '#ccddff',
+        }).setDepth(62).setOrigin(0.5));
+        btn.on('pointerover', () => { btn.setFillStyle(0x335566); txt.setColor('#ffffff'); });
+        btn.on('pointerout', () => { btn.setFillStyle(0x223344); txt.setColor('#ccddff'); });
+        btn.on('pointerdown', action);
+        els.push(btn, txt);
+      };
+
+      addLabel('Global XP Multipliers', '#ffffff');
+      addLabel('Applies live to combat, training, and ki skill XP.', '#7799aa');
+      for (const cfg of XP_MULTIPLIER_ROWS) {
+        const by = py + 38 + row * (btnH + 4);
+        const current = Number(multipliers[cfg.id] ?? 1);
+        const lbl = scene.addHud(scene.add.text(px + 14, by + btnH / 2, `${cfg.label}  x${current.toFixed(2)}`, {
+          fontSize: '13px', color: '#ccddff',
+        }).setDepth(62).setOrigin(0, 0.5));
+        els.push(lbl);
+        addMiniButton(px + panelW - 154, by + 2, '-1', () => this.setXpMultiplier(cfg.id, current - 1), 28);
+        addMiniButton(px + panelW - 122, by + 2, '-.25', () => this.setXpMultiplier(cfg.id, current - 0.25), 40);
+        addMiniButton(px + panelW - 78, by + 2, '+.25', () => this.setXpMultiplier(cfg.id, current + 0.25), 40);
+        addMiniButton(px + panelW - 34, by + 2, '+1', () => this.setXpMultiplier(cfg.id, current + 1), 28);
+        row += 1;
+      }
+      addActionButton(py + 38 + row * (btnH + 4), 'Reset XP Multipliers', () => {
+        for (const cfg of XP_MULTIPLIER_ROWS) this.setXpMultiplier(cfg.id, 1, { rerender: false });
+        this.renderAdminPanel();
+      });
     }
     scene._adminPanel = els;
   }

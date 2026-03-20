@@ -9,7 +9,7 @@ const LOG_KEYS = [null, LOG1_KEY, LOG2_KEY, LOG3_KEY]; // index by amount (1-3)
 // If placed=true (intentionally dropped), sits flat on the ground.
 // If placed=false (loot drop), bobs to indicate pickup.
 export class GroundItem extends Phaser.GameObjects.Container {
-  constructor(scene, x, y, resource, amount = 1, placed = false) {
+  constructor(scene, x, y, resource, amount = 1, placed = false, isEquipment = false) {
     super(scene, x, y);
     scene.add.existing(this);
     this.setDepth(placed ? 1 : 2); // placed items below player, loot above
@@ -17,6 +17,7 @@ export class GroundItem extends Phaser.GameObjects.Container {
     this.resource = resource;
     this.amount   = amount;
     this._placed  = placed;
+    this._isEquipment = isEquipment;
 
     // Register with scene so update() can check for pickup
     if (scene.groundItems) scene.groundItems.push(this);
@@ -26,7 +27,11 @@ export class GroundItem extends Phaser.GameObjects.Container {
     const logKey = isLog ? (LOG_KEYS[Math.min(amount, 3)] || LOG1_KEY) : null;
 
     let sprite;
-    if (logKey && scene.textures.exists(logKey)) {
+    if (isEquipment) {
+      // Equipment items: use a shield icon (frame 795) with a gold tint
+      sprite = scene.add.image(0, 0, SHEET_KEY, 795).setScale(1.4);
+      sprite.setTint(0xffdd88);
+    } else if (logKey && scene.textures.exists(logKey)) {
       sprite = scene.add.image(0, 0, logKey).setScale(TILE_SIZE / 16);
     } else {
       const frame = RESOURCE_FRAME[resource] ?? 0;
@@ -63,6 +68,14 @@ export class GroundItem extends Phaser.GameObjects.Container {
     const player = scene.player;
     if (!player || scene._playerDead) return;
 
+    // Right-click on equipment items: show NPC pickup context menu
+    if (ptr?.rightButtonDown() || ptr?.button === 2) {
+      if (this._isEquipment) {
+        this._showEquipContextMenu(ptr);
+      }
+      return;
+    }
+
     const d = Phaser.Math.Distance.Between(player.x, player.y, this.x, this.y);
     if (d > TILE_SIZE * 1.5) {
       const text = scene.add.text(this.x, this.y - TILE_SIZE / 2, 'Too far!', {
@@ -74,7 +87,6 @@ export class GroundItem extends Phaser.GameObjects.Container {
     }
 
     if (this.resource === 'KiShrine') {
-      if (ptr?.rightButtonDown()) return;
       scene._tryUseKiShrine?.(this);
       return;
     }
@@ -83,6 +95,12 @@ export class GroundItem extends Phaser.GameObjects.Container {
     if (conn?.connected && this._serverId) {
       conn.send({ type: 'pickup_placed', item_id: this._serverId });
     }
+  }
+
+  _showEquipContextMenu(ptr) {
+    const scene = this.scene;
+    if (!scene) return;
+    scene._openContextMenu(this, ptr);
   }
 
   /** Update the visual when the amount changes (log stacking). */

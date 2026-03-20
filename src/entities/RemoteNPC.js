@@ -8,6 +8,7 @@ import {
   NFRAME_WALK1_DOWN, NFRAME_WALK1_UP, NFRAME_WALK1_LEFT, NFRAME_WALK1_RIGHT,
 } from '../constants.js';
 import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
+import { createEquipmentOverlay, syncEquipmentOverlay } from './EquipmentOverlay.js';
 
 const SCALE = TILE_SIZE / NPC_FRAME_H;
 const LERP_SPEED = 0.35;
@@ -16,6 +17,13 @@ const MOVE_THRESHOLD = 0.5;
 
 const FACE_FRAMES = { down: NFRAME_FACE_DOWN, up: NFRAME_FACE_UP, left: NFRAME_FACE_LEFT, right: NFRAME_FACE_RIGHT };
 const WALK_FRAMES = { down: NFRAME_WALK1_DOWN, up: NFRAME_WALK1_UP, left: NFRAME_WALK1_LEFT, right: NFRAME_WALK1_RIGHT };
+
+// NPC frame → baseplayer frame mapping (for equipment overlay remap)
+const NPC_TO_BASE = {
+  0: 0, 1: 1, 2: 2, 3: 3,       // face down/up/right/left
+  36: 4, 37: 5, 38: 6, 39: 7,    // walk1 down/up/right/left
+  54: 26, 55: 25,                  // punch right/left
+};
 
 export class RemoteNPC extends Phaser.GameObjects.Sprite {
   constructor(scene, x, y, npcId, ownerPid, name) {
@@ -44,7 +52,7 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this.blastLevel = 0;
     this.kiSkillLevel = 1;
     this.kiBlastBonuses = {};
-    this.kiMoves = [];
+    this.kiMoves = ['absorb'];
     this.has_ki_blast = false;
     this.gathering = false;
     this._dead = false;
@@ -58,6 +66,8 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this._selected = false;
     this._attackable = false;
     this._hovered = false;
+    this.equipment = {};
+    this._equipOverlays = {};
 
     this._selectRing = scene.add.circle(x, y - 6, 21, 0xff4444, 0.28)
       .setStrokeStyle(3, 0xff8888, 0.95)
@@ -151,6 +161,7 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this._nameLabel?.setText(this._name);
     if (state.soul) this._soul = state.soul;
     if (state.personality) this._personality = state.personality;
+    if (state.equipment) this.equipment = { ...state.equipment };
     this._knockedOut = !!state.knocked_out;
     this._carriedBy = state.carried_by ?? null;
 
@@ -257,6 +268,34 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     const kiColor = kiPct > 0.5 ? 0x4488ff : kiPct > 0.25 ? 0x6644cc : 0x8822aa;
     this._kiBar?.setFillStyle(kiColor);
     syncBarrierOverlay(this._barrierOverlay, this);
+    this._syncEquipOverlays();
+  }
+
+  _syncEquipOverlays() {
+    const equipData = this.equipment || {};
+    const textures = this.scene?._equipmentTextures || {};
+    for (const [slot, eqId] of Object.entries(equipData)) {
+      let overlay = this._equipOverlays[slot];
+      const texInfo = textures[eqId];
+      if (!texInfo || !this.scene.textures.exists(texInfo.textureKey)) {
+        if (overlay) overlay.setVisible(false);
+        continue;
+      }
+      if (!overlay || overlay._textureKey !== texInfo.textureKey) {
+        if (overlay) overlay.destroy();
+        const npcRemap = {};
+        for (const [npcFrame, baseFrame] of Object.entries(NPC_TO_BASE)) {
+          const armorFrame = texInfo.remap[baseFrame];
+          if (armorFrame != null) npcRemap[Number(npcFrame)] = armorFrame;
+        }
+        overlay = createEquipmentOverlay(this.scene, this, texInfo.textureKey, npcRemap);
+        this._equipOverlays[slot] = overlay;
+      }
+      syncEquipmentOverlay(overlay, this);
+    }
+    for (const [slot, overlay] of Object.entries(this._equipOverlays)) {
+      if (!equipData[slot]) overlay.setVisible(false);
+    }
   }
 
   showBubble(text, duration = 4000) {
@@ -309,6 +348,8 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this._selectRingPulse?.destroy();
     this._attackRing?.destroy();
     this._barrierOverlay?.destroy();
+    for (const overlay of Object.values(this._equipOverlays || {})) overlay?.destroy();
+    this._equipOverlays = {};
     super.destroy(fromScene);
   }
 }

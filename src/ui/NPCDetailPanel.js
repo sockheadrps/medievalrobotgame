@@ -79,6 +79,10 @@ export class NPCDetailPanel {
               <div class="ndp-inv-label"></div>
               <button class="ndp-take-logs-btn">Take Logs</button>
             </div>
+            <div class="ndp-section ndp-equip-section">
+              <h3>Equipment</h3>
+              <div class="ndp-equip-content"></div>
+            </div>
             <div class="ndp-section ndp-personality">
               <h3>Personality</h3>
               <div class="ndp-type-desc"></div>
@@ -332,6 +336,9 @@ export class NPCDetailPanel {
     }
     matsEl.textContent = matsParts.length > 0 ? matsParts.join('  ') : '';
 
+    // Equipment section
+    this._refreshEquipment(npc);
+
     // Personality
     const pers = npc.soul.personality;
     const typeDesc = TYPE_DESCRIPTIONS[pType] || '';
@@ -536,6 +543,64 @@ export class NPCDetailPanel {
     this._el.querySelector('.ndp-soul-content').innerHTML = html;
   }
 
+  _refreshEquipment(npc) {
+    const el = this._el?.querySelector('.ndp-equip-content');
+    if (!el) return;
+    const scene = this._scene;
+    const eqManifest = scene._assetManifest?.equipment || {};
+    const playerInv = scene.player?.inventory ?? {};
+    const npcEquip = npc.equipment || {};
+
+    let html = '';
+
+    // Show currently equipped items
+    for (const [slot, eqId] of Object.entries(npcEquip)) {
+      const def = eqManifest[eqId];
+      const label = def?.label || eqId;
+      const stats = def?.stats || {};
+      const statParts = [];
+      if (stats.str_bonus) statParts.push(`+${stats.str_bonus} STR`);
+      if (stats.def_bonus) statParts.push(`+${stats.def_bonus} DEF`);
+      if (stats.hp_bonus) statParts.push(`+${stats.hp_bonus} HP`);
+      html += `<div class="ndp-equip-row">
+        <span class="ndp-equip-name" style="color:#88ff88">[${slot}] ${label}</span>
+        ${statParts.length ? `<span class="ndp-equip-stats">${statParts.join(', ')}</span>` : ''}
+        <button class="ndp-equip-take-btn" data-take-slot="${slot}">Take Back</button>
+      </div>`;
+    }
+
+    // Show equipment the player has in inventory that can be given
+    const available = Object.entries(playerInv).filter(([id, qty]) => qty > 0 && eqManifest[id]);
+    if (available.length > 0) {
+      html += `<div class="ndp-equip-divider">Give from inventory:</div>`;
+      for (const [eqId, qty] of available) {
+        const def = eqManifest[eqId];
+        const label = def?.label || eqId;
+        html += `<div class="ndp-equip-row">
+          <span class="ndp-equip-name" style="color:#aaccee">${label} x${qty}</span>
+          <button class="ndp-equip-give-btn" data-give-eq="${eqId}">Give</button>
+        </div>`;
+      }
+    }
+
+    if (!html) html = '<span style="color:#556;font-size:10px">No equipment</span>';
+    el.innerHTML = html;
+
+    // Bind give buttons
+    el.querySelectorAll('.ndp-equip-give-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        scene._conn?.send({ type: 'give_npc_equipment', npc_id: npc.id, equipment_id: btn.dataset.giveEq });
+      });
+    });
+
+    // Bind take back buttons
+    el.querySelectorAll('.ndp-equip-take-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        scene._conn?.send({ type: 'take_npc_equipment', npc_id: npc.id, slot: btn.dataset.takeSlot });
+      });
+    });
+  }
+
   _makeBar(label, value, color) {
     const pct = (value * 100).toFixed(0);
     return `<div class="ndp-trait">
@@ -702,6 +767,20 @@ export class NPCDetailPanel {
       }
       .ndp-take-logs-btn:hover:not(:disabled) { background:#2a3a2a; }
       .ndp-take-logs-btn:disabled { opacity:0.4; cursor:default; color:#666; border-color:#333; }
+
+      /* Equipment section */
+      .ndp-equip-row { display:flex; align-items:center; gap:6px; padding:3px 0; border-bottom:1px solid #1a1a33; font-size:11px; }
+      .ndp-equip-row:last-child { border-bottom:none; }
+      .ndp-equip-name { flex:1; }
+      .ndp-equip-stats { color:#889; font-size:9px; }
+      .ndp-equip-give-btn, .ndp-equip-take-btn {
+        background:#1a2a1a; border:1px solid #2a4; color:#4f4; font-size:10px;
+        padding:2px 8px; cursor:pointer; border-radius:3px;
+      }
+      .ndp-equip-take-btn { background:#2a1a1a; border-color:#a44; color:#f88; }
+      .ndp-equip-give-btn:hover { background:#2a3a2a; }
+      .ndp-equip-take-btn:hover { background:#3a2a2a; }
+      .ndp-equip-divider { font-size:9px; color:#668; margin:6px 0 3px; text-transform:uppercase; letter-spacing:0.5px; }
 
       /* Relationship label */
       .ndp-rel-label { margin-top:4px; font-size:11px; color:#aaa; text-align:center; }

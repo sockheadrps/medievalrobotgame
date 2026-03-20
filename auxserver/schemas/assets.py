@@ -53,6 +53,10 @@ class EquipmentStats(BaseModel):
     def_bonus: int = 0
     hp_bonus: int = 0
     dmg_reduction_pct: float = 0.0
+    # Mining tool stats (only relevant when slot == "tool")
+    mining_power: int = 0              # damage per swing to wall tiles
+    can_mine_hardwall: bool = False    # whether this tool can mine depth 30+ rock
+    durability: int = 0                # 0 = infinite, otherwise number of uses
 
 
 # ── Items ─────────────────────────────────────────────────────────────────────
@@ -74,10 +78,33 @@ class EquipmentDef(BaseModel):
     id: str
     label: str
     spriteSheet: str                     # filename (e.g. "Armor_Elite.png")
-    slot: str = "chest"                  # "chest", "head", "legs", etc.
+    slot: str = "chest"                  # "chest", "head", "legs", "weapon", "tool"
     frameSize: FrameSize = FrameSize()
     totalFrames: int = 1
     namedFrames: dict[str, str] = {}     # armor_frame_index → animation_name
     sourceTemplate: str = "baseplayer"   # which base sprite this overlays
     recipe: Recipe = Recipe()
     stats: EquipmentStats = EquipmentStats()
+
+
+# ── Crafting Stations ────────────────────────────────────────────────────────
+
+class StationRecipe(BaseModel):
+    input_item: str = ""                 # item id consumed
+    input_qty: int = 1
+    output_item: str = ""                # item id produced
+    output_min: int = 1
+    output_max: int = 1
+    process_time: float = 5.0           # seconds per operation
+
+
+class CraftingStationDef(BaseModel):
+    id: str
+    label: str
+    sprite: SpriteRef = SpriteRef()
+    station_type: str = "smelter"       # "smelter", "crusher", "anvil", "workbench"
+    speed_bonus: float = 1.0            # multiplier (1.0 = normal)
+    required_metallurgy: int = 0        # metallurgy level to build/use
+    fuel_type: str = "none"             # "none", "coal", "wood"
+    recipes: list[StationRecipe] = []   # what this station can process
+    build_recipe: dict[str, int] = {}   # ingredients to construct: item_id → qty

@@ -101,6 +101,10 @@ export class PlayerDetailPanel {
                   <h3>Items</h3>
                   <div class="pdp-inventory-dynamic"></div>
                 </div>
+                <div class="pdp-section">
+                  <h3>Equipment</h3>
+                  <div class="pdp-equipment-section"></div>
+                </div>
               </div>
               <div class="pdp-col-right">
                 <div class="pdp-section">
@@ -159,6 +163,14 @@ export class PlayerDetailPanel {
         el.querySelector(`.pdp-pane[data-pane="${tab.dataset.tab}"]`)?.classList.add('active');
       });
     }
+
+    // Combat mode toggle (delegated — buttons re-render each refresh)
+    el.querySelector('.pdp-combat-stats').addEventListener('click', (e) => {
+      const btn = e.target.closest('.pdp-cm-btn');
+      if (!btn) return;
+      const mode = btn.dataset.cm;
+      this._scene._conn?.send({ type: 'set_combat_mode', mode });
+    });
   }
 
   _refresh() {
@@ -183,10 +195,16 @@ export class PlayerDetailPanel {
     `;
 
     // Combat stats
+    const cMode = p.combatMode || 'kill';
     this._el.querySelector('.pdp-combat-stats').innerHTML = `
       <div class="pdp-stat-grid">
         ${this._statCell('STR', p.str)}
         ${this._statCell('DEF', p.def)}
+      </div>
+      <div class="pdp-combat-mode">
+        <span style="font-size:10px;color:#aaa;">Attack Mode:</span>
+        <button class="pdp-cm-btn${cMode === 'kill' ? ' active' : ''}" data-cm="kill">Kill</button>
+        <button class="pdp-cm-btn${cMode === 'ko' ? ' active' : ''}" data-cm="ko">KO</button>
       </div>
     `;
 
@@ -241,14 +259,60 @@ export class PlayerDetailPanel {
       </div>
     `;
 
-    // Data-driven inventory items
+    // Data-driven inventory items (separate equipment from regular items)
     const inv = p.inventory ?? {};
-    const invEntries = Object.entries(inv).filter(([, qty]) => qty > 0);
+    const eqManifest = this._scene._assetManifest?.equipment || {};
+    const regularEntries = Object.entries(inv).filter(([id, qty]) => qty > 0 && !eqManifest[id]);
+    const eqInvEntries = Object.entries(inv).filter(([id, qty]) => qty > 0 && eqManifest[id]);
     const invEl = this._el.querySelector('.pdp-inventory-dynamic');
     if (invEl) {
-      invEl.innerHTML = invEntries.length > 0
-        ? `<div class="pdp-inv-grid">${invEntries.map(([id, qty]) => this._invCell(id, qty, '#aaccee')).join('')}</div>`
+      invEl.innerHTML = regularEntries.length > 0
+        ? `<div class="pdp-inv-grid">${regularEntries.map(([id, qty]) => this._invCell(id, qty, '#aaccee')).join('')}</div>`
         : '';
+    }
+
+    // Equipment section: equipped + inventory equipment
+    const eqSection = this._el.querySelector('.pdp-equipment-section');
+    if (eqSection) {
+      let html = '';
+      const equipped = p.equipment || {};
+      // Show equipped items
+      for (const [slot, eqId] of Object.entries(equipped)) {
+        const def = eqManifest[eqId];
+        const label = def?.label || eqId;
+        html += `<div class="pdp-eq-row">
+          <span class="pdp-eq-label" style="color:#88ff88">[${slot}] ${label}</span>
+          <button class="pdp-eq-btn" data-unequip-slot="${slot}">Unequip</button>
+        </div>`;
+      }
+      // Show equipment in inventory
+      for (const [eqId, qty] of eqInvEntries) {
+        const def = eqManifest[eqId];
+        const label = def?.label || eqId;
+        html += `<div class="pdp-eq-row">
+          <span class="pdp-eq-label" style="color:#aaccee">${label} x${qty}</span>
+          <button class="pdp-eq-btn" data-equip-inv="${eqId}">Equip</button>
+          <button class="pdp-eq-btn" data-drop-eq="${eqId}">Drop</button>
+        </div>`;
+      }
+      if (!html) html = '<span style="color:#667788;font-size:12px">No equipment</span>';
+      eqSection.innerHTML = html;
+      // Bind buttons
+      eqSection.querySelectorAll('[data-unequip-slot]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this._scene._conn?.send({ type: 'unequip_item', slot: btn.dataset.unequipSlot });
+        });
+      });
+      eqSection.querySelectorAll('[data-equip-inv]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this._scene._conn?.send({ type: 'equip_item', equipment_id: btn.dataset.equipInv });
+        });
+      });
+      eqSection.querySelectorAll('[data-drop-eq]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this._scene._conn?.send({ type: 'drop_equipment', equipment_id: btn.dataset.dropEq });
+        });
+      });
     }
 
     // Give items — rebuild only once
@@ -279,17 +343,16 @@ export class PlayerDetailPanel {
     const canAnvil = (p.stones ?? 0) >= 5;
     const canCrystal = Number(p.crystals ?? 0) > 0;
     // Build equipment craft buttons from manifest
-    const eqManifest = this._scene._assetManifest?.equipment || {};
     let eqBtns = '';
     for (const [eqId, eqDef] of Object.entries(eqManifest)) {
-      const equipped = Object.values(p.equipment || {}).includes(eqId);
       const recipe = eqDef.recipe || {};
       const ingredients = recipe.ingredients || {};
       const costParts = Object.entries(ingredients).map(([res, amt]) => `${amt} ${res}`).join(', ');
-      const canCraft = !equipped && Object.entries(ingredients).every(([res, amt]) => (p[res] ?? 0) >= amt);
+      const getResCount = (res) => p[res] ?? p.inventory?.[res] ?? 0;
+      const canCraft = Object.entries(ingredients).every(([res, amt]) => getResCount(res) >= amt);
       eqBtns += `
         <button class="pdp-craft-btn" data-equip="${eqId}" ${canCraft ? '' : 'disabled'}>
-          ${equipped ? '(Equipped) ' : ''}${eqDef.label}<br><span class="pdp-craft-cost">${costParts}</span>
+          ${eqDef.label}<br><span class="pdp-craft-cost">${costParts}</span>
         </button>`;
     }
     craft.innerHTML = `
@@ -548,6 +611,26 @@ export class PlayerDetailPanel {
       #player-detail-panel .pdp-craft-btn:hover:not([disabled]) { background: #152540; color: #fff; }
       #player-detail-panel .pdp-craft-btn[disabled] { opacity: 0.4; cursor: default; }
       #player-detail-panel .pdp-craft-cost { font-size: 11px; color: #7a99b8; }
+
+      /* Equipment rows */
+      #player-detail-panel .pdp-eq-row { display: flex; align-items: center; gap: 8px;
+        padding: 5px 0; border-bottom: 1px solid rgba(75,107,139,0.12); }
+      #player-detail-panel .pdp-eq-row:last-child { border-bottom: 0; }
+      #player-detail-panel .pdp-eq-label { flex: 1; font-size: 13px; }
+      #player-detail-panel .pdp-eq-btn { background: #0d1625; color: #cde; border: 1px solid #335;
+        padding: 3px 10px; cursor: pointer; font-size: 12px; font-family: inherit; }
+      #player-detail-panel .pdp-eq-btn:hover { background: #152540; color: #fff; }
+
+      /* Combat mode toggle */
+      #player-detail-panel .pdp-combat-mode { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+      #player-detail-panel .pdp-cm-btn { font-size: 11px; padding: 3px 12px; border-radius: 4px;
+        border: 1px solid rgba(75,107,139,0.3); background: rgba(20,30,50,0.6); color: #8899aa;
+        cursor: pointer; font-family: inherit; }
+      #player-detail-panel .pdp-cm-btn:hover { background: rgba(40,60,100,0.6); border-color: #4488cc; color: #cde; }
+      #player-detail-panel .pdp-cm-btn.active[data-cm="kill"] { background: rgba(150,40,40,0.5);
+        border-color: #ff4444; color: #ffaaaa; box-shadow: 0 0 6px rgba(255,68,68,0.3); }
+      #player-detail-panel .pdp-cm-btn.active[data-cm="ko"] { background: rgba(40,100,150,0.5);
+        border-color: #44aaff; color: #aaddff; box-shadow: 0 0 6px rgba(68,170,255,0.3); }
 
       /* KV rows */
       #player-detail-panel .pdp-kv-list { display: flex; flex-direction: column; gap: 0; }

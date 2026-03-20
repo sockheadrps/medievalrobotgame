@@ -4,9 +4,11 @@ let currentTab = 'wo';
 let worldObjects = [];
 let equipment = [];
 let items = [];
+let stations = [];
 let selectedWO = null;
 let selectedEQ = null;
 let selectedIT = null;
+let selectedST = null;
 
 // ── Tab switching ────────────────────────────────────────────────────────────
 
@@ -15,32 +17,39 @@ function switchTab(tab) {
   document.getElementById('tabWO').classList.toggle('active', tab === 'wo');
   document.getElementById('tabEQ').classList.toggle('active', tab === 'eq');
   document.getElementById('tabIT').classList.toggle('active', tab === 'it');
+  document.getElementById('tabST').classList.toggle('active', tab === 'st');
   document.getElementById('woSidebar').style.display = tab === 'wo' ? '' : 'none';
   document.getElementById('eqSidebar').style.display = tab === 'eq' ? '' : 'none';
   document.getElementById('itSidebar').style.display = tab === 'it' ? '' : 'none';
+  document.getElementById('stSidebar').style.display = tab === 'st' ? '' : 'none';
   document.getElementById('woEditor').style.display = 'none';
   document.getElementById('eqEditor').style.display = 'none';
   document.getElementById('itEditor').style.display = 'none';
+  document.getElementById('stEditor').style.display = 'none';
   document.getElementById('emptyState').style.display = '';
   selectedWO = null;
   selectedEQ = null;
   selectedIT = null;
+  selectedST = null;
 }
 
 // ── Data loading ─────────────────────────────────────────────────────────────
 
 async function loadAll() {
-  const [woResp, eqResp, itResp] = await Promise.all([
+  const [woResp, eqResp, itResp, stResp] = await Promise.all([
     fetch('/api/assets/world-objects'),
     fetch('/api/assets/equipment'),
     fetch('/api/assets/items'),
+    fetch('/api/assets/stations'),
   ]);
   worldObjects = await woResp.json();
   equipment = await eqResp.json();
   items = await itResp.json();
+  stations = await stResp.json();
   renderWOList();
   renderEQList();
   renderITList();
+  renderSTList();
 }
 
 function renderWOList() {
@@ -86,6 +95,8 @@ function selectWO(wo) {
   selectedWO = JSON.parse(JSON.stringify(wo));
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('eqEditor').style.display = 'none';
+  document.getElementById('itEditor').style.display = 'none';
+  document.getElementById('stEditor').style.display = 'none';
   const el = document.getElementById('woEditor');
   el.style.display = '';
   renderWOEditor();
@@ -278,6 +289,8 @@ function selectEQ(eq) {
   selectedEQ = JSON.parse(JSON.stringify(eq));
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('woEditor').style.display = 'none';
+  document.getElementById('itEditor').style.display = 'none';
+  document.getElementById('stEditor').style.display = 'none';
   const el = document.getElementById('eqEditor');
   el.style.display = '';
   renderEQEditor();
@@ -301,11 +314,12 @@ function renderEQEditor() {
     <div class="form-row">
       <div class="form-group"><label>Sprite Sheet (filename)</label><input id="eq_spriteSheet" value="${eq.spriteSheet || ''}" /></div>
       <div class="form-group"><label>Slot</label>
-        <select id="eq_slot">
+        <select id="eq_slot" onchange="toggleMiningFields()">
           <option value="chest" ${eq.slot === 'chest' ? 'selected' : ''}>Chest</option>
           <option value="head" ${eq.slot === 'head' ? 'selected' : ''}>Head</option>
           <option value="legs" ${eq.slot === 'legs' ? 'selected' : ''}>Legs</option>
           <option value="weapon" ${eq.slot === 'weapon' ? 'selected' : ''}>Weapon</option>
+          <option value="tool" ${eq.slot === 'tool' ? 'selected' : ''}>Tool</option>
         </select>
       </div>
     </div>
@@ -322,6 +336,18 @@ function renderEQEditor() {
       <div class="form-group"><label>DEF Bonus</label><input type="number" id="eq_defBonus" value="${stats.def_bonus ?? 0}" /></div>
       <div class="form-group"><label>HP Bonus</label><input type="number" id="eq_hpBonus" value="${stats.hp_bonus ?? 0}" /></div>
       <div class="form-group"><label>Dmg Reduction %</label><input type="number" id="eq_dmgRed" value="${stats.dmg_reduction_pct ?? 0}" step="0.1" /></div>
+    </div>
+
+    <div class="section-header" id="eq_miningHeader" style="${eq.slot === 'tool' ? '' : 'display:none'}">Mining Tool Stats</div>
+    <div class="form-row" id="eq_miningRow" style="${eq.slot === 'tool' ? '' : 'display:none'}">
+      <div class="form-group"><label>Mining Power</label><input type="number" id="eq_miningPower" value="${stats.mining_power ?? 1}" min="1" /></div>
+      <div class="form-group"><label>Can Mine Hardwall</label>
+        <select id="eq_canMineHardwall">
+          <option value="false" ${!stats.can_mine_hardwall ? 'selected' : ''}>No</option>
+          <option value="true" ${stats.can_mine_hardwall ? 'selected' : ''}>Yes</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Durability (0=infinite)</label><input type="number" id="eq_durability" value="${stats.durability ?? 0}" min="0" /></div>
     </div>
 
     <div class="section-header">Recipe</div>
@@ -426,8 +452,19 @@ function gatherEQ() {
       def_bonus: Number(document.getElementById('eq_defBonus').value),
       hp_bonus: Number(document.getElementById('eq_hpBonus').value),
       dmg_reduction_pct: Number(document.getElementById('eq_dmgRed').value),
+      mining_power: Number(document.getElementById('eq_miningPower')?.value || 0),
+      can_mine_hardwall: document.getElementById('eq_canMineHardwall')?.value === 'true',
+      durability: Number(document.getElementById('eq_durability')?.value || 0),
     },
   };
+}
+
+function toggleMiningFields() {
+  const isTool = document.getElementById('eq_slot')?.value === 'tool';
+  const header = document.getElementById('eq_miningHeader');
+  const row = document.getElementById('eq_miningRow');
+  if (header) header.style.display = isTool ? '' : 'none';
+  if (row) row.style.display = isTool ? '' : 'none';
 }
 
 async function saveEQ() {
@@ -482,6 +519,7 @@ function selectIT(it) {
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('woEditor').style.display = 'none';
   document.getElementById('eqEditor').style.display = 'none';
+  document.getElementById('stEditor').style.display = 'none';
   const el = document.getElementById('itEditor');
   el.style.display = '';
   renderITEditor();
@@ -630,6 +668,277 @@ async function uploadItemSprite() {
   if (result.ok) {
     document.getElementById('it_png').value = fileInput.files[0].name;
   }
+}
+
+// ── Station Editor ──────────────────────────────────────────────────────────
+
+function renderSTList() {
+  const ul = document.getElementById('stList');
+  ul.innerHTML = '';
+  for (const st of stations) {
+    const li = document.createElement('li');
+    li.classList.toggle('selected', selectedST?.id === st.id);
+    li.innerHTML = `<span class="item-label">${st.label || st.id}</span><span class="item-id">${st.id}</span>`;
+    li.onclick = () => selectST(st);
+    ul.appendChild(li);
+  }
+}
+
+function newStation() {
+  const id = prompt('Station ID (e.g. basic_furnace):');
+  if (!id) return;
+  const st = {
+    id, label: id.replace(/_/g, ' '),
+    sprite: { type: 'tilemap', tileCol: 0, tileRow: 0 },
+    station_type: 'smelter',
+    speed_bonus: 1.0,
+    required_metallurgy: 0,
+    fuel_type: 'none',
+    recipes: [],
+    build_recipe: {},
+  };
+  selectST(st);
+}
+
+function selectST(st) {
+  selectedST = JSON.parse(JSON.stringify(st));
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('woEditor').style.display = 'none';
+  document.getElementById('eqEditor').style.display = 'none';
+  document.getElementById('itEditor').style.display = 'none';
+  const el = document.getElementById('stEditor');
+  el.style.display = '';
+  renderSTEditor();
+  renderSTList();
+}
+
+function renderSTEditor() {
+  const st = selectedST;
+  if (!st) return;
+  const el = document.getElementById('stEditor');
+  el.innerHTML = `
+    <h3 style="color:#66aaff;margin-bottom:12px;">Crafting Station: ${st.id}</h3>
+
+    <div class="form-row">
+      <div class="form-group"><label>ID</label><input id="st_id" value="${st.id}" /></div>
+      <div class="form-group"><label>Label</label><input id="st_label" value="${st.label || ''}" /></div>
+    </div>
+
+    <div class="section-header">Sprite</div>
+    <div class="form-row">
+      <div class="form-group"><label>Tile Col</label><input type="number" id="st_tileCol" value="${st.sprite?.tileCol ?? 0}" onchange="drawTilePreview('st_tilePreview', Number(this.value), Number(document.getElementById('st_tileRow').value))" /></div>
+      <div class="form-group"><label>Tile Row</label><input type="number" id="st_tileRow" value="${st.sprite?.tileRow ?? 0}" onchange="drawTilePreview('st_tilePreview', Number(document.getElementById('st_tileCol').value), Number(this.value))" /></div>
+      <div class="form-group"><label>Preview</label>
+        <div style="display:flex;align-items:center;">
+          <canvas id="st_tilePreview" class="tile-preview" width="48" height="48"></canvas>
+          <button type="button" class="btn-pick-tile" onclick="openTilePicker(
+            Number(document.getElementById('st_tileCol').value),
+            Number(document.getElementById('st_tileRow').value),
+            (col, row) => {
+              document.getElementById('st_tileCol').value = col;
+              document.getElementById('st_tileRow').value = row;
+              drawTilePreview('st_tilePreview', col, row);
+            }
+          )">Pick tile</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-header">Properties</div>
+    <div class="form-row">
+      <div class="form-group"><label>Station Type</label>
+        <select id="st_stationType">
+          <option value="smelter" ${st.station_type === 'smelter' ? 'selected' : ''}>Smelter</option>
+          <option value="crusher" ${st.station_type === 'crusher' ? 'selected' : ''}>Crusher</option>
+          <option value="anvil" ${st.station_type === 'anvil' ? 'selected' : ''}>Anvil</option>
+          <option value="workbench" ${st.station_type === 'workbench' ? 'selected' : ''}>Workbench</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Speed Bonus</label><input type="number" id="st_speedBonus" value="${st.speed_bonus ?? 1.0}" step="0.1" min="0.1" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Required Metallurgy Level</label><input type="number" id="st_reqMetal" value="${st.required_metallurgy ?? 0}" min="0" /></div>
+      <div class="form-group"><label>Fuel Type</label>
+        <select id="st_fuelType">
+          <option value="none" ${st.fuel_type === 'none' ? 'selected' : ''}>None</option>
+          <option value="coal" ${st.fuel_type === 'coal' ? 'selected' : ''}>Coal</option>
+          <option value="wood" ${st.fuel_type === 'wood' ? 'selected' : ''}>Wood</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-header">Build Recipe</div>
+    <div class="build-recipe-list" id="stBuildRecipe"></div>
+    <button class="btn-add-row" onclick="addSTBuildIngredient()">+ Add Ingredient</button>
+
+    <div class="section-header">Station Recipes</div>
+    <div class="station-recipes-list" id="stRecipes"></div>
+    <button class="btn-add-row" onclick="addSTRecipe()">+ Add Recipe</button>
+
+    <div style="margin-top:20px;">
+      <button class="btn-save" onclick="saveST()">Save</button>
+      <button class="btn-delete" onclick="deleteST()">Delete</button>
+    </div>
+  `;
+  renderSTBuildRecipe();
+  renderSTRecipes();
+  drawTilePreview('st_tilePreview', st.sprite?.tileCol ?? 0, st.sprite?.tileRow ?? 0);
+}
+
+// ── Station Build Recipe ──
+
+function renderSTBuildRecipe() {
+  const container = document.getElementById('stBuildRecipe');
+  if (!container) return;
+  container.innerHTML = '';
+  const ingredients = selectedST.build_recipe || {};
+  const entries = Object.entries(ingredients);
+  for (let i = 0; i < entries.length; i++) {
+    const [res, amt] = entries[i];
+    const row = document.createElement('div');
+    row.className = 'ingredient-row';
+    row.innerHTML = `
+      <select class="ing-res" data-i="${i}" onchange="updateSTBuildRecipe()">${_itemOptions(res)}</select>
+      <label style="color:#888;font-size:11px;">qty</label>
+      <input class="ing-amt" type="number" value="${amt}" data-i="${i}" onchange="updateSTBuildRecipe()" />
+      <button onclick="removeSTBuildIngredient('${res}')">x</button>
+    `;
+    container.appendChild(row);
+  }
+}
+
+function addSTBuildIngredient() {
+  if (!selectedST.build_recipe) selectedST.build_recipe = {};
+  const defaultRes = items.length > 0 ? items[0].id : 'stone';
+  selectedST.build_recipe[defaultRes] = 1;
+  renderSTBuildRecipe();
+}
+
+function removeSTBuildIngredient(res) {
+  delete selectedST.build_recipe[res];
+  renderSTBuildRecipe();
+}
+
+function updateSTBuildRecipe() {
+  const container = document.getElementById('stBuildRecipe');
+  const rows = container.querySelectorAll('.ingredient-row');
+  const newRecipe = {};
+  rows.forEach(row => {
+    const res = row.querySelector('.ing-res').value.trim();
+    const amt = Number(row.querySelector('.ing-amt').value);
+    if (res) newRecipe[res] = amt;
+  });
+  selectedST.build_recipe = newRecipe;
+}
+
+// ── Station Recipes (processing) ──
+
+function renderSTRecipes() {
+  const container = document.getElementById('stRecipes');
+  if (!container) return;
+  container.innerHTML = '';
+  const recipes = selectedST.recipes || [];
+  for (let i = 0; i < recipes.length; i++) {
+    const r = recipes[i];
+    const card = document.createElement('div');
+    card.className = 'recipe-card';
+    card.innerHTML = `
+      <div class="recipe-card-header">
+        <span>Recipe ${i + 1}</span>
+        <button onclick="removeSTRecipe(${i})">x</button>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Input Item</label>
+          <select data-i="${i}" data-f="input_item" onchange="updateSTRecipeField(this)">${_itemOptions(r.input_item)}</select>
+        </div>
+        <div class="form-group"><label>Input Qty</label>
+          <input type="number" value="${r.input_qty ?? 1}" min="1" data-i="${i}" data-f="input_qty" onchange="updateSTRecipeField(this)" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Output Item</label>
+          <select data-i="${i}" data-f="output_item" onchange="updateSTRecipeField(this)">${_itemOptions(r.output_item)}</select>
+        </div>
+        <div class="form-group"><label>Output Min</label>
+          <input type="number" value="${r.output_min ?? 1}" min="1" data-i="${i}" data-f="output_min" onchange="updateSTRecipeField(this)" />
+        </div>
+        <div class="form-group"><label>Output Max</label>
+          <input type="number" value="${r.output_max ?? 1}" min="1" data-i="${i}" data-f="output_max" onchange="updateSTRecipeField(this)" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Process Time (s)</label>
+          <input type="number" value="${r.process_time ?? 5}" min="0.5" step="0.5" data-i="${i}" data-f="process_time" onchange="updateSTRecipeField(this)" />
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  }
+}
+
+function addSTRecipe() {
+  selectedST.recipes = selectedST.recipes || [];
+  const defaultItem = items.length > 0 ? items[0].id : '';
+  selectedST.recipes.push({
+    input_item: defaultItem, input_qty: 10,
+    output_item: defaultItem, output_min: 2, output_max: 5,
+    process_time: 5.0,
+  });
+  renderSTRecipes();
+}
+
+function removeSTRecipe(i) {
+  selectedST.recipes.splice(i, 1);
+  renderSTRecipes();
+}
+
+function updateSTRecipeField(el) {
+  const i = Number(el.dataset.i);
+  const f = el.dataset.f;
+  if (f === 'input_item' || f === 'output_item') {
+    selectedST.recipes[i][f] = el.value;
+  } else {
+    selectedST.recipes[i][f] = Number(el.value);
+  }
+}
+
+function gatherST() {
+  updateSTBuildRecipe();
+  return {
+    id: document.getElementById('st_id').value.trim(),
+    label: document.getElementById('st_label').value.trim(),
+    sprite: {
+      type: 'tilemap',
+      tileCol: Number(document.getElementById('st_tileCol').value),
+      tileRow: Number(document.getElementById('st_tileRow').value),
+    },
+    station_type: document.getElementById('st_stationType').value,
+    speed_bonus: Number(document.getElementById('st_speedBonus').value),
+    required_metallurgy: Number(document.getElementById('st_reqMetal').value),
+    fuel_type: document.getElementById('st_fuelType').value,
+    recipes: selectedST.recipes || [],
+    build_recipe: selectedST.build_recipe || {},
+  };
+}
+
+async function saveST() {
+  const data = gatherST();
+  await fetch('/api/assets/stations', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  await loadAll();
+  selectST(data);
+}
+
+async function deleteST() {
+  if (!selectedST?.id) return;
+  if (!confirm(`Delete station "${selectedST.id}"?`)) return;
+  await fetch(`/api/assets/stations/${selectedST.id}`, { method: 'DELETE' });
+  selectedST = null;
+  document.getElementById('stEditor').style.display = 'none';
+  document.getElementById('emptyState').style.display = '';
+  await loadAll();
 }
 
 // ── Tile Picker Modal ────────────────────────────────────────────────────────

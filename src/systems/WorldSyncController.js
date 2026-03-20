@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { Rock } from '../entities/Rock.js';
 import { GroundItem } from '../entities/GroundItem.js';
 import { TrainingDummy } from '../entities/TrainingDummy.js';
+import { Etrainer } from '../entities/Etrainer.js';
 import { AnimalEntity } from '../entities/AnimalEntity.js';
 import { WorldObject } from '../entities/WorldObject.js';
 import { Conveyor } from '../entities/Conveyor.js';
@@ -9,7 +10,7 @@ import { Crate } from '../entities/Crate.js';
 import { Furnace } from '../entities/Furnace.js';
 import { LogCuttingStation } from '../entities/LogCuttingStation.js';
 import { MinecartTrack } from '../entities/MinecartTrack.js';
-import { TILE_SIZE, SHEET_KEY, FRAME_ANVIL, FIRE_KEY, FIRE_FRAMES, tilePos } from '../constants.js';
+import { TILE_SIZE, SHEET_KEY, FRAME_ANVIL, FRAME_GATE, FRAME_FENCE, FIRE_KEY, FIRE_FRAMES, tilePos } from '../constants.js';
 
 export class WorldSyncController {
   constructor(scene) {
@@ -57,8 +58,9 @@ export class WorldSyncController {
     for (const si of serverItems) {
       seenIds.add(si.id);
       if (!scene._groundItemSprites[si.id]) {
-        const gi = new GroundItem(scene, si.x, si.y, si.resource, si.amount, !!si._placed);
+        const gi = new GroundItem(scene, si.x, si.y, si.resource, si.amount, !!si._placed, !!si._equipment);
         gi._serverId = si.id;
+        gi._isEquipment = !!si._equipment;
         gi.applyState(si);
         scene._groundItemSprites[si.id] = gi;
       } else {
@@ -95,14 +97,20 @@ export class WorldSyncController {
       seenIds.add(did);
       let dummy = scene._dummySprites[did];
       if (!dummy) {
-        dummy = new TrainingDummy(scene, sd.x, sd.y, Math.ceil(sd.maxHp / 5));
+        if (sd.etrainer) {
+          dummy = new Etrainer(scene, sd.x, sd.y);
+        } else {
+          dummy = new TrainingDummy(scene, sd.x, sd.y, Math.ceil(sd.maxHp / 5));
+        }
         dummy._serverId = did;
         scene._dummySprites[did] = dummy;
         scene.dummies.push(dummy);
       }
-      dummy.hp = sd.hp;
-      dummy.maxHp = sd.maxHp;
-      dummy._updateHpBar();
+      if (!sd.etrainer) {
+        dummy.hp = sd.hp;
+        dummy.maxHp = sd.maxHp;
+        dummy._updateHpBar?.();
+      }
     }
     for (const [did, dummy] of Object.entries(scene._dummySprites)) {
       if (!seenIds.has(did)) {
@@ -367,8 +375,45 @@ export class WorldSyncController {
           if (sb.out_direction && sb.out_direction !== (sb.direction || 'right')) {
             entity._refreshOwnSprite(sb.out_direction);
           }
+        } else if (sb.kind === 'etrainer') {
+          // Etrainer is rendered via syncDummies, not as a building sprite
+          entity = { _skip: true };
+        } else if (sb.kind === 'gate' || sb.kind === 'fence') {
+          const frame = sb.kind === 'gate' ? FRAME_GATE : FRAME_FENCE;
+          entity = scene.add.sprite(x, y, SHEET_KEY, frame);
+          entity.setScale(TILE_SIZE / 16);
+          entity.setDepth(4);
+          entity.col = sb.col;
+          entity.row = sb.row;
+          entity._kind = sb.kind;
+          entity._owner = sb.owner || '';
+
+          if (sb.kind === 'fence') {
+            const hpBar = scene.add.graphics().setDepth(5);
+            entity._hpBar = hpBar;
+            entity._hp = sb.hp ?? 50;
+            entity._maxHp = sb.maxHp ?? 50;
+            this._updateFenceHpBar(entity);
+            entity.setInteractive({ useHandCursor: true });
+            entity.on('pointerdown', (ptr) => {
+              if (ptr.leftButtonDown()) {
+                scene._conn?.send({ type: 'attack_fence', building_id: bid });
+              } else if (ptr.rightButtonDown()) {
+                ptr._fgHandled = true;
+                scene._openBuildingContextMenu(bid, 'fence', ptr, entity);
+              }
+            });
+          } else {
+            entity.setInteractive({ useHandCursor: true });
+            entity.on('pointerdown', (ptr) => {
+              if (ptr.rightButtonDown()) {
+                ptr._fgHandled = true;
+                scene._openBuildingContextMenu(bid, 'gate', ptr, entity);
+              }
+            });
+          }
         }
-        if (entity) {
+        if (entity && !entity._skip) {
           entity._serverId = bid;
           scene._buildingSprites[bid] = entity;
         }
@@ -392,6 +437,18 @@ export class WorldSyncController {
       // Sync cart state on tracks from server
       if (entity && sb.kind === 'track' && entity.applyServerCart) {
         entity.applyServerCart(sb.cart || null);
+      }
+
+      // Sync fence HP
+      if (entity && sb.kind === 'fence' && sb.hp != null) {
+        entity._hp = sb.hp;
+        entity._maxHp = sb.maxHp ?? 50;
+        this._updateFenceHpBar(entity);
+      }
+
+      // Sync gate owner
+      if (entity && (sb.kind === 'gate' || sb.kind === 'fence')) {
+        entity._owner = sb.owner || '';
       }
 
       // Re-apply conveyor out_direction on every sync (in case it was reset by neighbor refreshSprite)
@@ -425,12 +482,35 @@ export class WorldSyncController {
         } else if (entity instanceof MinecartTrack) {
           const idx = scene._tracks.indexOf(entity);
           if (idx >= 0) scene._tracks.splice(idx, 1);
+        } else if (entity._kind === 'fence' || entity._kind === 'gate') {
+          if (entity._hpBar) entity._hpBar.destroy();
         }
-        scene.grid.remove(entity.col, entity.row);
-        entity.destroy();
+        if (entity.col != null && entity.row != null) scene.grid.remove(entity.col, entity.row);
+        if (typeof entity.destroy === 'function') {
+          entity.destroy();
+        }
         delete scene._buildingSprites[bid];
       }
     }
+  }
+
+  _updateFenceHpBar(entity) {
+    if (!entity._hpBar) return;
+    const bar = entity._hpBar;
+    bar.clear();
+    const hp = entity._hp ?? 0;
+    const maxHp = entity._maxHp ?? 1;
+    if (hp >= maxHp) return; // Don't show bar at full HP
+    const bw = 32;
+    const bh = 4;
+    const bx = entity.x - bw / 2;
+    const by = entity.y + TILE_SIZE * 0.4;
+    bar.fillStyle(0x333333);
+    bar.fillRect(bx, by, bw, bh);
+    const pct = hp / maxHp;
+    const color = pct > 0.5 ? 0x44cc44 : pct > 0.25 ? 0xccaa44 : 0xcc4444;
+    bar.fillStyle(color);
+    bar.fillRect(bx, by, bw * pct, bh);
   }
 
   tryRefineAtAnvil(anvilId, ax, ay) {

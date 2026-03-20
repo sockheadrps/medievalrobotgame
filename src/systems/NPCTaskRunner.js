@@ -12,6 +12,7 @@ const DEFEND_RANGE  = TILE_SIZE * 6;
 const ATTACK_COOLDOWN_BASE = 1000; // ms between NPC attacks (base, scaled by personality)
 const KI_BLAST_RANGE = TILE_SIZE * 4; // NPC ki blast range (matches player)
 const KI_BLAST_COOLDOWN_BASE = 1200; // NPC ki blast cooldown (base, scaled by personality)
+const ABSORB_DURATION_MS = 2000;
 
 export class NPCTaskRunner {
   constructor(scene, npc) {
@@ -84,6 +85,114 @@ export class NPCTaskRunner {
     this.setTasks([{ task: 'idle' }]);
   }
 
+  _pickAbsorbLine(kind = 'start', targetName = 'them') {
+    const type = this._npc.soul?.personality?.type || 'Pragmatist';
+    const linesByType = {
+      Guardian: {
+        start: [
+          `I'll absorb ${targetName} before they recover.`,
+          `Keeping this contained. Absorbing ${targetName} now.`,
+        ],
+        cast: [
+          `Taking their power now.`,
+          `Their energy is mine.`,
+        ],
+      },
+      Scout: {
+        start: [
+          `Ooh, let's see what ${targetName} was hiding.`,
+          `Alright, draining ${targetName} now.`,
+        ],
+        cast: [
+          `Whoa... that's a lot of power.`,
+          `Yep, I'm taking that.`,
+        ],
+      },
+      Berserker: {
+        start: [
+          `Good. I'll rip the power out of ${targetName}.`,
+          `Stay down, ${targetName}. I'm taking everything.`,
+        ],
+        cast: [
+          `Mine now.`,
+          `Your power belongs to me.`,
+        ],
+      },
+      Caretaker: {
+        start: [
+          `I'll end this cleanly. Absorbing ${targetName}.`,
+          `Sorry... but I need that strength, ${targetName}.`,
+        ],
+        cast: [
+          `Easy... just let go.`,
+          `It's over. I'm taking the energy.`,
+        ],
+      },
+      Paranoid: {
+        start: [
+          `Not risking them getting back up. Absorbing ${targetName}.`,
+          `No chances. I'm draining ${targetName} now.`,
+        ],
+        cast: [
+          `Safer this way.`,
+          `They won't be getting up from that.`,
+        ],
+      },
+      Pragmatist: {
+        start: [
+          `Absorbing ${targetName}. Efficient.`,
+          `Target is down. Beginning absorption.`,
+        ],
+        cast: [
+          `Energy transfer underway.`,
+          `Power acquired.`,
+        ],
+      },
+    };
+    const pool = linesByType[type]?.[kind] || linesByType.Pragmatist[kind] || ['Absorbing target.'];
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  _tryAbsorbKnockedOutNpc(target) {
+    const npc = this._npc;
+    const scene = this._scene;
+    if (!target?.isKnockedOut?.() || target.isDead?.()) return false;
+    if (!(npc.kiMoves || []).includes('absorb')) return false;
+    if (this._kiBlastCooldown > 0) return false;
+    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, target.x, target.y);
+    if (dist > this._getKiBlastRange()) return false;
+    if (!npc.infKi && npc.ki < npc.getBlastCost()) return false;
+
+    const cost = npc.getBlastCost();
+    if (npc.infKi) {
+      npc.ki = npc.maxKi;
+    } else {
+      npc.ki -= cost;
+      npc._kiRegenAccum = 0;
+    }
+
+    this._faceTarget(npc, target);
+    npc.stopMoving();
+    scene._combatFx?.playAbsorbEffect(
+      npc.x,
+      npc.y - npc.displayHeight * 0.4,
+      target.x,
+      target.y - (target.displayHeight || TILE_SIZE) * 0.4,
+      ABSORB_DURATION_MS,
+    );
+    scene._conn?.send({
+      type: 'npc_absorb_npc',
+      npc_id: npc.id,
+      target_owner: target.ownerPid,
+      target_npc_id: target.npcId,
+    });
+    const castLine = this._pickAbsorbLine('cast', target.getName?.() || target.npcId || 'them');
+    npc.showBubble(castLine, 1800, { silent: true });
+    scene._addNPCSpeechToChat?.(npc, castLine, '#66e0ff');
+    this._kiBlastCooldown = ABSORB_DURATION_MS;
+    return true;
+  }
+
   /** Called every frame from GameScene update. */
   update(delta) {
     if (this._npc.isDead()) return;
@@ -102,6 +211,7 @@ export class NPCTaskRunner {
       case 'defend_player':        this._doDefend(delta); break;
       case 'attack_player':        this._doAttackPlayer(delta); break;
       case 'attack_npc':            this._doAttackNPC(delta); break;
+      case 'absorb_npc':            this._doAbsorbNPC(delta); break;
       case 'flee_player':           this._doFleePlayer(delta); break;
       case 'give_logs':            this._doGiveLogs(delta); break;
       case 'steal_logs':           this._doStealLogs(delta); break;
@@ -246,6 +356,9 @@ export class NPCTaskRunner {
     const scene = this._scene;
     const npc = this._npc;
     const player = scene.player;
+    const npcInv = npc._npcInventory || {};
+    const invStone = Number(npcInv.stone || npcInv.Stone || 0);
+    const invCrystal = Number(npcInv.crystal || npcInv.Crystal || 0);
 
     if (this._mineCooldown > 0) {
       this._mineCooldown -= _delta;
@@ -253,7 +366,7 @@ export class NPCTaskRunner {
       return;
     }
 
-    if ((npc.stones || 0) + (npc.crystals || 0) > 0) {
+    if ((npc.stones || 0) + (npc.crystals || 0) + invStone + invCrystal > 0) {
       if (!player) return;
       const distToPlayer = Phaser.Math.Distance.Between(npc.x, npc.y, player.x, player.y);
       if (distToPlayer > this._getFollowLeash()) {
@@ -265,11 +378,17 @@ export class NPCTaskRunner {
           conn.send({ type: 'npc_give_materials', npc_id: npc.id });
         }
         const parts = [];
-        if ((npc.crystals || 0) > 0) parts.push(`${npc.crystals} Crystal${npc.crystals > 1 ? 's' : ''}`);
-        if ((npc.stones || 0) > 0) parts.push(`${npc.stones} Stone${npc.stones > 1 ? 's' : ''}`);
+        const totalCrystals = (npc.crystals || 0) + invCrystal;
+        const totalStones = (npc.stones || 0) + invStone;
+        if (totalCrystals > 0) parts.push(`${totalCrystals} Crystal${totalCrystals > 1 ? 's' : ''}`);
+        if (totalStones > 0) parts.push(`${totalStones} Stone${totalStones > 1 ? 's' : ''}`);
         npc.showBubble(`Bringing you ${parts.join(', ')}!`, 3000, { silent: true });
         npc.crystals = 0;
         npc.stones = 0;
+        delete npcInv.crystal;
+        delete npcInv.Crystal;
+        delete npcInv.stone;
+        delete npcInv.Stone;
       }
       return;
     }
@@ -293,6 +412,32 @@ export class NPCTaskRunner {
         const conn = scene._conn;
         if (conn?.connected && rockSprite.rockId >= 0) {
           conn.send({ type: 'npc_mine_rock', rock_id: rockSprite.rockId, npc_id: npc.id });
+        }
+        npc.stones = (npc.stones || 0) + 1;
+        npc.showBubble('Mining stone!', 1200, { silent: true });
+        this._mineCooldown = 1000;
+      }
+      return;
+    }
+
+    let rockWorldObj = null;
+    let bestWorldRockDist = Infinity;
+    for (const wo of Object.values(scene._worldObjSprites || {})) {
+      if (!wo || wo._depleted || wo._assetId !== 'rock') continue;
+      const d = Phaser.Math.Distance.Between(npc.x, npc.y, wo.x, wo.y);
+      if (d < bestWorldRockDist) {
+        bestWorldRockDist = d;
+        rockWorldObj = wo;
+      }
+    }
+    if (rockWorldObj) {
+      if (bestWorldRockDist > ROCK_MINE_DIST) {
+        npc.moveTo(rockWorldObj.x, rockWorldObj.y);
+      } else {
+        npc.stopMoving();
+        const conn = scene._conn;
+        if (conn?.connected && rockWorldObj._woId) {
+          conn.send({ type: 'npc_interact_world_object', wo_id: rockWorldObj._woId, npc_id: npc.id });
         }
         npc.stones = (npc.stones || 0) + 1;
         npc.showBubble('Mining stone!', 1200, { silent: true });
@@ -475,8 +620,16 @@ export class NPCTaskRunner {
     // Attack cooldown
     if (this._attackCooldown > 0) { this._attackCooldown -= _delta; return; }
 
+    if (this._target?.isKnockedOut?.()) {
+      const targetName = this._target.getName?.() || this._target.playerId || this._target.npcId || 'them';
+      if (this._targetType === 'npc') this._tryAbsorbKnockedOutNpc(this._target);
+      this._completeCombatTaskOnTargetDown(targetName);
+      this._target = null;
+      return;
+    }
+
     // Re-acquire target if current one is dead or missing
-    if (!this._target || this._target._dead || this._target.isDead?.() || this._target.isKnockedOut?.()) {
+    if (!this._target || this._target._dead || this._target.isDead?.()) {
       this._target = null;
       let bestDist = Infinity;
 
@@ -550,6 +703,7 @@ export class NPCTaskRunner {
 
       if (this._targetIsDown(target)) {
         const targetName = target.getName?.() || target.playerId || target.npcId || 'them';
+        if (this._targetType === 'npc') this._tryAbsorbKnockedOutNpc(target);
         this._completeCombatTaskOnTargetDown(targetName);
         this._target = null;
       }
@@ -663,6 +817,7 @@ export class NPCTaskRunner {
       return;
     }
     if (rnpc.isKnockedOut?.()) {
+      this._tryAbsorbKnockedOutNpc(rnpc);
       this._completeCombatTaskOnTargetDown(rnpc.getName?.() || cmd.target_npc_id || 'them');
       return;
     }
@@ -690,6 +845,71 @@ export class NPCTaskRunner {
         });
       }
     }
+  }
+
+  _findNearestKnockedOutEnemyNpc() {
+    const scene = this._scene;
+    const npc = this._npc;
+    let nearest = null;
+    let nearestDist = Infinity;
+    for (const rnpc of Object.values(scene._remoteNPCSprites || {})) {
+      if (!rnpc || rnpc.ownerPid === scene.playerId || rnpc.isDead?.() || !rnpc.isKnockedOut?.()) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, rnpc.x, rnpc.y);
+      if (dist < nearestDist) {
+        nearest = rnpc;
+        nearestDist = dist;
+      }
+    }
+    return nearest;
+  }
+
+  _doAbsorbNPC(_delta) {
+    const scene = this._scene;
+    const npc = this._npc;
+    const cmd = this._tasks[0] || {};
+    let target = null;
+
+    if (cmd.target_owner && cmd.target_npc_id) {
+      target = scene._remoteNPCSprites?.[`${cmd.target_owner}_${cmd.target_npc_id}`] || null;
+    }
+    if (!target && cmd.target_id?.startsWith?.('npc:')) {
+      const bareId = cmd.target_id.slice(4);
+      target = Object.values(scene._remoteNPCSprites || {}).find(rnpc => rnpc?.npcId === bareId) || null;
+    }
+    if (!target) {
+      target = this._findNearestKnockedOutEnemyNpc();
+    }
+
+    if (!target || target.isDead?.()) {
+      npc.showBubble('No KO target to absorb…', 2000);
+      this._tasks.shift();
+      return;
+    }
+    if (!target.isKnockedOut?.()) {
+      npc.showBubble('They need to be KO’d first.', 2000);
+      this._tasks.shift();
+      return;
+    }
+
+    if (!cmd._announced) {
+      cmd._announced = true;
+      const startLine = this._pickAbsorbLine('start', target.getName?.() || target.npcId || 'them');
+      npc.showBubble(startLine, 2600, { silent: true });
+      scene._addNPCSpeechToChat?.(npc, startLine, '#66e0ff');
+    }
+
+    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, target.x, target.y);
+    if (dist > this._getKiBlastRange()) {
+      npc.moveTo(target.x, target.y);
+      return;
+    }
+
+    if (this._tryAbsorbKnockedOutNpc(target)) {
+      this._tasks.shift();
+      return;
+    }
+
+    npc.stopMoving();
   }
 
   // ── Flee from a specific player ─────────────────────────────────────────

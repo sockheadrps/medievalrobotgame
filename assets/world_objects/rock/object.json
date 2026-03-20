@@ -1,0 +1,22 @@
+{
+  "id": "rock",
+  "label": "Rock",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 56,
+    "tileRow": 21
+  },
+  "solid": true,
+  "interaction": "mine",
+  "required_level": 1,
+  "hp": 5,
+  "drops": [
+    {
+      "resource": "stone",
+      "min": 1,
+      "max": 2
+    }
+  ],
+  "respawn_min": 30,
+  "respawn_max": 60
+}

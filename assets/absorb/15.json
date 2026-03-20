@@ -1,0 +1,17 @@
+{
+  "spriteSheet": "15.png",
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 384,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 12,
+    "rows": 1
+  },
+  "totalFrames": 12
+}

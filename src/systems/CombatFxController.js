@@ -1,5 +1,8 @@
 import Phaser from 'phaser';
-import { NRG_KEY, TILE_SIZE } from '../constants.js';
+import { ABSORB_FRAMES, ABSORB_KEY, NRG_KEY, TILE_SIZE } from '../constants.js';
+
+const ABSORB_DURATION_MS = 2000;
+const ABSORB_TINT = 0x66ffff;
 
 export class CombatFxController {
   constructor(scene) {
@@ -45,6 +48,112 @@ export class CombatFxController {
     return 1;
   }
 
+  ensureAbsorbAnim() {
+    const scene = this.scene;
+    if (scene.anims.exists('absorb-channel')) return;
+    scene.anims.create({
+      key: 'absorb-channel',
+      frames: scene.anims.generateFrameNumbers(ABSORB_KEY, { start: 0, end: ABSORB_FRAMES - 1 }),
+      frameRate: ABSORB_FRAMES / (ABSORB_DURATION_MS / 1000),
+      repeat: -1,
+    });
+  }
+
+  playAbsorbEffect(startX, startY, endX, endY, duration = ABSORB_DURATION_MS) {
+    const scene = this.scene;
+    this.ensureAbsorbAnim();
+    const midX = (startX + endX) * 0.5;
+    const midY = (startY + endY) * 0.5;
+    const dist = Phaser.Math.Distance.Between(startX, startY, endX, endY);
+    const beam = scene.add.sprite(midX, midY, ABSORB_KEY, 0);
+    beam.setDepth(15);
+    beam.setTint(ABSORB_TINT);
+    beam.setAlpha(0.92);
+    beam.setAngle(Phaser.Math.RadToDeg(Phaser.Math.Angle.Between(startX, startY, endX, endY)));
+    beam.setScale(Math.max(1, dist / TILE_SIZE), 1.2);
+    beam.play('absorb-channel');
+
+    const startPulse = scene.add.circle(startX, startY, 18, ABSORB_TINT, 0.28).setDepth(16);
+    const endPulse = scene.add.circle(endX, endY, 20, ABSORB_TINT, 0.34).setDepth(16);
+    scene.tweens.add({
+      targets: [startPulse, endPulse],
+      scaleX: 1.5,
+      scaleY: 1.5,
+      alpha: 0.05,
+      yoyo: true,
+      repeat: Math.max(0, Math.round(duration / 250) - 1),
+      duration: 250,
+    });
+
+    scene.time.delayedCall(duration, () => {
+      beam.destroy();
+      startPulse.destroy();
+      endPulse.destroy();
+      this.showKiBlastImpact(endX, endY, ABSORB_TINT, 24, false);
+    });
+  }
+
+  findAbsorbTarget(actor, range, aim) {
+    let bestForward = range + 1;
+    let target = null;
+
+    const considerTarget = (candidate) => {
+      if (!candidate?.isKnockedOut?.() || candidate.isDead?.()) return;
+      const dx = candidate.x - actor.x;
+      const dy = candidate.y - actor.y;
+      const forward = dx * aim.dir.x + dy * aim.dir.y;
+      if (forward <= 0 || forward > range) return;
+      const side = dx * aim.perp.x + dy * aim.perp.y;
+      if (Math.abs(side) > aim.spread) return;
+      if (forward < bestForward) {
+        bestForward = forward;
+        target = candidate;
+      }
+    };
+
+    for (const rnpc of Object.values(this.scene._remoteNPCSprites || {})) considerTarget(rnpc);
+    for (const npc of this.scene.npcs || []) considerTarget(npc);
+    return target;
+  }
+
+  startPlayerAbsorb(target) {
+    const scene = this.scene;
+    const p = scene.player;
+    const conn = scene._conn;
+    if (!target || !conn?.connected) return false;
+
+    const startX = p.x;
+    const startY = p.y - p.displayHeight * 0.4;
+    const endX = target.x;
+    const endY = target.y - (target.displayHeight || TILE_SIZE) * 0.4;
+    this.playAbsorbEffect(startX, startY, endX, endY, ABSORB_DURATION_MS);
+    scene._lastBlastTime = Date.now();
+    conn.send({
+      type: 'absorb_npc',
+      owner_id: target.ownerPid || scene.playerId,
+      npc_id: target.npcId || target.id,
+    });
+    return true;
+  }
+
+  firePlayerAbsorb() {
+    const scene = this.scene;
+    const p = scene.player;
+    if (!p || scene._playerDead || p._knockedOut) return;
+    if (!(p.kiMoves || []).includes('absorb')) return;
+
+    const now = Date.now();
+    const cooldown = this.getKiBlastCooldownMs(p);
+    if (scene._lastBlastTime && now - scene._lastBlastTime < cooldown) return;
+
+    const range = this.getKiBlastRange(p);
+    const aim = this.getKiBlastAimInfo(p);
+    const target = this.findAbsorbTarget(p, range, aim);
+    const estCost = p.getBlastCost?.() ?? 3;
+    if (!target || (!p.infKi && p.ki < estCost)) return;
+    this.startPlayerAbsorb(target);
+  }
+
   firePlayerKiBlast() {
     const scene = this.scene;
     const p = scene.player;
@@ -52,12 +161,12 @@ export class CombatFxController {
 
     const mode = p.activeKiMode || 'ki_shot';
     const costMult = this.getKiModeCostMult(mode);
-
     const now = Date.now();
     const blastCooldown = this.getKiBlastCooldownMs(p) * (mode === 'explosive_shot' ? 1.5 : 1);
     if (scene._lastBlastTime && now - scene._lastBlastTime < blastCooldown) return;
 
-    // Check ki cost (estimated — server is authoritative)
+    const range = this.getKiBlastRange(p);
+    const aim = this.getKiBlastAimInfo(p);
     const estCost = (p.getBlastCost?.() ?? 3) * costMult;
     if (!p.infKi && p.ki < estCost) {
       if (scene._pf_kiBar) {
@@ -74,8 +183,6 @@ export class CombatFxController {
 
     scene._lastBlastTime = now;
 
-    const range = this.getKiBlastRange(p);
-    const aim = this.getKiBlastAimInfo(p);
     let bestForward = range + 1;
     let target = null;
     let targetType = null;
@@ -105,14 +212,11 @@ export class CombatFxController {
       if (rnpc.isDead?.() || rnpc.isKnockedOut?.()) continue;
       considerTarget(rnpc, 'npc');
     }
-    for (const dummy of (scene.dummies || [])) {
+    for (const dummy of scene.dummies || []) {
       if (dummy.isDead?.()) continue;
       considerTarget(dummy, 'dummy');
     }
-    for (const ktSprite of Object.values(scene._kiTargetSprites || {})) {
-      considerTarget(ktSprite, 'ki_target');
-    }
-    // Ground log piles can be ignited into campfires
+    for (const ktSprite of Object.values(scene._kiTargetSprites || {})) considerTarget(ktSprite, 'ki_target');
     for (const gi of Object.values(scene._groundItemSprites || {})) {
       if (!gi._placed) continue;
       if (gi.resource !== 'Wood' && gi.resource !== 'log') continue;
@@ -159,12 +263,12 @@ export class CombatFxController {
     const tint = Number(p.auraTint ?? 0x4fd6ff);
     if (isExplosive) proj.setScale(2.2);
 
-    // Helper: animate a single projectile to an end point
     const animateProj = (sprite, endX, endY, miss = false) => {
       const dist = Phaser.Math.Distance.Between(projX, projY, endX, endY);
       scene.tweens.add({
         targets: sprite,
-        x: endX, y: endY,
+        x: endX,
+        y: endY,
         alpha: miss ? 0 : 1,
         duration: Math.max(120, (dist / projectileSpeed) * 1000),
         onComplete: () => {
@@ -188,7 +292,6 @@ export class CombatFxController {
       animateProj(proj, impactPoint.x, impactPoint.y, true);
     }
 
-    // Scatter: fire two additional side projectiles
     if (mode === 'scatter_shot') {
       for (const sign of [-1, 1]) {
         const sideProj = scene.add.sprite(projX, projY, NRG_KEY, blastFrame);
@@ -239,9 +342,10 @@ export class CombatFxController {
 
   handleReplicatedFxEvents(events) {
     for (const event of events || []) {
-      if (!event || event.kind !== 'ki_blast') continue;
+      if (!event) continue;
       if (event.owner_pid && event.owner_pid === this.scene.playerId) continue;
-      this.renderReplicatedKiBlast(event);
+      if (event.kind === 'ki_blast') this.renderReplicatedKiBlast(event);
+      if (event.kind === 'absorb') this.renderReplicatedAbsorb(event);
     }
   }
 
@@ -284,4 +388,25 @@ export class CombatFxController {
     });
   }
 
+  renderReplicatedAbsorb(event) {
+    const scene = this.scene;
+    let startX = Number(event.start_x || 0);
+    let startY = Number(event.start_y || 0);
+    if (event.owner_pid && event.npc_id) {
+      const rnpc = scene._remoteNPCSprites?.[`${event.owner_pid}_${event.npc_id}`];
+      if (rnpc) {
+        startX = rnpc.x;
+        startY = rnpc.y - (rnpc.displayHeight || TILE_SIZE) * 0.4;
+      }
+    } else if (event.owner_pid) {
+      const rp = scene._remotePlayers?.[event.owner_pid];
+      if (rp) {
+        startX = rp.x;
+        startY = rp.y - (rp.displayHeight || TILE_SIZE) * 0.4;
+      }
+    }
+    const endX = Number(event.impact_x || startX);
+    const endY = Number(event.impact_y || startY);
+    this.playAbsorbEffect(startX, startY, endX, endY, Number(event.duration_ms || ABSORB_DURATION_MS));
+  }
 }

@@ -13,7 +13,7 @@ from services.crop_service import crop_manager
 from services.accounts import save_player, load_player
 from services.ai_player import ai_player, PID as AI_PID
 from core.config import SPAWN_AI_PLAYER
-from services.database import save_npc as db_save_npc, load_npc as db_load_npc
+from services.database import save_npc as db_save_npc, load_npc as db_load_npc, delete_npc as db_delete_npc
 
 router = APIRouter()
 
@@ -63,8 +63,10 @@ def _save_player_state(pid: str):
         "seeds": p.get("seeds", 0),
         "ki_blast_bonuses": p.get("ki_blast_bonuses", {}),
         "ki_moves": p.get("ki_moves", []),
-        "npc_ids": p.get("npc_ids", []),
+        "npc_ids": [nid for nid in p.get("npc_ids", [])
+                    if not p.get("npcs", {}).get(nid, {}).get("dead")],
         "map": p.get("map", "level_01"),
+        "combat_mode": p.get("combat_mode", "kill"),
         "equipment": p.get("equipment", {}),
         "inventory": p.get("inventory", {}),
     }
@@ -73,8 +75,11 @@ def _save_player_state(pid: str):
     # Also persist NPC stats to the database
     for npc_id, npc in p.get("npcs", {}).items():
         if npc.get("dead"):
+            # Remove dead NPCs from DB so they don't respawn on reload
+            db_delete_npc(npc_id)
             continue
         stats = {k: v for k, v in npc.items() if not k.startswith("_") and k not in ("id", "name", "x", "y", "owner")}
+        # Pass empty soul {} — save_npc will preserve existing soul data when soul is empty
         db_save_npc(npc_id, npc.get("name", npc_id), npc.get("x", 0), npc.get("y", 0), stats, {})
 
 
@@ -137,6 +142,9 @@ async def game_loop():
                 "chatColor": p.get("chatColor", "#cccccc"),
                 "is_ai_rival": p.get("is_ai_rival", False),
                 "map": p.get("map", "level_01"),
+                "carried_by": p.get("carried_by"),
+                "carrying": bool(p.get("_carrying")),
+                "combat_mode": p.get("combat_mode", "kill"),
                 "equipment": p.get("equipment", {}),
                 "inventory": p.get("inventory", {}),
                 "_refine_result": p.pop("_refine_result", None),
@@ -148,6 +156,7 @@ async def game_loop():
                 "id": d["id"], "x": d["x"], "y": d["y"],
                 "hp": d["hp"], "maxHp": d["maxHp"], "dead": d["dead"],
                 "map": d.get("map", "level_01"),
+                "etrainer": d.get("_etrainer", False),
             }
         clean_anvils = {}
         for aid, a in game.anvils.items():
@@ -176,11 +185,15 @@ async def game_loop():
                 "id": b["id"], "kind": b["kind"],
                 "col": b["col"], "row": b["row"],
                 "map": b.get("map", "level_01"),
+                "owner": b.get("owner", ""),
                 "direction": b.get("direction", ""),
                 "out_direction": b.get("out_direction", ""),
                 "label": b.get("label", ""),
                 "stored": b.get("stored", {}),
             }
+            if b.get("hp") is not None:
+                cb["hp"] = b["hp"]
+                cb["maxHp"] = b.get("maxHp", b["hp"])
             if b.get("_cart"):
                 cb["cart"] = b["_cart"]
             if b.get("_held"):
@@ -239,9 +252,11 @@ async def game_loop():
             state = {
                 "type": "state",
                 "players": filtered_players,
+                "xp_multipliers": dict(game.xp_multipliers),
                 "trees": game.trees if on_overworld else [],
                 "rocks": game.rocks if on_overworld else [],
-                "ground_items": game.ground_items if on_overworld else [],
+                "ground_items": [gi for gi in game.ground_items
+                                 if gi.get("map", "level_01") == recipient_map] if on_overworld else [],
                 "dummies": filtered_dummies,
                 "anvils": filtered_anvils,
                 "campfires": filtered_campfires,
@@ -325,8 +340,10 @@ async def websocket_endpoint(ws: WebSocket):
         player["seeds"] = saved.get("seeds", 0)
         player["ki_blast_bonuses"] = saved.get("ki_blast_bonuses", player.get("ki_blast_bonuses", {}))
         player["ki_moves"] = saved.get("ki_moves", [])
+        game._ensure_default_ki_moves(player)
         player["npc_ids"] = saved.get("npc_ids", [])
         player["map"] = saved.get("map", "level_01")
+        player["combat_mode"] = saved.get("combat_mode", "kill")
         player["equipment"] = saved.get("equipment", {})
         player["inventory"] = saved.get("inventory", {})
         print(f"[ws] Restored player {pid} (level {player['level']}, {player['logs']} logs)")

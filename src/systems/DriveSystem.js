@@ -9,12 +9,12 @@ import { TILE_SIZE } from '../constants.js';
 // ── Drive growth rates (per second, 0–1 scale) ──────────────────────────────
 // Higher = this drive fills faster for this personality type.
 const DRIVE_GROWTH_RATES = {
-  Guardian:   { aggression:0.05, attachment:0.12, curiosity:0.04, greed:0.03, social:0.07, survival:0.08, ambition:0.04 },
-  Berserker:  { aggression:0.18, attachment:0.04, curiosity:0.06, greed:0.05, social:0.03, survival:0.06, ambition:0.08 },
-  Scout:      { aggression:0.04, attachment:0.06, curiosity:0.15, greed:0.06, social:0.08, survival:0.07, ambition:0.05 },
-  Caretaker:  { aggression:0.02, attachment:0.16, curiosity:0.05, greed:0.02, social:0.14, survival:0.05, ambition:0.03 },
-  Paranoid:   { aggression:0.06, attachment:0.08, curiosity:0.03, greed:0.04, social:0.04, survival:0.16, ambition:0.03 },
-  Pragmatist: { aggression:0.05, attachment:0.06, curiosity:0.07, greed:0.10, social:0.07, survival:0.07, ambition:0.09 },
+  Guardian:   { aggression:0.05, attachment:0.09, curiosity:0.04, greed:0.03, social:0.07, survival:0.08, ambition:0.06 },
+  Berserker:  { aggression:0.18, attachment:0.04, curiosity:0.06, greed:0.05, social:0.03, survival:0.06, ambition:0.10 },
+  Scout:      { aggression:0.04, attachment:0.05, curiosity:0.15, greed:0.06, social:0.08, survival:0.07, ambition:0.07 },
+  Caretaker:  { aggression:0.02, attachment:0.12, curiosity:0.05, greed:0.02, social:0.14, survival:0.05, ambition:0.05 },
+  Paranoid:   { aggression:0.06, attachment:0.06, curiosity:0.03, greed:0.04, social:0.04, survival:0.16, ambition:0.05 },
+  Pragmatist: { aggression:0.05, attachment:0.05, curiosity:0.07, greed:0.10, social:0.07, survival:0.07, ambition:0.10 },
 };
 
 // Emotion → drive growth multipliers. Applied when emotion exceeds 0.1.
@@ -28,15 +28,15 @@ const EMOTION_DRIVE_MULTS = {
 // Within a band, the highest drive wins. Higher bands always beat lower bands.
 const PRIORITY_BANDS = [
   { name: 'curiosity', drives: ['curiosity', 'social'],              threshold: 0.55 },
-  { name: 'activity',  drives: ['aggression', 'greed', 'ambition'],  threshold: 0.60 },
-  { name: 'attachment',drives: ['attachment'],                        threshold: 0.70 },
-  { name: 'emergency', drives: ['survival'],                          threshold: 0.75 },
+  { name: 'activity',  drives: ['aggression', 'greed', 'ambition'],  threshold: 0.55 },
+  { name: 'attachment',drives: ['attachment'],                        threshold: 0.75 },
+  { name: 'emergency', drives: ['survival'],                          threshold: 0.80 },
 ];
 
 // Drive → candidate tasks mapping
 const DRIVE_TO_INTENTS = {
   aggression: ['attack_nearest_enemy', 'train'],
-  attachment: ['follow'],
+  attachment: ['wander_explore'],
   curiosity:  ['wander_explore'],
   greed:      ['gather', 'gather_wood'],
   social:     ['socialize_npc'],
@@ -148,6 +148,15 @@ export class DriveSystem {
       }).length;
       return 1 + Math.min(nearbyCount * 0.3, 1.0);
     }
+    if (drive === 'ambition') {
+      // Nearby dummies/etrainers boost ambition — NPCs want to train
+      const dummies = (scene.dummies ?? []).filter(d => !d.isDead?.());
+      const nearbyDummies = dummies.filter(d => {
+        const dist = Phaser.Math.Distance.Between(npc.x, npc.y, d.x, d.y);
+        return dist < TILE_SIZE * 10;
+      }).length;
+      return 1 + Math.min(nearbyDummies * 0.8, 2.0);
+    }
     return 1.0;
   }
 
@@ -204,7 +213,7 @@ export class DriveSystem {
         return { task: 'train' };
       }
       case 'attachment':
-        return { task: 'follow' };
+        return { task: 'wander_explore' };
       case 'curiosity':
         return { task: 'wander_explore' };
       case 'greed': {

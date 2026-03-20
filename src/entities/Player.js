@@ -69,7 +69,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.blastLevel = 0;  // tracks how many blasts fired (XP for ki blasts)
     this.kiSkillLevel = 1;
     this.kiSkillXp = 0;
-    this.kiMoves = [];
+    this.kiMoves = ['absorb'];
     this.activeKiMode = 'ki_shot'; // current shot type: ki_shot, scatter_shot, explosive_shot
 
     // Resource counters

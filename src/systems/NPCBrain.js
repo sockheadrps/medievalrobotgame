@@ -19,6 +19,13 @@ const EMOTION_DELTA_MAX    = 0.05; // max emotion shift per decision — small n
 const FEAR_REACT_THRESHOLD  = 0.7;  // flee toward player
 const ANGER_REACT_THRESHOLD = 0.8;  // attack nearest (Berserker-only automatic rage)
 const EMOTION_REACT_COOLDOWN = 6000; // ms between emotion-triggered reactions
+const OWNER_STICKY_TASKS = new Set([
+  'attack_nearest_enemy',
+  'train', 'gather', 'gather_stone', 'gather_all',
+  'mine_ore', 'practice_ki', 'refine_stone', 'wander_explore',
+  'deposit_to_crate', 'custom_task', 'absorb_npc',
+  'give_logs', 'give_materials',
+]);
 
 // Maps LLM intents to TaskRunner tasks
 const INTENT_TO_TASK = {
@@ -28,11 +35,13 @@ const INTENT_TO_TASK = {
   attack_enemy:     { task: 'attack_nearest_enemy' },
   attack_player:    null, // handled specially — needs target_id
   attack_npc:       null, // handled specially — needs target info
+  absorb_npc:       null, // handled specially — needs target info
   retreat:          { task: 'follow' },
   hold_position:    { task: 'idle' },
   observe:          { task: 'idle' },
   reposition:       { task: 'follow' },
   do_nothing:       { task: 'idle' },
+  wander_explore:   { task: 'wander_explore' },
   gather_wood:      { task: 'gather', item: 'wood' },
   give_logs:        { task: 'give_logs' },
   train:            { task: 'train' },
@@ -61,8 +70,8 @@ const FALLBACK_LINES = {
 function _makeFallbackResponse(personalityType) {
   const fallbackTask = {
     Guardian: 'defend_player', Scout: 'idle', Berserker: 'attack_enemy',
-    Caretaker: 'follow', Paranoid: 'follow', Pragmatist: 'gather_wood',
-  }[personalityType] || 'follow';
+    Caretaker: 'wander_explore', Paranoid: 'observe', Pragmatist: 'gather_wood',
+  }[personalityType] || 'wander_explore';
   const lines = FALLBACK_LINES[personalityType] || ['Following.'];
   const speech = lines[Math.floor(Math.random() * lines.length)];
   return {
@@ -184,6 +193,15 @@ export class NPCBrain {
     }
 
     // ── Drive-based silent task switching (no LLM) ──
+    const currentTask = status.tasks[0]?.task || null;
+    const ownerTask = this._npc._ownerCommandTask || null;
+    if (ownerTask && (!status.running || currentTask !== ownerTask)) {
+      this._npc._ownerCommandTask = null;
+    }
+    if (ownerTask && currentTask === ownerTask && OWNER_STICKY_TASKS.has(ownerTask)) {
+      return;
+    }
+
     const isManualLocked = this._npc._manualCommandUntil && now < this._npc._manualCommandUntil;
     const isCommitLocked = (this._npc.soul?.drives?._commitUntil ?? 0) > now;
     if (!isManualLocked && !isCommitLocked) {
@@ -339,13 +357,14 @@ export class NPCBrain {
       if (dummy.isDead()) continue;
       const dist = Phaser.Math.Distance.Between(npc.x, npc.y, dummy.x, dummy.y) / TILE_SIZE;
       if (dist < 12) {
+        const isEtrainer = !!dummy._isEtrainer;
         nearbyEntities.push({
           id: dummy._serverId || 'local_dummy',
-          type: 'training_dummy',
-          name: 'Training Dummy',
+          type: isEtrainer ? 'etrainer' : 'training_dummy',
+          name: isEtrainer ? 'Etrainer (infinite HP)' : 'Training Dummy',
           distance: parseFloat(dist.toFixed(1)),
-          hp: dummy.hp,
-          maxHp: dummy.maxHp,
+          hp: isEtrainer ? 'infinite' : dummy.hp,
+          maxHp: isEtrainer ? 'infinite' : dummy.maxHp,
           visible: true,
         });
       }
@@ -543,8 +562,8 @@ export class NPCBrain {
   _getAllowedActions() {
     const actions = [
       'follow', 'stay_near_player', 'defend_player', 'attack_enemy',
-      'attack_player', 'attack_npc',
-      'retreat', 'hold_position', 'observe', 'do_nothing',
+      'attack_player', 'attack_npc', 'absorb_npc',
+      'retreat', 'hold_position', 'observe', 'do_nothing', 'wander_explore',
       'gather_wood', 'give_logs', 'train', 'practice_ki',
       'socialize_npc', 'steal_logs',
     ];
@@ -631,7 +650,7 @@ export class NPCBrain {
     if (intent !== this._lastIntent || !this._runner.getStatus().running) {
       if (intent === 'attack_player' && decision.target_id) {
         this._runner.setTasks([{ task: 'attack_player', target_id: decision.target_id }]);
-      } else if ((intent === 'attack_npc' || intent === 'steal_logs' || intent === 'socialize_npc') && decision.target_id) {
+      } else if ((intent === 'attack_npc' || intent === 'absorb_npc' || intent === 'steal_logs' || intent === 'socialize_npc') && decision.target_id) {
         const scene = this._scene;
         // target_id is composite key "ownerPid_npcId" (e.g. "test2_npc_1")
         const rnpcEntry = scene._remoteNPCSprites?.[decision.target_id]
@@ -642,6 +661,12 @@ export class NPCBrain {
           if (intent === 'steal_logs') {
             this._runner.setTasks([{
               task: 'steal_logs',
+              target_owner: rnpcEntry.ownerPid,
+              target_npc_id: rnpcEntry.npcId,
+            }]);
+          } else if (intent === 'absorb_npc') {
+            this._runner.setTasks([{
+              task: 'absorb_npc',
               target_owner: rnpcEntry.ownerPid,
               target_npc_id: rnpcEntry.npcId,
             }]);
@@ -690,7 +715,7 @@ export class NPCBrain {
       }
       if (Object.keys(clamped).length > 0) {
         // If the intent targets another NPC, apply emotions toward that NPC too
-        const npcTargetIntents = ['steal_logs', 'socialize_npc', 'attack_npc'];
+        const npcTargetIntents = ['steal_logs', 'socialize_npc', 'attack_npc', 'absorb_npc'];
         if (npcTargetIntents.includes(intent) && decision.target_id) {
           // Extract bare npcId from composite key (e.g. "test2_npc_1" → "npc_1")
           const bareId = this._extractNpcId(decision.target_id);
@@ -702,7 +727,7 @@ export class NPCBrain {
     }
 
     // Process memory candidates — store under target NPC key if relevant
-    const memoryBucket = (['steal_logs', 'socialize_npc', 'attack_npc'].includes(intent) && decision.target_id)
+    const memoryBucket = (['steal_logs', 'socialize_npc', 'attack_npc', 'absorb_npc'].includes(intent) && decision.target_id)
       ? `npc:${this._extractNpcId(decision.target_id)}`
       : playerId;
 

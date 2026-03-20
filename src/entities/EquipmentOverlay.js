@@ -14,7 +14,7 @@ const SCALE = TILE_SIZE / PLAYER_FRAME_H; // same scale as baseplayer
  */
 export function createEquipmentOverlay(scene, owner, textureKey, remapTable) {
   const overlay = scene.add.sprite(owner.x, owner.y, textureKey, 0);
-  overlay.setOrigin(0.5, 0.5);
+  overlay.setOrigin(owner.originX ?? 0.5, owner.originY ?? 0.5);
   overlay.setDepth((owner.depth ?? 0) + 0.05);
   overlay.setScale(SCALE);
   overlay.setVisible(false);

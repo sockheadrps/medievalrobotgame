@@ -1,0 +1,14 @@
+{
+  "id": "stone",
+  "label": "Stone",
+  "category": "resource",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 46,
+    "tileRow": 16
+  },
+  "stackable": true,
+  "maxStack": 99,
+  "color": "#cccccc",
+  "description": ""
+}

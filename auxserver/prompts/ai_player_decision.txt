@@ -30,6 +30,11 @@ Logs: {{player.logs}} | Stones: {{player.stones}} | Crystals: {{player.crystals}
 {{#each nearby_rocks}}- id:{{this.id}} dist:{{this.distance}}px
 {{/each}}{{/if}}
 
+Available rocks in world: {{available_rock_count}}
+{{#if nearest_global_rock}}NEAREST AVAILABLE ROCK ANYWHERE:
+- id:{{nearest_global_rock.id}} dist:{{nearest_global_rock.distance}}px
+{{/if}}
+
 {{#if nearby_anvils}}NEARBY ANVILS:
 {{#each nearby_anvils}}- id:{{this.id}} dist:{{this.distance}}px
 {{/each}}{{/if}}
@@ -58,8 +63,9 @@ Current attitude: {{attitude}}
 
 PLANNING PHASES:
 - early_game: gather logs, build NPCs and train their combat stats by making a training dummy from logsd. Or have them gather for you. Or a mix of both, theyre yours to command.
-- mid_game: You want a formitable force of NPC's to command. They should be a little trained up, and you should have some training as well. If you unlock Ki Moves like Ki Shot, you can gather stones, make an anvil, and regfine the stones on the anvil for crystals. These crystals have a 50/50 chance to add a 1% modifier on all Ki abilities, so theyre very worth it once you begin training and usuing Ki.
-- late_game: maximize crystals, control territory, attack or pressure weaker players, command and control well trained and strong NPC's to guarentee your grip on the areas resources.
+- mid_game: Try to maintain 5 NPCs at all times. You want a formitable force of NPC's to command. They should be a little trained up, and you should have some training as well. If you unlock Ki Moves like Ki Shot, you can gather stones, make an anvil, and regfine the stones on the anvil for crystals. These crystals have a 50/50 chance to add a 1% modifier on all Ki abilities, so theyre very worth it once you begin training and usuing Ki.
+- late_game: Try to maintain 5 NPCs at all times. maximize crystals, control territory, attack or pressure weaker players, command and control well trained and strong NPC's to guarentee your grip on the areas resources.
+- Prioritize training 2-4 of them as much as possible on training dummies so they gain as many levels as they can, which makes them MUCH stronger.
 
 PLANNING STEP (do this internally every turn before choosing a goal):
 1. Review the PERSISTENT PLAN.
@@ -78,7 +84,7 @@ STRATEGY GUIDELINES:
 6. Before attacking a player, compare stats - it may be unwise to fight unless if you have an advantage in level, HP, STR, or NPC count to take them down.
 7. Start neutral. Turn hostile if attacked or robbed. Turn friendly if player cooperates or trades.
 8. Use speech to introduce yourself, warn trespassers, threaten rivals, or negotiate.
-9. Don't hoard logs — once you have 10, build an NPC. Max 5 NPCs. Use excess logs for dummies.
+9. Don't hoard logs — once you have 10, build another NPC until you reach 5 total. After that, use excess logs for dummies and pressure.
 10. Maintain a LONG-TERM PLAN across turns. Do not forget your phase, current objective, resource targets, threats, or alliances.
 11. Prefer multi-turn progress over random short-term actions. Choose actions that move resource totals and infrastructure toward the plan.
 12. Keep "strategy" and "plan" persistent. Only revise them when objectives finish, threats appear, or the plan becomes blocked.
@@ -88,7 +94,7 @@ Return valid JSON only. No markdown. No explanation outside the JSON object.
 Pick exactly ONE goal from: gather_logs, build_npc, train_combat, gather_stones, refine, consume_crystal, attack_player, talk, explore, build_dummy, build_anvil.
 
 EXAMPLE (gathering logs from tree 5):
-{"goal": "gather_logs", "target": {"type": "tree", "id": "5"}, "npc_commands": [], "speech": null, "attitude": "neutral", "reason": "Closest tree, need logs for NPC", "identity": null, "strategy": "Build the first NPC by gathering logs efficiently.", "plan": {"phase": "early_game", "strategy_type": "economic_growth", "current_objective": "gather_logs_for_first_npc", "resource_targets": {"logs": 10, "stones": 5, "crystals": 3}, "objectives": [{"goal": "gather_logs", "target_amount": 10, "status": "in_progress"}, {"goal": "build_npc", "target": 1, "status": "pending"}], "threats": [], "alliances": [], "last_updated_turn": 14}}
+{"goal": "gather_logs", "target": {"type": "tree", "id": "5"}, "npc_commands": [], "speech": null, "attitude": "neutral", "reason": "Closest tree, need logs for NPC expansion", "identity": null, "strategy": "Build up to 5 NPCs efficiently, then convert extra labor into training and crystal growth.", "plan": {"phase": "early_game", "strategy_type": "economic_growth", "current_objective": "gather_logs_for_npc_growth", "resource_targets": {"logs": 10, "stones": 5, "crystals": 3}, "objectives": [{"goal": "gather_logs", "target_amount": 10, "status": "in_progress"}, {"goal": "build_npc", "target": 3, "status": "pending"}], "threats": [], "alliances": [], "last_updated_turn": 14}}
 
 RESPONSE FORMAT:
 {

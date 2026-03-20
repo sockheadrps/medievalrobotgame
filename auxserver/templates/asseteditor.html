@@ -11,6 +11,7 @@
     <button class="active" id="tabWO" onclick="switchTab('wo')">World Objects</button>
     <button id="tabEQ" onclick="switchTab('eq')">Equipment</button>
     <button id="tabIT" onclick="switchTab('it')">Items</button>
+    <button id="tabST" onclick="switchTab('st')">Crafting Stations</button>
   </div>
 
   <div class="main-workspace">
@@ -30,6 +31,11 @@
         <button class="btn-new" onclick="newItem()">+ New Item</button>
         <ul class="item-list" id="itList"></ul>
       </div>
+      <div id="stSidebar" style="display:none;">
+        <h3>Crafting Stations</h3>
+        <button class="btn-new" onclick="newStation()">+ New Station</button>
+        <ul class="item-list" id="stList"></ul>
+      </div>
     </aside>
 
     <div class="editor-panel" id="editorPanel">
@@ -37,6 +43,7 @@
       <div id="woEditor" style="display:none;"></div>
       <div id="eqEditor" style="display:none;"></div>
       <div id="itEditor" style="display:none;"></div>
+      <div id="stEditor" style="display:none;"></div>
     </div>
   </div>
 

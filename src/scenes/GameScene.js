@@ -37,6 +37,7 @@ import {
   INTERACT_DIST, tilePos,
   LOG1_KEY, LOG1_PATH, LOG2_KEY, LOG2_PATH, LOG3_KEY, LOG3_PATH,
   BARRIER_KEY, BARRIER_PATH, BARRIER_FRAME_W, BARRIER_FRAME_H,
+  ABSORB_KEY, ABSORB_PATH, ABSORB_FRAME_W, ABSORB_FRAME_H,
   FRAME_ROCK, FRAME_ANVIL, FRAME_CRYSTAL,
   NRG_KEY, NRG_PATH, NRG_FRAME_W, NRG_FRAME_H,
   FIRE_KEY, FIRE_PATH, FIRE_FRAME_W, FIRE_FRAME_H,
@@ -86,6 +87,10 @@ export default class GameScene extends Phaser.Scene {
     this.load.spritesheet(NRG_KEY, NRG_PATH, {
       frameWidth: NRG_FRAME_W,
       frameHeight: NRG_FRAME_H,
+    });
+    this.load.spritesheet(ABSORB_KEY, ABSORB_PATH, {
+      frameWidth: ABSORB_FRAME_W,
+      frameHeight: ABSORB_FRAME_H,
     });
     this.load.spritesheet(BARRIER_KEY, BARRIER_PATH, {
       frameWidth: BARRIER_FRAME_W,
@@ -165,7 +170,7 @@ export default class GameScene extends Phaser.Scene {
 
     // Right-click on buildings → context menu to remove
     this.events.on('object-right-clicked', ({ type, obj, ptr }) => {
-      if (type === 'conveyor' || type === 'crate' || type === 'furnace' || type === 'log_cutter' || type === 'track') {
+      if (type === 'conveyor' || type === 'crate' || type === 'furnace' || type === 'log_cutter' || type === 'track' || type === 'gate' || type === 'fence') {
         const bid = obj._serverId;
         if (!bid) return;
         ptr._fgHandled = true;
@@ -453,6 +458,14 @@ export default class GameScene extends Phaser.Scene {
       this._tryBuildDummy();
     });
 
+    // G key — drop carried entity
+    this.input.keyboard.on('keydown-G', () => {
+      if (this.chatBox?.isOpen() || this._namingNPC) return;
+      if (this.player?._carrying) {
+        this._conn?.send({ type: 'drop_carried' });
+      }
+    });
+
     // Q key — admin menu
     this._adminOpen = false;
     this._adminPanel = null;
@@ -467,7 +480,7 @@ export default class GameScene extends Phaser.Scene {
     });
     this.input.keyboard.on('keydown-RIGHT', () => {
       if (!this._adminOpen) return;
-      this._adminPage = Math.min(2, (this._adminPage || 1) + 1);
+      this._adminPage = Math.min(3, (this._adminPage || 1) + 1);
       this._renderAdminPanel();
     });
 
@@ -673,6 +686,8 @@ export default class GameScene extends Phaser.Scene {
         let mx = dx, my = dy;
         if (mx !== 0 && my !== 0) { mx /= Math.SQRT2; my /= Math.SQRT2; }
         const dt = delta / 1000;
+        const prevX = this.player.x;
+        const prevY = this.player.y;
         this.player.x += mx * speed * dt;
         this.player.y += my * speed * dt;
         // Clamp to world bounds
@@ -680,6 +695,8 @@ export default class GameScene extends Phaser.Scene {
         const worldH = this._mapRows * TILE_SIZE;
         this.player.x = Math.max(0, Math.min(worldW, this.player.x));
         this.player.y = Math.max(0, Math.min(worldH, this.player.y));
+        // Fence/gate collision — push back if overlapping
+        this._resolveBarrierCollision(prevX, prevY);
       }
     } else if (this._conn.connected) {
       this._conn.sendMove(0, 0, false);
@@ -1173,6 +1190,9 @@ export default class GameScene extends Phaser.Scene {
         this.physics.add.existing(body, true);
         this._collisionGroup.add(body);
       }
+      if (this.player) {
+        this.physics.add.collider(this.player, this._collisionGroup);
+      }
     } catch (e) {
       console.warn('[map] Failed to change map:', e.message);
     }
@@ -1368,24 +1388,35 @@ export default class GameScene extends Phaser.Scene {
 
   _onNPCCommands(npc, commands) {
     const normalized = commands || [];
+    const now = Date.now();
+    const primaryTask = normalized[0]?.task || null;
     let runner = this._taskRunners.get(npc.id);
     if (!runner) {
       runner = new NPCTaskRunner(this, npc);
       this._taskRunners.set(npc.id, runner);
     }
     runner.setTasks(normalized);
+    npc._ownerCommandTask = primaryTask;
 
     // Notify brain that player issued an explicit command — pause autonomous decisions
     const brain = this._npcBrains.get(npc.id);
     if (brain) {
       brain.onPlayerCommand();
       // Custom tasks run indefinitely — lock the brain for a very long time
-      if (normalized[0]?.task === 'custom_task') {
-        npc._manualCommandUntil = Date.now() + 3600000; // 1 hour
+      if (primaryTask === 'custom_task') {
+        npc._manualCommandUntil = now + 3600000; // 1 hour
+      } else if ([
+        'train', 'gather', 'gather_stone', 'gather_all',
+        'mine_ore', 'practice_ki', 'refine_stone', 'wander_explore',
+        'deposit_to_crate', 'absorb_npc', 'give_logs', 'give_materials',
+      ].includes(primaryTask)) {
+        npc._manualCommandUntil = now + 120000; // 2 minutes
+      } else if (primaryTask && primaryTask !== 'idle') {
+        npc._manualCommandUntil = now + 30000; // 30 seconds
       }
       brain.pushEvent({
         type: 'command',
-        text: `Player commanded: ${normalized[0]?.task || 'unknown'}`,
+        text: `Player commanded: ${primaryTask || 'unknown'}`,
         importance: 0.9,
       });
     }
@@ -1673,12 +1704,27 @@ export default class GameScene extends Phaser.Scene {
 
   _buildContextActions(entity) {
     const actions = [];
-    if (entity?.soul) {
+    // Ground equipment item: show NPC pickup options
+    if (entity?._isEquipment && entity?._serverId) {
+      for (const npc of (this.npcs || [])) {
+        if (npc._dead || npc._knockedOut) continue;
+        actions.push({ label: `${npc.getName()} Equip`, action: () => {
+          this._conn?.send({ type: 'npc_pickup_equipment', npc_id: npc.id, item_id: entity._serverId });
+        }});
+      }
+      return actions;
+    }
+    if (entity?.soul && entity?.isKnockedOut?.()) {
+      // Own NPC that's knocked out
+      actions.push({ label: 'Pick Up', action: () => this._conn?.send({ type: 'carry_own_npc', npc_id: entity.id }) });
+      actions.push({ label: 'Details', action: () => { this._selectNPC(entity); this._openNPCDetail(entity); } });
+    } else if (entity?.soul) {
       actions.push({ label: 'Chat', action: () => { this._selectNPC(entity); if (!this.chatBox?.isOpen()) this.chatBox.open(); } });
       actions.push({ label: 'Details', action: () => { this._selectNPC(entity); this._openNPCDetail(entity); } });
     } else if (entity?.isKnockedOut?.()) {
       actions.push({ label: 'Kill', action: () => this._sendKnockoutAction('kill', entity) });
       actions.push({ label: 'Rob', action: () => this._sendKnockoutAction('rob', entity) });
+      actions.push({ label: 'Pick Up', action: () => this._sendKnockoutAction('carry', entity) });
       actions.push({ label: 'Inspect', action: () => { this._selectRemote(entity); this._inspectPanel.open(entity); } });
     } else if (entity?.ownerPid) {
       actions.push({ label: 'Chat', action: () => { this._selectRemote(entity); if (!this.chatBox?.isOpen()) this.chatBox.open(); } });
@@ -2258,6 +2304,34 @@ export default class GameScene extends Phaser.Scene {
     this._buildingContextEls = els;
   }
 
+  /**
+   * After client-side movement prediction, check if player overlaps any
+   * fence or gate they shouldn't pass through, and push back.
+   */
+  _resolveBarrierCollision(prevX, prevY) {
+    const p = this.player;
+    if (!p) return;
+    const halfBody = TILE_SIZE * 0.35; // approximate player half-width
+    for (const entity of Object.values(this._buildingSprites || {})) {
+      if (entity._kind !== 'fence' && entity._kind !== 'gate') continue;
+      // Gates: owner can pass through
+      if (entity._kind === 'gate' && entity._owner === this.playerId) continue;
+      const bx = entity.x;
+      const by = entity.y;
+      const halfTile = TILE_SIZE / 2;
+      // AABB overlap check
+      const overlapX = (halfBody + halfTile) - Math.abs(p.x - bx);
+      const overlapY = (halfBody + halfTile) - Math.abs(p.y - by);
+      if (overlapX <= 0 || overlapY <= 0) continue;
+      // Push back on the axis of least penetration
+      if (overlapX < overlapY) {
+        p.x = p.x < bx ? bx - halfTile - halfBody : bx + halfTile + halfBody;
+      } else {
+        p.y = p.y < by ? by - halfTile - halfBody : by + halfTile + halfBody;
+      }
+    }
+  }
+
   _closeBuildingContextMenu() {
     this._buildingContextBounds = null;
     if (this._buildingContextEls) {
@@ -2357,7 +2431,9 @@ export default class GameScene extends Phaser.Scene {
         str: npc.str, def: npc.def,
         level: npc.level, xp: npc.xp,
         blastLevel: npc.blastLevel,
+        ki_moves: npc.kiMoves ?? [],
         ki_blast_bonuses: npc.kiBlastBonuses ?? {},
+        has_ki_blast: !!npc._hasKiBlast,
         facing: (npc.getFacing?.() ? npc.getFacing() : 'down'),
         barrier_proc_until: Number(npc.barrierProcUntil || 0),
         barrier_proc_facing: npc.barrierProcFacing ? npc.barrierProcFacing : (npc.getFacing?.() ? npc.getFacing() : 'down'),
@@ -2371,6 +2447,7 @@ export default class GameScene extends Phaser.Scene {
         gathering: this._taskRunners.get(npc.id)?.getStatus()?.tasks?.[0]?.task === 'gather',
         soul: soulData,
         personality,
+        equipment: npc.equipment ?? {},
       };
     }
     this._conn.send({ type: 'sync_npcs', npcs });
@@ -2664,6 +2741,9 @@ export default class GameScene extends Phaser.Scene {
   // ── Ki Blast ─────────────────────────────────────────────────────────────────
   _fireKiBlast() {
     return this._combatFx.firePlayerKiBlast();
+  }
+  _fireAbsorb() {
+    return this._combatFx.firePlayerAbsorb();
   }
   _getKiBlastImpactPoint(startX, startY, endX, endY, allowEarlyDetonation = false) {
     return this._combatFx.getKiBlastImpactPoint(startX, startY, endX, endY, allowEarlyDetonation);
