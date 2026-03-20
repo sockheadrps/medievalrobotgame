@@ -24,7 +24,7 @@ No shared constants file exists yet. No `/api/constants` endpoint exists.
 - `auxserver/core/constants.py` loads cleanly from the JSON — no fallback hardcoded values
 - `GET /api/constants` returns the JSON
 - Client loads constants from the API before game init
-- No constant value appears hardcoded in both `game_state.py` and `src/constants.js` after this work
+- No shared constant appears hardcoded in any server file (`game_state.py` or the new service modules from spec 01) or in any client JS file other than through the shared source — the criterion covers the full codebase, not just `game_state.py` and `src/constants.js`
 
 ## Risks & Notes
 

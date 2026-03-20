@@ -8,17 +8,18 @@ Clarify the responsibilities of `NPC.js`, `NPCBrain.js`, `NPCTaskRunner.js`, and
 **Existing files:**
 - `NPC.js` — entity class, but also contains personality/emotion/memory/relationship logic
 - `NPCBrain.js` — decision-making, but may contain some execution logic
-- `NPCTaskRunner.js` — task execution, but may contain some decision logic
+- `NPCTaskRunner.js` — **2,433 lines** — task execution mixed with decision logic; this file is oversized and will need its own split in addition to the decision/execution cleanup
 - `ChatBox.js` — UI display, but also handles NPC command routing and vocabulary learning
+- `DriveSystem.js` — contains hardcoded per-personality-type data tables (`DRIVE_GROWTH_RATES`, `EMOTION_DRIVE_MULTS`, `COMMIT_DURATION`) that are a third location of personality metadata alongside `NPC.js` and `LLMClient.js`
 
 No `NPCPersonality.js` exists yet. The brain→runner pipeline is not formally documented.
 
 ## Gaps to Fill
 
-- [ ] Create `src/systems/NPCPersonality.js` — personality type metadata, emotion state, memory, relationship tracking, vocabulary/phrase learning. `NPC.js` holds a reference to its `NPCPersonality` instance but contains none of this logic.
+- [ ] Create `src/systems/NPCPersonality.js` — personality type metadata, emotion state, memory, relationship tracking, vocabulary/phrase learning. `NPC.js` holds a reference to its `NPCPersonality` instance but contains none of this logic. **Include the per-type drive tables from `DriveSystem.js`** (`DRIVE_GROWTH_RATES`, `EMOTION_DRIVE_MULTS`, `COMMIT_DURATION`) — remove them from `DriveSystem.js` and have it import from `NPCPersonality.js` instead.
 - [ ] Audit `NPC.js` — move all personality/emotion/memory/relationship logic to `NPCPersonality.js`. `NPC.js` should only contain: sprite, stats, equipment overlays, animations.
 - [ ] Audit `NPCBrain.js` — remove any task execution logic. Brain decides WHAT to do and produces a task descriptor.
-- [ ] Audit `NPCTaskRunner.js` — remove any decision-making logic. Runner only executes a given task descriptor.
+- [ ] Audit `NPCTaskRunner.js` (2,433 lines) — first, remove decision-making logic; second, **produce a split plan** if the file remains over 600 lines after the logic cleanup. Do not deliver a >600-line file without a documented sub-split plan.
 - [ ] Move NPC command routing from `ChatBox.js` to `NPCBrain.js` (it's a decision, not a UI concern)
 - [ ] Move vocabulary learning from `ChatBox.js` to `NPCPersonality.js`
 - [ ] `ChatBox.js` should only: display messages, capture input, forward raw commands to `NPCBrain`
@@ -26,10 +27,11 @@ No `NPCPersonality.js` exists yet. The brain→runner pipeline is not formally d
 
 ## Acceptance Criteria
 
-- `NPCPersonality.js` exists in `src/systems/`
+- `NPCPersonality.js` exists in `src/systems/` and is the single location for personality type metadata (drive tables, emotion multipliers, commit durations)
+- `DriveSystem.js` imports personality data from `NPCPersonality.js` rather than defining it inline
 - `NPC.js` contains no personality, emotion, memory, or relationship logic
 - `NPCBrain.js` contains no task execution logic
-- `NPCTaskRunner.js` contains no decision-making logic
+- `NPCTaskRunner.js` contains no decision-making logic and is either under 600 lines or has a documented sub-split plan
 - `ChatBox.js` contains no NPC command routing or vocabulary learning
 - NPC dialogue, personality expression, and task execution all work correctly after the split
 - The brain→runner pipeline is documented in both files

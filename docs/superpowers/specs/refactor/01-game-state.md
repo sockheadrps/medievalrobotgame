@@ -35,7 +35,7 @@ Reduce `game_state.py` from 4,239 lines to under 800 by extracting six remaining
 
 - `game_state.py` is under 800 lines
 - All six new service files exist in `auxserver/services/`
-- Each new service file is under 600 lines (if larger, it needs its own sub-split)
+- Each new service file is under 600 lines. If a service file exceeds 600 lines during implementation, **pause and document a sub-split plan before continuing** — do not deliver an oversized file without a plan
 - No logic is duplicated between `game_state.py` and new modules
 - Combat, resource gathering, building, NPC management, player management, and portal transitions all work correctly after extraction (manual smoke test)
 

@@ -35,4 +35,4 @@ Light cleanup of the web tools at `http://127.0.0.1:8001/`. These tools work and
 ## Risks & Notes
 
 - **Low priority** — do this last among structural work. Tools function correctly today.
-- **asseteditor.css** has uncommitted changes in the current branch — coordinate with whatever work is pending there before touching the file.
+- **`asseteditor.js` and `asseteditor.css` both have uncommitted changes on the current branch (`ai-rival-simplify`)**. Resolve or commit those changes before beginning spec 09 work to avoid merge conflicts.

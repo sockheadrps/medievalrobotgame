@@ -39,3 +39,4 @@ Reduce `GameScene.js` from 2,840 lines to under 600 by extracting four missing c
 - **Phaser scene context**: some systems need the Phaser scene reference for physics, camera, and object factories. Pass `scene` at construction time, not stored globally.
 - **InputController and update loop**: Phaser's input is event-driven, but some keys require polling in `update()`. `InputController.update()` should handle both.
 - **Order of operations in `create()`**: controllers may depend on each other at init time (e.g., `MovementController` needs the player object created by an earlier step). Document the init order.
+- **`Connection.js`** (`src/net/Connection.js`): audit this file before starting the WebSocket routing cleanup. If it exposes methods that `GameScene` calls directly for message routing, note any interface changes required. If its interface is unchanged by this refactor, confirm explicitly so it can be excluded from the changeset.

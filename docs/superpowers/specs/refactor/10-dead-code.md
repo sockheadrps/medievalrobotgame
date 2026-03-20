@@ -17,7 +17,7 @@ Remove unused files, commented-out code, and noisy debug logging. Flag multiplay
 
 - [ ] Grep for files imported nowhere — list candidates, review, delete confirmed unused files
 - [ ] Remove commented-out code blocks longer than 5 lines
-- [ ] Remove or archive outdated implementation docs (`impl1.md`, `impl2.md`, `impl3.md`) if they no longer reflect current code
+- [ ] Remove or archive outdated implementation docs (`impl1.md`, `impl2.md`, `impl3.md`, `imple2-design-plan.md`) if they no longer reflect current code
 - [ ] Audit `console.log`/`console.warn` in all client JS files — remove noisy debug logs, keep error/warning logs
 - [ ] Audit `print()` statements in all Python server files — convert to `logging` module calls
 - [ ] Add `// MULTIPLAYER` comment to `RemotePlayer.js`, `RemoteNPC.js`, and multi-client broadcast logic in `ws.py`

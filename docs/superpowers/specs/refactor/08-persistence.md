@@ -29,6 +29,6 @@ Audit and tighten the database layer: remove unused tables, ensure save/load sym
 
 ## Risks & Notes
 
-- **Independent of other specs** — can be done at any point after spec 01 is underway.
+- **Soft dependency on spec 01**: the "ensure all entity types have symmetric save/load" audit should be done after spec 01 is **complete** — running it before the six new service modules exist means auditing against a god-object structure that is about to change. The dependency map reflects this. The asset registry cache work (independent) can start at any time.
 - **Schema migrations**: removing unused tables requires a migration. Use SQLite `DROP TABLE IF EXISTS` with a schema version check. Back up `game.db` before running.
 - **Cache invalidation**: the asset manifest cache only needs invalidation on server restart (assets don't change at runtime). A simple module-level dict populated once in `startup()` is sufficient.

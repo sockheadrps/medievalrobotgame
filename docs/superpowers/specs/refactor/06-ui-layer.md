@@ -5,14 +5,11 @@ Standardize the lifecycle pattern across all UI panels and fix the two highest-v
 
 ## Current State Audit
 
-UI panels audited (per REFACTOR_PLAN.md):
+UI panels to audit (per REFACTOR_PLAN.md):
 - `ChatBox.js` — being cleaned up in spec 05
 - `HudController.js` — reads directly from the `Player` Phaser entity
-- `NPCDetailPanel.js` — unknown lifecycle compliance
 - `PlayerDetailPanel.js` — misnamed; is actually the admin/cheat panel. Partially auto-generates crafting buttons from equipment manifest. Give Items rows are hardcoded.
-- `InspectPanel.js` — unknown lifecycle compliance
-- `InventoryController.js` — unknown lifecycle compliance
-- `AdminPanelController.js` — unknown lifecycle compliance
+- `NPCDetailPanel.js`, `InspectPanel.js`, `InventoryController.js`, `AdminPanelController.js` — lifecycle compliance unknown; **the implementer must audit these files at the start of this spec** and record which lifecycle methods each does and does not implement before making any changes.
 
 No standardized lifecycle interface (`constructor(scene)`, `show(data)`, `hide()`, `destroy()`) is enforced across panels.
 

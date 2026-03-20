@@ -65,8 +65,8 @@ Single-player focus. Multiplayer sync (RemotePlayer, RemoteNPC, multi-client bro
 
 | # | Spec File | Rationale |
 |---|-----------|-----------|
-| 1 | `01-game-state.md` | Highest leverage. Audit already-extracted services, fill remaining six gaps. Unblocks all other server work. |
-| 2 | `02-constants.md` | Best done while game_state.py is still being touched. Prevents constant duplication spreading into new modules. |
+| 1 | `01-game-state.md` | Highest leverage. Audit already-extracted services, fill remaining six gaps. Unblocks all other server work. **Note:** REFACTOR_PLAN.md recommends constants (spec 02) first; this order is reversed here so the six new service modules exist before constants are migrated into them — extracting constants into files that don't yet exist creates a two-PR dependency chain with no benefit. |
+| 2 | `02-constants.md` | Done while game_state.py split is still fresh. New service modules from spec 01 are the migration target. |
 | 3 | `03-main-py.md` | Small, low-risk, quick win. Cleans up the entry point before client work begins. |
 | 4 | `04-gamescene.md` | Highest client leverage. EntityManager is a prerequisite for specs 05 and 06. |
 | 5 | `05-npc-system.md` | Depends on EntityManager from spec 04. Clarifies Brain/Runner/Personality boundaries. |
@@ -82,15 +82,18 @@ Single-player focus. Multiplayer sync (RemotePlayer, RemoteNPC, multi-client bro
 
 ```
 01-game-state ──► 02-constants
-                │
-                └──► 03-main-py ──► 07-llm
-                                        ▲
-04-gamescene ──► 05-npc-system ─────────┘
+             │
+             ├──► 03-main-py ──► 07-llm
+             │                       ▲
+             ├──► 08-persistence      │
+             │                       │
+             └────────────────────────┘ (spec 07 also depends on spec 05)
+
+04-gamescene ──► 05-npc-system ──► 07-llm
              │
              └──► 06-ui-layer
 
-08-persistence  (independent)
-09-tooling      (independent)
+09-tooling      (independent — low priority)
 10-dead-code    (last — depends on all others)
 ```
 

@@ -32,10 +32,11 @@ Split `LLMClient.js` (796 lines) into focused responsibilities, move all prompt 
 - `GET /api/prompts/{name}` returns rendered prompt text
 - `llm_gateway.py` retries on failure and times out gracefully
 - `llm_gateway.py` logs each LLM request (timestamp, model, prompt length, response length)
-- Personality type metadata exists in exactly one place (not duplicated between `LLMClient.js` and `NPCPersonality.js`)
+- Personality type metadata exists in exactly one place: `NPCPersonality.js`. Not duplicated in `LLMClient.js` or `DriveSystem.js` (which are addressed in spec 05)
 
 ## Risks & Notes
 
-- **Depends on spec 05** for `NPCPersonality.js` (vocabulary learning destination) and on spec 03 for the Ollama router.
+- **Depends on spec 05** for `NPCPersonality.js` (vocabulary learning destination).
+- **Depends on spec 03** for the `auxserver/api/` router pattern: the `GET /api/prompts/{name}` endpoint should be added as a new router in `auxserver/api/prompts.py`, following the pattern established by spec 03 — not inline in `main.py`. Do not begin spec 07 before spec 03's router extraction is complete.
 - **Prompt rendering at fetch time**: the server renders templates with context variables before serving. Ensure the `GET /api/prompts/{name}` endpoint accepts context params (e.g., NPC name, personality type) as query params or POST body.
 - **Client caching**: prompt templates don't change at runtime. Cache fetched templates in `LLMClient.js` to avoid re-fetching on every NPC conversation turn.

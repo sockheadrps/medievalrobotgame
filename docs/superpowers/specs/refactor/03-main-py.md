@@ -6,23 +6,26 @@ Reduce `main.py` to its single responsibility: create the FastAPI app, register 
 ## Current State Audit
 
 `main.py` is 399 lines. It currently contains:
-- FastAPI app creation and router registration
-- Startup/shutdown lifecycle hooks
-- Ollama proxy endpoints
-- Legacy LLM proxy endpoint
-- AI player dashboard HTML (inline in Python)
-- Database init, asset registry scan, and state loading (scattered across startup)
+- FastAPI app creation and router registration (several routers already extracted to `auxserver/api/`)
+- Inline Ollama proxy endpoints and legacy LLM proxy (not yet moved to a router)
+- AI player dashboard HTML (inline in Python, not yet moved to a template file)
+- Database init, asset registry scan, and state loading called at **module import time** (lines ~31–36), outside any lifecycle hook — there is no `startup()` function
 
-No `auxserver/api/` directory or `auxserver/templates/` directory exists yet.
+**Already in place** (do not recreate):
+- `auxserver/api/` exists with: `accounts.py`, `assets.py`, `commands.py`, `maps.py`, `soul.py`, `ws.py`
+- `auxserver/core/` exists with: `config.py` (which configures Jinja2 templates)
+- `auxserver/templates/` exists with: `asseteditor.html`, `mapmaker.html`, `playground.html`
+- Jinja2 is already configured and in use
+
+The remaining work is narrower than a full extraction: move the Ollama/LLM proxy routes into the existing `api/` structure, move the AI dashboard HTML into `templates/`, and consolidate the module-level init calls into a proper lifecycle hook.
 
 ## Gaps to Fill
 
-- [ ] Create `auxserver/templates/` directory
-- [ ] Move AI player dashboard HTML to `auxserver/templates/ai_dashboard.html`
-- [ ] Create `auxserver/api/ollama.py` router — move Ollama proxy endpoints and legacy LLM proxy here
-- [ ] Register the new router in `main.py` via `app.include_router()`
-- [ ] Consolidate database init, asset registry scan, and state loading into a single `startup()` function
-- [ ] Consolidate shutdown save logic into a single `shutdown()` function
+- [ ] Move AI player dashboard HTML to `auxserver/templates/ai_dashboard.html` (template already dir exists)
+- [ ] Create `auxserver/api/ollama.py` router — move Ollama proxy endpoints and legacy LLM proxy here (api/ dir already exists)
+- [ ] Register `ollama.py` router in `main.py` via `app.include_router()`
+- [ ] Move module-level init calls (`init_db()`, `migrate_json_files()`, `asset_registry.load_all()`, `init_world_objects()`) into a `@app.on_event("startup")` function
+- [ ] Consolidate shutdown save logic into a `@app.on_event("shutdown")` function (one already exists — extend it)
 - [ ] Remove all inline HTML from `main.py`
 - [ ] `main.py` should only: create app, register routers, define startup/shutdown hooks
 
