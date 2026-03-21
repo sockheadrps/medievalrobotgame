@@ -1025,16 +1025,7 @@ class CombatService:
         p["punch_until"] = now + 0.3
 
         # XP
-        xp_gain = 5
-        p["xp"] += xp_gain
-        needed = p["level"] * 20
-        if p["xp"] >= needed:
-            p["xp"] -= needed
-            p["level"] += 1
-            p["maxHp"] += 2
-            p["hp"] = p["maxHp"]
-            p["str"] += 1
-            p["def"] += 1
+        self.gs._grant_xp(p, 5)
 
         if dummy["hp"] <= 0 and not dummy.get("_etrainer"):
             dummy["dead"] = True
