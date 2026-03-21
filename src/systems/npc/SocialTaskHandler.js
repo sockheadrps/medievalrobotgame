@@ -177,6 +177,74 @@ export class SocialTaskHandler {
     // While socializing, just wait (don't shift task until conversation finishes)
   }
 
+  // ── Brief greeting between two NPCs ──────────────────────────────────────────
+
+  /**
+   * Brief greeting between two NPCs.
+   * cmd = tasks[0] with shape { task: 'greet_npc', target: 'ownerPid_npcId' }
+   */
+  async doGreetNpc(cmd) {
+    const npc = this._npc;
+    const scene = this._scene;
+    const targetKey = cmd.target;
+    if (!targetKey) { this._runner._tasks.shift(); return; }
+
+    // Find the target sprite
+    const entry = scene._remoteNPCSprites?.[targetKey]
+      || Object.values(scene._remoteNPCSprites || {}).find(
+          e => `${e.ownerPid}_${e.npcId}` === targetKey
+        );
+    if (!entry?.sprite) { this._runner._tasks.shift(); return; }
+
+    const targetSprite = entry.sprite;
+
+    // Move within 2 tiles
+    const dist = Phaser.Math.Distance.Between(npc.x, npc.y, targetSprite.x, targetSprite.y);
+    if (dist > 2 * TILE_SIZE) {
+      // Walk toward target
+      if (dist > 4 * TILE_SIZE) { this._runner._tasks.shift(); return; } // too far, give up
+      scene.physics?.moveTo?.(npc, targetSprite.x, targetSprite.y, 80);
+      return; // still approaching, called again next frame
+    }
+
+    npc.stopMoving?.();
+
+    // Generate greeting line — cheap prompt (personality + relationship only)
+    const relKey = `npc:${entry.npcId}`;
+    const relLabel = npc.soul?.relationships?.[relKey]?.label ?? 'stranger';
+    const pType = npc.soul?.personality?.type ?? 'Pragmatist';
+    let line = 'Hey there!'; // fallback
+    try {
+      const { generateDecision } = await import('../../net/LLMClient.js');
+      const resp = await Promise.race([
+        generateDecision({
+          type: 'greet_npc',
+          personality: pType,
+          relationship: relLabel,
+          target_name: entry.npcId,
+        }),
+        new Promise(r => setTimeout(() => r(null), 3000)),
+      ]);
+      if (resp?.line) line = resp.line;
+    } catch { /* use fallback */ }
+
+    // Show speech bubbles
+    npc.showBubble?.(line, 3000);
+    targetSprite.showBubble?.('...', 2000);
+
+    // Apply trust delta
+    const rel = npc.soul?.relationships ?? {};
+    if (!rel[relKey]) rel[relKey] = { label: 'stranger', trust: 0.5, cooperation: 0.5 };
+    const coop = rel[relKey].cooperation ?? 0.5;
+    rel[relKey].trust = Math.min(1, Math.max(0, (rel[relKey].trust ?? 0.5) + (coop > 0.5 ? 0.05 : 0)));
+    npc.soul.relationships = rel;
+
+    // Add memory
+    npc.addMemory?.(`greeted ${entry.npcId}`, 'social', relKey);
+
+    this._runner._tasks.shift(); // task complete
+  }
+
   // ── Custom Task (mine specified ores → deposit to specified crates, repeat) ────
 
   doCustomTask(_delta) {

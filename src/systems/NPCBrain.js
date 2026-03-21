@@ -238,6 +238,23 @@ export class NPCBrain {
     // ── Environmental reflex (throttled 2s) — ore/dummy/social checks ──
     if (now - this._lastReflexCheck > 2000) {
       this._lastReflexCheck = now;
+
+      // Proximity tracking — push events for NPCs entering range
+      const currentNearby = this._scene.getNearbyRemoteNpcs?.(this._npc, 6 * TILE_SIZE) ?? [];
+      const currentIds = new Set(currentNearby.map(e => `${e.ownerPid}_${e.npcId}`));
+      for (const entry of currentNearby) {
+        const eid = `${entry.ownerPid}_${entry.npcId}`;
+        if (!this._knownNearbyNpcIds.has(eid)) {
+          const inCombat = this._scene._recentThreats?.[`npc:${entry.npcId}`];
+          this.pushEvent({
+            type: inCombat ? 'npc_combat_nearby' : 'npc_nearby',
+            text: `${entry.npcId} is ${inCombat ? 'fighting' : 'nearby'}`,
+            importance: inCombat ? 0.65 : 0.3,
+          });
+        }
+      }
+      this._knownNearbyNpcIds = currentIds;
+
       if (this._reflexCheck(status, now)) return;
     }
 

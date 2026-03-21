@@ -4,7 +4,7 @@
 //
 // Supported tasks: gather, follow, attack_nearest_enemy, defend_player,
 //   attack_player, attack_npc, idle, give_logs, deposit_to_crate,
-//   socialize_npc, steal_logs, practice_ki, refine_stone, mine_ore, custom_task.
+//   socialize_npc, greet_npc, steal_logs, practice_ki, refine_stone, mine_ore, custom_task.
 
 import { TILE_SIZE } from '../constants.js';
 import { GatherTaskHandler }  from './npc/GatherTaskHandler.js';
@@ -119,6 +119,7 @@ export class NPCTaskRunner {
       case 'give_logs':            this._gather.doGiveLogs(delta); break;
       case 'steal_logs':           this._deposit.doStealLogs(delta); break;
       case 'socialize_npc':        this._social.doSocializeNPC(delta); break;
+      case 'greet_npc':            this._social.doGreetNpc(cmd); break;
       case 'practice_ki':          this._ki.doPracticeKi(delta); break;
       case 'pickup_stone':         this._gather.doPickupStone(delta); break;
       case 'refine_stone':         this._refine.doRefineStone(delta); break;
