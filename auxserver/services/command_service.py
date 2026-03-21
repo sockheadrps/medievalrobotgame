@@ -1,6 +1,9 @@
 import json
+import logging
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from schemas.commands import ChatRequest
 from services.prompt_loader import load_prompt, render_prompt
@@ -74,24 +77,24 @@ def validate_commands(raw: list) -> list:
             continue
         task = cmd.get("task")
         if task not in VALID_TASKS:
-            print(f"[Validator] Dropped unknown task: {cmd!r}")
+            logger.debug("Validator: Dropped unknown task: %r", cmd)
             continue
         if task == "loop":
             goals = cmd.get("goals")
             if not isinstance(goals, list) or len(goals) == 0:
-                print(f"[Validator] Dropped loop with no/invalid goals: {cmd!r}")
+                logger.debug("Validator: Dropped loop with no/invalid goals: %r", cmd)
                 continue
             valid_goals = [g for g in goals if isinstance(g, dict) and g.get("goal") in VALID_GOALS]
             if not valid_goals:
-                print(f"[Validator] Dropped loop - all goals unknown: {cmd!r}")
+                logger.debug("Validator: Dropped loop - all goals unknown: %r", cmd)
                 continue
             if len(valid_goals) < len(goals):
                 dropped = [g for g in goals if g not in valid_goals]
-                print(f"[Validator] Pruned unknown goals from loop: {dropped!r}")
+                logger.debug("Validator: Pruned unknown goals from loop: %r", dropped)
             cmd = {**cmd, "goals": valid_goals}
         out.append(cmd)
     if not out:
-        print("[Validator] All commands invalid - returning idle")
+        logger.debug("Validator: All commands invalid - returning idle")
         return [{"task": "idle"}]
     return out
 
@@ -110,9 +113,9 @@ async def route_category(text: str, client: httpx.AsyncClient) -> str:
     raw = raw_text.strip().lower().split()[0]
     category = raw.strip(".,!?")
     if category not in VALID_CATEGORIES:
-        print(f"[Router] UNKNOWN category '{category}' for input: {text!r}")
+        logger.warning("Router: UNKNOWN category '%s' for input: %r", category, text)
         return "fallback"
-    print(f"[Router] '{text}' -> '{category}'")
+    logger.debug("Router: '%s' -> '%s'", text, category)
     return category
 
 
@@ -145,7 +148,7 @@ async def specialist_commands(category: str, request: ChatRequest, client: httpx
         max_tokens=300,
         timeout=60.0,
     )
-    print(f"[Specialist:{category}] raw -> {raw!r}")
+    logger.debug("Specialist[%s] raw -> %r", category, raw)
     commands = extract_command_json(raw)
     return validate_commands(commands)
 
@@ -179,7 +182,7 @@ async def parse_command(request: ChatRequest) -> tuple[str, list]:
     text_lower = request.text.strip().lower()
     for keyword, result in _KEYWORD_SHORTCUTS.items():
         if text_lower == keyword or text_lower.startswith(keyword + " "):
-            print(f"[CommandService] Keyword shortcut: '{request.text}' -> {result}")
+            logger.debug("Keyword shortcut: '%s' -> %s", request.text, result)
             return result
 
     async with httpx.AsyncClient(timeout=60.0) as client:
