@@ -1,9 +1,12 @@
 # combat.py — Combat service extracted from game_state.py
 # Handles melee attacks, ki blasts, knockouts, barriers, absorbs, and damage calculation.
 
+import logging
 import time
 import math
 import random
+
+logger = logging.getLogger(__name__)
 
 from services.animal_service import animal_manager
 from services.asset_registry import asset_registry
@@ -711,7 +714,7 @@ class CombatService:
         }
         # Remove the ground item
         self.gs.ground_items = [gi for gi in self.gs.ground_items if gi["id"] != item_id]
-        print(f"[game_state] {pid} lit a campfire ({log_count} logs, {duration}s) at ({item['x']}, {item['y']})")
+        logger.debug("%s lit a campfire (%d logs, %ss) at (%s, %s)", pid, log_count, duration, item['x'], item['y'])
 
     def _npc_ki_blast_player(self, owner_pid, npc_id, target_pid):
         """An NPC ki-blasts a player."""
@@ -1104,7 +1107,7 @@ class CombatService:
                     npc_state["ki"] = npc_state.get("ki", 20)
                     npc_state["maxKi"] = npc_state.get("maxKi", 20)
                     npc_learned = True
-                    print(f"[game_state] NPC {watching_npc_id} learned ki blast!")
+                    logger.debug("NPC %s learned ki blast!", watching_npc_id)
 
         # 40% chance target breaks
         broke = random.random() < KI_TARGET_BREAK_CHANCE
