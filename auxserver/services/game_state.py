@@ -2,9 +2,12 @@
 # Holds all players, trees, ground items, NPCs, dummies.
 # Ticked at ~20Hz by the WebSocket broadcast loop.
 
+import logging
 import time
 import math
 import random
+
+logger = logging.getLogger(__name__)
 
 from services.database import (
     load_ground_items, save_ground_items,
@@ -230,11 +233,11 @@ class GameState:
                     _next_building_id = n
             ct = len(self.ground_items) + len(self.dummies) + len(self.anvils) + len(self.campfires) + len(self.buildings)
             if ct > 0:
-                print(f"[game_state] Restored {len(self.ground_items)} ground items, "
-                      f"{len(self.dummies)} dummies, {len(self.anvils)} anvils, "
-                      f"{len(self.campfires)} campfires, {len(self.buildings)} buildings from DB")
+                logger.info("Restored %d ground items, %d dummies, %d anvils, %d campfires, %d buildings from DB",
+                            len(self.ground_items), len(self.dummies), len(self.anvils),
+                            len(self.campfires), len(self.buildings))
         except Exception as e:
-            print(f"[game_state] Failed to load persisted state: {e}")
+            logger.warning("Failed to load persisted state: %s", e)
 
     def reset(self):
         """Reset all in-memory state to fresh. Called after DB reset."""
@@ -264,7 +267,7 @@ class GameState:
         self._init_trees()
         self._last_rock_spawn = time.time()
         self.resources._spawn_rocks()
-        print("[game_state] In-memory state reset")
+        logger.info("In-memory state reset")
 
     def save_world(self):
         """Persist ground items, dummies, anvils, campfires, buildings, and mine grids to the database."""
@@ -279,7 +282,7 @@ class GameState:
             for pid, mg in self.mine_grids.items():
                 save_mine_state(pid, mg.to_json())
         except Exception as e:
-            print(f"[game_state] Failed to save world state: {e}")
+            logger.warning("Failed to save world state: %s", e)
 
     def add_player(self, pid: str):
         return self.player_manager.add_player(pid)
