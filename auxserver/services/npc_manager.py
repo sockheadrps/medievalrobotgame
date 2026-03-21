@@ -258,6 +258,8 @@ class NPCManager:
                 continue
 
             task = bg["task"]
+            if not task:
+                continue
             task_type = task.get("task", "")
             npc_map = bg["map"]
             npc_inv = npc_state.setdefault("inventory", {})
@@ -272,7 +274,6 @@ class NPCManager:
 
                 # Phase: mine — find a non-depleted world object on this map
                 ore_asset_ids = task.get("ore_asset_ids", [])
-                mined = False
                 for wo_id, wo in WORLD_OBJECT_INSTANCES.items():
                     if wo["depleted"]:
                         continue
@@ -293,15 +294,13 @@ class NPCManager:
                         wo["depleted"] = True
                         respawn_secs = random.uniform(wo_def.respawn_min, wo_def.respawn_max)
                         wo["respawn_at"] = now + respawn_secs
-                    mined = True
                     bg["_tick_count"] = bg.get("_tick_count", 0) + 1
                     break
                 # If nothing to mine, just wait (ores will respawn)
 
             elif task_type == "train":
-                npc_stats = npc_state.setdefault("stats", {})
                 xp_gain = npc_state.get("level", 1) * 2
-                npc_stats["xp"] = npc_stats.get("xp", 0) + xp_gain
+                npc_state["xp"] = npc_state.get("xp", 0) + xp_gain
                 bg["_xp_gained"] = bg.get("_xp_gained", 0) + xp_gain
                 bg["_tick_count"] = bg.get("_tick_count", 0) + 1
                 self._advance_bg_goal(bg)
