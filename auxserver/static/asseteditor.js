@@ -10,6 +10,23 @@ let selectedEQ = null;
 let selectedIT = null;
 let selectedST = null;
 
+// ── Save feedback ────────────────────────────────────────────────────────────
+
+function showFeedback(message, type) {
+  let el = document.getElementById('ae-save-feedback');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ae-save-feedback';
+    el.style.cssText = 'position:fixed;top:10px;right:10px;padding:8px 16px;border-radius:4px;font-weight:bold;z-index:9999;display:none;';
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  el.style.background = type === 'success' ? '#4caf50' : '#f44336';
+  el.style.color = '#fff';
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 2500);
+}
+
 // ── Tab switching ────────────────────────────────────────────────────────────
 
 function switchTab(tab) {
@@ -251,12 +268,17 @@ function gatherWO() {
 
 async function saveWO() {
   const data = gatherWO();
-  await fetch('/api/assets/world-objects', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  await loadAll();
-  selectWO(data);
+  try {
+    await fetch('/api/assets/world-objects', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    await loadAll();
+    selectWO(data);
+    showFeedback('Saved!', 'success');
+  } catch (e) {
+    showFeedback('Save failed: ' + e.message, 'error');
+  }
 }
 
 async function deleteWO() {
@@ -684,12 +706,17 @@ function toggleMiningFields() {
 
 async function saveEQ() {
   const data = gatherEQ();
-  await fetch('/api/assets/equipment', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  await loadAll();
-  selectEQ(data);
+  try {
+    await fetch('/api/assets/equipment', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    await loadAll();
+    selectEQ(data);
+    showFeedback('Saved!', 'success');
+  } catch (e) {
+    showFeedback('Save failed: ' + e.message, 'error');
+  }
 }
 
 async function deleteEQ() {
@@ -1046,12 +1073,17 @@ function gatherIT() {
 
 async function saveIT() {
   const data = gatherIT();
-  await fetch('/api/assets/items', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  await loadAll();
-  selectIT(data);
+  try {
+    await fetch('/api/assets/items', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    await loadAll();
+    selectIT(data);
+    showFeedback('Saved!', 'success');
+  } catch (e) {
+    showFeedback('Save failed: ' + e.message, 'error');
+  }
 }
 
 async function deleteIT() {
@@ -1338,12 +1370,17 @@ function gatherST() {
 
 async function saveST() {
   const data = gatherST();
-  await fetch('/api/assets/stations', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  await loadAll();
-  selectST(data);
+  try {
+    await fetch('/api/assets/stations', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    await loadAll();
+    selectST(data);
+    showFeedback('Saved!', 'success');
+  } catch (e) {
+    showFeedback('Save failed: ' + e.message, 'error');
+  }
 }
 
 async function deleteST() {
