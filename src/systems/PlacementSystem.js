@@ -182,7 +182,7 @@ export class PlacementSystem {
     if ((this._buildType === 'crate' || this._buildType === 'crafting_station' || this._buildType === 'etrainer' || this._buildType === 'gate' || this._buildType === 'fence') && this._phase === PHASE_START) {
       if (!this._grid.isFree(col, row)) return;
       const extra = this._buildType === 'crafting_station'
-        ? { asset_id: this._scene._inventoryController?._selectedStationAssetId || '' }
+        ? { asset_id: this._scene._inventoryUi?._selectedStationAssetId || '' }
         : {};
       this._sendPlaceBuilding(this._buildType, col, row, '', extra);
       return;
