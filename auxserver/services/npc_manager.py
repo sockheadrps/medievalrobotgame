@@ -1,6 +1,7 @@
 """NPC management: spawning, sync, carry, equipment, background simulation."""
 
 import random
+import time
 
 from services.asset_registry import asset_registry
 from services.game_state import (
@@ -74,7 +75,6 @@ class NPCManager:
 
     def _sync_player_npcs(self, pid, npcs):
         """Sync NPC positions/stats from a client so other clients can see them."""
-        import time
         p = self.gs.players.get(pid)
         if not p:
             return

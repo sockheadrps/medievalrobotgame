@@ -1620,9 +1620,6 @@ class GameState:
     def _tick_background_npcs(self, now):
         return self.npc_manager._tick_background_npcs(now)
 
-    def _bg_npc_deposit(self, npc_state, npc_inv, task, npc_map):
-        return self.npc_manager._bg_npc_deposit(npc_state, npc_inv, task, npc_map)
-
     # ── Tick ───────────────────────────────────────────────────────────────────
 
     def tick(self, dt: float):
