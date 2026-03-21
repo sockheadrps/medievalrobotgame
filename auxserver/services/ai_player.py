@@ -5,10 +5,13 @@
 
 import asyncio
 import json
+import logging
 import math
 import random
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import httpx
 
@@ -155,16 +158,15 @@ class AIMemory:
             # Filter out garbage diary entries on load
             self.diary = [d for d in raw_diary if self._is_valid_diary(d.get("text", ""))]
             if len(self.diary) < len(raw_diary):
-                print(f"[AIMemory] Cleaned {len(raw_diary) - len(self.diary)} garbage diary entries")
+                logger.debug("AIMemory: Cleaned %d garbage diary entries", len(raw_diary) - len(self.diary))
             self.relationships = data.get("relationships", {})
             self.strategy = data.get("strategy", "")
             self.identity = data.get("identity", "")
             self.plan = self._normalize_plan(data.get("plan"))
-            print(f"[AIMemory] Loaded {len(self.event_log)} events, "
-                  f"{len(self.diary)} diary entries, "
-                  f"{len(self.relationships)} relationships")
+            logger.info("AIMemory: Loaded %d events, %d diary entries, %d relationships",
+                        len(self.event_log), len(self.diary), len(self.relationships))
         except Exception as e:
-            print(f"[AIMemory] Failed to load: {e}")
+            logger.warning("AIMemory: Failed to load: %s", e)
 
     def save(self):
         """Persist memory to disk."""
@@ -181,7 +183,7 @@ class AIMemory:
             }
             MEMORY_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
-            print(f"[AIMemory] Failed to save: {e}")
+            logger.warning("AIMemory: Failed to save: %s", e)
 
     def _get_rel(self, pid: str) -> dict:
         existing = self.relationships.get(pid, {})
@@ -458,7 +460,7 @@ class AIPlayer:
     def spawn(self):
         """Register the AI rival in the game world, restoring saved state if available."""
         if PID in game.players:
-            print(f"[AIPlayer] Already spawned.")
+            logger.debug("AIPlayer: Already spawned.")
             return
 
         game.add_player(PID)
@@ -516,12 +518,12 @@ class AIPlayer:
                     npc_state["hp"] = npc_state["maxHp"]
                     npc_state["ki"] = npc_state["maxKi"]
                     p["npcs"][npc_id] = npc_state
-                    print(f"[AIPlayer] Restored NPC {npc_id}: Lv{npc_state['level']} STR:{npc_state['str']} DEF:{npc_state['def']}")
+                    logger.info("AIPlayer: Restored NPC %s: Lv%s STR:%s DEF:%s", npc_id, npc_state['level'], npc_state['str'], npc_state['def'])
                 else:
-                    print(f"[AIPlayer] NPC {npc_id} not found in DB, skipping")
+                    logger.warning("AIPlayer: NPC %s not found in DB, skipping", npc_id)
             # Remove any npc_ids that weren't found
             p["npc_ids"] = [nid for nid in p["npc_ids"] if nid in p["npcs"]]
-            print(f"[AIPlayer] Restored saved state (level {p['level']}, {p['logs']} logs, {len(p['npcs'])} NPCs)")
+            logger.info("AIPlayer: Restored saved state (level %s, %s logs, %d NPCs)", p['level'], p['logs'], len(p['npcs']))
         else:
             # Fresh spawn away from center (center is roughly tile 10,10 = 480,480)
             cx, cy = 10 * TILE_SIZE, 10 * TILE_SIZE
@@ -530,7 +532,7 @@ class AIPlayer:
             p["x"] = cx + math.cos(angle) * dist
             p["y"] = cy + math.sin(angle) * dist
             p["npc_ids"] = []
-            print(f"[AIPlayer] Fresh spawn at ({p['x']:.0f}, {p['y']:.0f})")
+            logger.info("AIPlayer: Fresh spawn at (%.0f, %.0f)", p['x'], p['y'])
 
     def start(self):
         """Start the background brain loop."""
@@ -538,14 +540,14 @@ class AIPlayer:
             return
         self._running = True
         self._task = asyncio.ensure_future(self.brain_loop())
-        print("[AIPlayer] Brain loop started.")
+        logger.info("AIPlayer: Brain loop started.")
 
     def stop(self):
         """Stop the brain loop."""
         self._running = False
         if self._task and not self._task.done():
             self._task.cancel()
-        print("[AIPlayer] Brain loop stopped.")
+        logger.info("AIPlayer: Brain loop stopped.")
 
     def reset(self):
         """Full reset — stop brain, wipe memory, remove from game, re-spawn fresh."""
@@ -569,7 +571,7 @@ class AIPlayer:
         # Re-spawn and start
         self.spawn()
         self.start()
-        print("[AIPlayer] Full reset complete.")
+        logger.info("AIPlayer: Full reset complete.")
 
     def _current_attitude(self) -> str:
         relationships = self.memory.relationships or {}
@@ -666,7 +668,7 @@ class AIPlayer:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"[AIPlayer] brain_loop error: {e}")
+                logger.warning("AIPlayer: brain_loop error: %s", e)
             await asyncio.sleep(THINK_INTERVAL)
 
     async def _think(self):
@@ -678,7 +680,7 @@ class AIPlayer:
         p = game.players.get(PID)
         try:
             if not p:
-                print("[AIPlayer] Not in game.players — respawning.")
+                logger.warning("AIPlayer: Not in game.players — respawning.")
                 self.spawn()
                 return
 
@@ -725,7 +727,7 @@ class AIPlayer:
 
             goal = decision.get("goal", "explore")
             reason = decision.get("reason", "")
-            print(f"[AIPlayer] Think #{self._think_count}: goal={goal} reason={reason[:80]}")
+            logger.debug("AIPlayer: Think #%d: goal=%s reason=%s", self._think_count, goal, reason[:80])
 
             # Log the final executed decision after server-side overrides.
             self.memory.log_event(f"Decided: {goal} — {reason[:100]}")
@@ -962,28 +964,28 @@ class AIPlayer:
             bad_markers = ["Write the diary entry", "Current stats:", "Plan resource targets:",
                            "Current plan phase:", "Current objective:", "Current strategy:"]
             if any(m in entry for m in bad_markers):
-                print(f"[AIPlayer] Diary rejected (prompt echo): {entry[:80]}")
+                logger.debug("AIPlayer: Diary rejected (prompt echo): %s", entry[:80])
                 return
             # Reject entries that are too short
             if len(entry) < 20:
-                print(f"[AIPlayer] Diary rejected (too short): {entry[:80]}")
+                logger.debug("AIPlayer: Diary rejected (too short): %s", entry[:80])
                 return
             # Reject repetitive garbage (same char/word repeated many times)
             words = entry.split()
             if len(words) > 5:
                 unique_words = set(words)
                 if len(unique_words) <= 3:
-                    print(f"[AIPlayer] Diary rejected (repetitive): {entry[:80]}")
+                    logger.debug("AIPlayer: Diary rejected (repetitive): %s", entry[:80])
                     return
             # Reject entries that are mostly non-alpha (timestamps, numbers, punctuation spam)
             alpha_chars = sum(1 for c in entry if c.isalpha())
             if len(entry) > 0 and alpha_chars / len(entry) < 0.4:
-                print(f"[AIPlayer] Diary rejected (low alpha ratio): {entry[:80]}")
+                logger.debug("AIPlayer: Diary rejected (low alpha ratio): %s", entry[:80])
                 return
             self.memory.add_diary_entry(entry)
-            print(f"[AIPlayer] Diary: {entry[:120]}")
+            logger.debug("AIPlayer: Diary: %s", entry[:120])
         except Exception as e:
-            print(f"[AIPlayer] Diary write failed: {e}")
+            logger.warning("AIPlayer: Diary write failed: %s", e)
 
     # ── State gathering ────────────────────────────────────────────────────────
 
@@ -1162,7 +1164,7 @@ class AIPlayer:
         try:
             system_prompt = render_prompt("ai_player_decision", state_context)
         except Exception as e:
-            print(f"[AIPlayer] Prompt render error: {e}")
+            logger.warning("AIPlayer: Prompt render error: %s", e)
             system_prompt = "You are an AI rival player. Return JSON with your decision."
 
         user_content = (
@@ -1181,23 +1183,23 @@ class AIPlayer:
                 max_tokens=600,
                 timeout=60.0,
             )
-            print(f"[AIPlayer] LLM raw -> {raw_text[:300]}")
+            logger.debug("AIPlayer: LLM raw -> %s", raw_text[:300])
 
             parsed = extract_soul_json(raw_text)
             if not parsed:
-                print("[AIPlayer] Failed to parse JSON from LLM response.")
+                logger.warning("AIPlayer: Failed to parse JSON from LLM response.")
                 return self._fallback_decision(state_context)
 
             return self._validate_decision(parsed)
 
         except httpx.TimeoutException:
-            print("[AIPlayer] LLM request timed out.")
+            logger.warning("AIPlayer: LLM request timed out.")
             return self._fallback_decision(state_context)
         except httpx.HTTPStatusError as e:
-            print(f"[AIPlayer] LLM HTTP error: {e.response.status_code}")
+            logger.warning("AIPlayer: LLM HTTP error: %s", e.response.status_code)
             return self._fallback_decision(state_context)
         except Exception as e:
-            print(f"[AIPlayer] LLM error: {e}")
+            logger.warning("AIPlayer: LLM error: %s", e)
             return self._fallback_decision(state_context)
 
     def _validate_decision(self, raw: dict) -> dict:
@@ -1567,7 +1569,7 @@ class AIPlayer:
         if p["logs"] >= 10:
             name = random.choice(NPC_NAMES)
             game.handle_input(PID, {"type": "build_npc", "npc_name": name})
-            print(f"[AIPlayer] Building NPC: {name}")
+            logger.debug("AIPlayer: Building NPC: %s", name)
         else:
             # Not enough logs — go gather
             self._do_gather_logs(None)
@@ -1576,7 +1578,7 @@ class AIPlayer:
         p = game.players[PID]
         if p["logs"] >= 10:
             game.handle_input(PID, {"type": "build_dummy", "logs": 10})
-            print("[AIPlayer] Building training dummy.")
+            logger.debug("AIPlayer: Building training dummy.")
         else:
             self._do_gather_logs(None)
 
@@ -1584,7 +1586,7 @@ class AIPlayer:
         p = game.players[PID]
         if p.get("stones", 0) >= 5:
             game.handle_input(PID, {"type": "build_anvil"})
-            print("[AIPlayer] Building anvil.")
+            logger.debug("AIPlayer: Building anvil.")
         else:
             self._do_gather_stones(None)
 
@@ -2239,7 +2241,7 @@ class AIPlayer:
                 try:
                     cb()
                 except Exception as e:
-                    print(f"[AIPlayer] on_arrive error: {e}")
+                    logger.warning("AIPlayer: on_arrive error: %s", e)
             return
 
         dx = tx - p["x"]
