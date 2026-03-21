@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { API_BASE } from '../config.js';
 import {
   FRAME_ANVIL,
   FRAME_CRYSTAL,
@@ -265,7 +266,7 @@ export class InventoryController {
     const scene = this.scene;
     if (!this._stationManifest) {
       try {
-        const resp = await fetch('/api/assets/crafting_stations');
+        const resp = await fetch(`${API_BASE}/api/assets/crafting_stations`);
         this._stationManifest = await resp.json();
       } catch (e) {
         console.warn('Failed to fetch crafting stations:', e);
