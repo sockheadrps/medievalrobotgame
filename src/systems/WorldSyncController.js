@@ -7,8 +7,7 @@ import { AnimalEntity } from '../entities/AnimalEntity.js';
 import { WorldObject } from '../entities/WorldObject.js';
 import { Conveyor } from '../entities/Conveyor.js';
 import { Crate } from '../entities/Crate.js';
-import { Furnace } from '../entities/Furnace.js';
-import { LogCuttingStation } from '../entities/LogCuttingStation.js';
+import { CraftingStation } from '../entities/CraftingStation.js';
 import { MinecartTrack } from '../entities/MinecartTrack.js';
 import { TILE_SIZE, SHEET_KEY, FRAME_ANVIL, FRAME_GATE, FRAME_FENCE, FIRE_KEY, FIRE_FRAMES, tilePos } from '../constants.js';
 
@@ -357,17 +356,20 @@ export class WorldSyncController {
           entity = new Crate(scene, x, y);
           scene.grid.place(sb.col, sb.row, entity);
           scene._crates.push(entity);
-        } else if (sb.kind === 'furnace') {
-          entity = new Furnace(scene, x, y);
+        } else if (sb.kind === 'crafting_station') {
+          const stDef = scene._craftingStationManifest?.[sb.asset_id];
+          entity = new CraftingStation(
+            scene,
+            x,
+            y,
+            sb.asset_id || '',
+            stDef?.label || sb.asset_id,
+            sb.stored || {}
+          );
           entity.setGrid(scene.grid);
           scene.grid.place(sb.col, sb.row, entity);
-          scene._furnaces.push(entity);
-        } else if (sb.kind === 'log_cutter') {
-          entity = new LogCuttingStation(scene, x, y);
-          entity.setGrid(scene.grid);
-          entity.setTrackClass(MinecartTrack);
-          scene.grid.place(sb.col, sb.row, entity);
-          scene._logCutters.push(entity);
+          scene._craftingStations = scene._craftingStations || [];
+          scene._craftingStations.push(entity);
         } else if (sb.kind === 'track') {
           entity = new MinecartTrack(scene, sb.col, sb.row, sb.direction || 'right', scene.grid);
           scene.grid.place(sb.col, sb.row, entity);
@@ -428,7 +430,7 @@ export class WorldSyncController {
       }
 
       // Sync stored contents from server — server is authoritative
-      if (entity && sb.stored && (sb.kind === 'crate' || sb.kind === 'furnace' || sb.kind === 'log_cutter')) {
+      if (entity && sb.stored && (sb.kind === 'crate' || sb.kind === 'crafting_station')) {
         if (typeof entity._applyServerStored === 'function') {
           entity._applyServerStored(sb.stored);
         }
@@ -473,12 +475,9 @@ export class WorldSyncController {
         } else if (entity instanceof Crate) {
           const idx = scene._crates.indexOf(entity);
           if (idx >= 0) scene._crates.splice(idx, 1);
-        } else if (entity instanceof Furnace) {
-          const idx = scene._furnaces.indexOf(entity);
-          if (idx >= 0) scene._furnaces.splice(idx, 1);
-        } else if (entity instanceof LogCuttingStation) {
-          const idx = scene._logCutters.indexOf(entity);
-          if (idx >= 0) scene._logCutters.splice(idx, 1);
+        } else if (entity instanceof CraftingStation) {
+          const idx = (scene._craftingStations || []).indexOf(entity);
+          if (idx >= 0) scene._craftingStations.splice(idx, 1);
         } else if (entity instanceof MinecartTrack) {
           const idx = scene._tracks.indexOf(entity);
           if (idx >= 0) scene._tracks.splice(idx, 1);

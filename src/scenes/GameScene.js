@@ -10,6 +10,7 @@ import { CombatFxController } from '../systems/CombatFxController.js';
 import { StateSyncController } from '../systems/StateSyncController.js';
 import { SelectionController } from '../systems/SelectionController.js';
 import { WorldSyncController } from '../systems/WorldSyncController.js';
+import { CraftingStation } from '../entities/CraftingStation.js';
 import { DialogueController } from '../systems/DialogueController.js';
 import { Connection }   from '../net/Connection.js';
 import { NPCDetailPanel } from '../ui/NPCDetailPanel.js';
@@ -157,8 +158,7 @@ export default class GameScene extends Phaser.Scene {
     this.grid = new GridSystem();
     this._conveyors = [];
     this._crates = [];
-    this._furnaces = [];
-    this._logCutters = [];
+    this._craftingStations = [];
     this._tracks = [];
     this._minecartExitTiles = [];
     this._buildingSprites = {};
@@ -542,16 +542,9 @@ export default class GameScene extends Phaser.Scene {
       crate.updateProximity(this.player.x, this.player.y);
     }
 
-    // Update furnace proximity + push bars to conveyors
-    for (const furnace of this._furnaces) {
-      furnace.updateProximity(this.player.x, this.player.y);
-      furnace.tick();
-    }
-
-    // Update log cutter proximity + push planks to tracks
-    for (const lc of this._logCutters) {
-      lc.updateProximity(this.player.x, this.player.y);
-      lc.tick();
+    // Update crafting station proximity labels
+    for (const station of (this._craftingStations || [])) {
+      station.updateProximity(this.player.x, this.player.y);
     }
 
     const npcCost = this._npcBuildCost();
