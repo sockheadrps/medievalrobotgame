@@ -31,17 +31,18 @@ export async function fetchModels() {
   }
 }
 
+const _promptCache = {};
+
 /** Fetch a rendered prompt template from the server. Results are cached by name+params. */
 export async function fetchPrompt(name, params = {}) {
-  this._promptCache ??= {};
   const key = name + JSON.stringify(params);
-  if (!this._promptCache[key]) {
+  if (!_promptCache[key]) {
     const qs = new URLSearchParams(params).toString();
     const res = await fetch(`/api/prompts/${name}?${qs}`);
     const { prompt } = await res.json();
-    this._promptCache[key] = prompt;
+    _promptCache[key] = prompt;
   }
-  return this._promptCache[key];
+  return _promptCache[key];
 }
 
 // ── Core Ollama calls ───────────────────────────────────────────────────────
@@ -69,6 +70,17 @@ async function _callWithHistory(systemPrompt, chatHistory, userMessage, opts = {
   }
   messages.push({ role: 'user', content: userMessage });
   return _llmFetch(messages, opts);
+}
+
+/** Public transport wrapper — sends a single prompt string to the LLM and returns the raw response. */
+export async function generate(prompt, model) {
+  const prev = _model;
+  if (model) _model = model;
+  try {
+    return await _call(prompt, '');
+  } finally {
+    if (model) _model = prev;
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
