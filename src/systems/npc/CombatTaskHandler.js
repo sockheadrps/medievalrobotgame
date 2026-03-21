@@ -371,7 +371,7 @@ export class CombatTaskHandler {
       return;
     }
     if (!target.isKnockedOut?.()) {
-      npc.showBubble('They need to be KO'd first.', 2000);
+      npc.showBubble("They need to be KO'd first.", 2000);
       runner._tasks.shift();
       return;
     }
