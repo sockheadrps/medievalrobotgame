@@ -84,3 +84,8 @@ def test_constants_loads():
 def test_prompts_router_imports():
     from api.prompts import router
     assert router is not None
+
+
+def test_llm_gateway_imports():
+    from services.llm_gateway import call_llm
+    assert callable(call_llm)

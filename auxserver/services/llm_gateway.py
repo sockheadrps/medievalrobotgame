@@ -1,25 +1,39 @@
+"""LLM Gateway — proxies requests to Ollama with retry, timeout, and logging."""
+import logging
+import time
 import httpx
 
-from core.config import LLM_API_KEY, LLM_CHAT_URL, MODEL
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+TIMEOUT_SECONDS = 30
 
 
-def _headers():
-    headers = {"Content-Type": "application/json"}
-    if LLM_API_KEY:
-        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
-    return headers
+async def call_llm(url: str, payload: dict) -> dict:
+    """Call Ollama with retry on failure and timeout."""
+    last_error = None
 
+    for attempt in range(1, MAX_RETRIES + 1):
+        t0 = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                elapsed = time.monotonic() - t0
+                logger.info(
+                    "LLM call succeeded attempt=%d model=%s elapsed=%.2fs",
+                    attempt,
+                    payload.get("model", "unknown"),
+                    elapsed,
+                )
+                return resp.json()
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            elapsed = time.monotonic() - t0
+            logger.warning(
+                "LLM call failed attempt=%d/%d elapsed=%.2fs error=%s",
+                attempt, MAX_RETRIES, elapsed, e,
+            )
+            last_error = e
 
-async def chat_completion(messages, *, temperature=0.7, max_tokens=300, model=None, timeout=60.0):
-    payload = {
-        "model": model or MODEL,
-        "messages": messages,
-        "stream": False,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(LLM_CHAT_URL, json=payload, headers=_headers())
-        resp.raise_for_status()
-    data = resp.json()
-    return ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "").strip()
+    logger.error("LLM unreachable after %d attempts: %s", MAX_RETRIES, last_error)
+    return {"error": "LLM unreachable", "detail": str(last_error)}
