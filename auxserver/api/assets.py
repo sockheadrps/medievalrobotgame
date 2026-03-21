@@ -108,12 +108,17 @@ async def get_stations():
 async def post_station(request: Request):
     data = await request.json()
     save_station(data)
+    # Evict from registry cache so next access reloads from disk
+    station_id = data.get("id")
+    if station_id:
+        asset_registry.crafting_stations.pop(station_id, None)
     return {"ok": True}
 
 
 @router.delete("/stations/{station_id}")
 async def del_station(station_id: str):
     deleted = delete_station(station_id)
+    asset_registry.crafting_stations.pop(station_id, None)
     return {"ok": deleted}
 
 
