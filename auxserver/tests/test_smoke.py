@@ -12,5 +12,8 @@ def test_database_imports():
 
 
 def test_combat_imports():
+    from services.game_state import GameState
     from services.combat import CombatService
-    assert CombatService is not None
+    gs = GameState.__new__(GameState)  # bypass __init__ (avoids DB requirement)
+    gs.combat = CombatService(gs)
+    assert isinstance(gs.combat, CombatService)
