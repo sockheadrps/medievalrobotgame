@@ -172,12 +172,7 @@ export default class GameScene extends Phaser.Scene {
 
     // Right-click on buildings → context menu to remove
     this.events.on('object-right-clicked', ({ type, obj, ptr }) => {
-      if (type === 'crafting_station') {
-        const stationDef = this._craftingStationManifest?.[obj._assetId];
-        this._stationViewer?.open(obj, stationDef);
-        return;
-      }
-      if (type === 'conveyor' || type === 'crate' || type === 'track' || type === 'gate' || type === 'fence') {
+      if (type === 'conveyor' || type === 'crate' || type === 'track' || type === 'gate' || type === 'fence' || type === 'crafting_station') {
         const bid = obj._serverId;
         if (!bid) return;
         ptr._fgHandled = true;
