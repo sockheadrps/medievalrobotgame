@@ -14,6 +14,7 @@ THIS_DIR = Path(__file__).resolve().parent
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
+from api.constants import router as constants_router
 from api.maps import router as maps_router
 from api.soul import router as soul_router
 from api.ws import router as ws_router
@@ -53,6 +54,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/templates", StaticFiles(directory=str(TEMPLATES_DIR)), name="templates")
 app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
+app.include_router(constants_router)
 app.include_router(soul_router)
 app.include_router(maps_router)
 app.include_router(ws_router)
