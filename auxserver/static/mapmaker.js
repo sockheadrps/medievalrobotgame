@@ -42,6 +42,93 @@ let isDrawing = false;
 let isErasing = false;
 let lastFloodTile = null; // track last tile flooded to avoid re-flooding same cell
 
+// Undo/redo history
+// Each entry is an array of { x, y, layer, newTile, oldTile } change objects.
+// newTile / oldTile are copies of the placedTiles entry (or null if the cell was empty).
+const _paintHistory = [];
+let _historyIndex = -1;
+// Accumulates changes during an active drag stroke; committed on mouseup.
+let _currentStroke = null;
+// Track which cells have already been touched in the current stroke (avoid duplicate entries).
+const _strokeTouched = new Set();
+
+function _tileSnapshot(x, y, layer) {
+  const t = getTileAt(x, y, layer);
+  return t ? { ...t } : null;
+}
+
+function _recordBatch(changes) {
+  if (!changes || changes.length === 0) return;
+  // Discard redo stack above current position
+  _paintHistory.splice(_historyIndex + 1);
+  _paintHistory.push(changes);
+  _historyIndex = _paintHistory.length - 1;
+  // Cap at 100 batch entries
+  if (_paintHistory.length > 100) {
+    _paintHistory.shift();
+    _historyIndex = _paintHistory.length - 1;
+  }
+}
+
+function _beginStroke() {
+  _currentStroke = [];
+  _strokeTouched.clear();
+}
+
+function _commitStroke() {
+  if (_currentStroke && _currentStroke.length > 0) {
+    _recordBatch(_currentStroke);
+  }
+  _currentStroke = null;
+  _strokeTouched.clear();
+}
+
+function _addToStroke(x, y, layer, oldTile, newTile) {
+  if (!_currentStroke) return;
+  const key = `${x},${y},${layer}`;
+  // Only record the first time a cell is touched in this stroke (preserves original oldTile)
+  if (!_strokeTouched.has(key)) {
+    _strokeTouched.add(key);
+    _currentStroke.push({ x, y, layer, oldTile, newTile });
+  } else {
+    // Update newTile for already-touched cell (in case it changed)
+    const entry = _currentStroke.find(c => c.x === x && c.y === y && c.layer === layer);
+    if (entry) entry.newTile = newTile;
+  }
+}
+
+function _applyTileSnapshot(x, y, layer, snapshot) {
+  placedTiles = placedTiles.filter((t) => !(t.x === x && t.y === y && (t.layer ?? 0) === layer));
+  if (snapshot) placedTiles.push({ ...snapshot });
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+    e.preventDefault();
+    if (_historyIndex >= 0) {
+      const batch = _paintHistory[_historyIndex];
+      // Apply in reverse order to correctly undo multi-tile ops
+      for (let i = batch.length - 1; i >= 0; i--) {
+        const { x, y, layer, oldTile } = batch[i];
+        _applyTileSnapshot(x, y, layer, oldTile);
+      }
+      _historyIndex--;
+      renderMap();
+    }
+  }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+    e.preventDefault();
+    if (_historyIndex < _paintHistory.length - 1) {
+      _historyIndex++;
+      const batch = _paintHistory[_historyIndex];
+      for (const { x, y, layer, newTile } of batch) {
+        _applyTileSnapshot(x, y, layer, newTile);
+      }
+      renderMap();
+    }
+  }
+});
+
 const img = new Image();
 img.src = '/static/Spritesheet/roguelikeSheet_transparent.png';
 
@@ -691,13 +778,18 @@ function doPaint(gx, gy) {
   }
 
   if (isErasing) {
+    const oldTile = _tileSnapshot(gx, gy, activeLayer);
     removeTileAt(gx, gy, activeLayer);
+    _addToStroke(gx, gy, activeLayer, oldTile, null);
     renderMap();
     return;
   }
 
   if (isDrawing && selectedBrush) {
+    const oldTile = _tileSnapshot(gx, gy, activeLayer);
     setTileAt(gx, gy, selectedBrush, activeLayer);
+    const newTile = _tileSnapshot(gx, gy, activeLayer);
+    _addToStroke(gx, gy, activeLayer, oldTile, newTile);
     renderMap();
   }
 }
@@ -738,6 +830,7 @@ function floodFill(startX, startY) {
 
   const stack = [[startX, startY]];
   const processed = new Set();
+  const floodChanges = [];
 
   while (stack.length > 0) {
     const [x, y] = stack.pop();
@@ -750,11 +843,15 @@ function floodFill(startX, startY) {
 
     if (currentType === targetType) {
       processed.add(key);
+      const oldTile = current ? { ...current } : null;
       setTileAt(x, y, selectedBrush, activeLayer);
+      const newTile = _tileSnapshot(x, y, activeLayer);
+      floodChanges.push({ x, y, layer: activeLayer, oldTile, newTile });
       stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
     }
   }
 
+  _recordBatch(floodChanges);
   renderMap();
 }
 
@@ -779,21 +876,29 @@ function finalizeLine(endX, endY) {
 
   const dx = Math.abs(endX - lineStart.x);
   const dy = Math.abs(endY - lineStart.y);
+  const lineChanges = [];
 
   if (dx > dy) {
     const start = Math.min(lineStart.x, endX);
     const end = Math.max(lineStart.x, endX);
     for (let x = start; x <= end; x++) {
+      const oldTile = _tileSnapshot(x, lineStart.y, activeLayer);
       setTileAt(x, lineStart.y, selectedBrush, activeLayer);
+      const newTile = _tileSnapshot(x, lineStart.y, activeLayer);
+      lineChanges.push({ x, y: lineStart.y, layer: activeLayer, oldTile, newTile });
     }
   } else {
     const start = Math.min(lineStart.y, endY);
     const end = Math.max(lineStart.y, endY);
     for (let y = start; y <= end; y++) {
+      const oldTile = _tileSnapshot(lineStart.x, y, activeLayer);
       setTileAt(lineStart.x, y, selectedBrush, activeLayer);
+      const newTile = _tileSnapshot(lineStart.x, y, activeLayer);
+      lineChanges.push({ x: lineStart.x, y, layer: activeLayer, oldTile, newTile });
     }
   }
 
+  _recordBatch(lineChanges);
   lineStart = null;
   renderMap();
 }
@@ -862,10 +967,12 @@ mCanvas.addEventListener('mousedown', (e) => {
   if (activeTool === 'paint') {
     if (e.button === 0) isDrawing = true;
     if (e.button === 2) isErasing = true;
+    _beginStroke();
     doPaint(gx, gy);
   } else if (activeTool === 'collision') {
     if (e.button === 0) isDrawing = true;
     if (e.button === 2) isErasing = true;
+    _beginStroke();
     doPaint(gx, gy);
   } else if (activeTool === 'portal' && e.button === 0) {
     placePortalAt(gx, gy);
@@ -894,6 +1001,7 @@ mapContainer.addEventListener('mousedown', (e) => {
 
 // Global mouseup
 window.addEventListener('mouseup', () => {
+  _commitStroke();
   isResizing = false;
   isDrawing = false;
   isErasing = false;
