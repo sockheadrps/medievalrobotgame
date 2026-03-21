@@ -30,6 +30,7 @@ export async function fetchModels() {
 }
 
 // ── Personality type metadata ────────────────────────────────────────────────
+// TODO: move to NPCPersonality.js (handled in plan 07)
 
 const PERSONALITY_TYPES = {
   Guardian: {
