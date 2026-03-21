@@ -49,6 +49,7 @@ export class NPCDetailPanel {
   }
 
   destroy() {
+    this._stopUpdating();
     if (this._el && this._el.parentNode) {
       this._el.parentNode.removeChild(this._el);
     }
