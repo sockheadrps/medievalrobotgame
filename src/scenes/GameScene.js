@@ -835,23 +835,43 @@ export default class GameScene extends Phaser.Scene {
   }
 
   /** Register NPCs with active tasks as background workers when leaving their map. */
-  _registerBackgroundNPCs(oldMap, newMap) {
+  async _registerBackgroundNPCs(oldMap, newMap) {
     const conn = this._conn;
     if (!conn?.connected) return;
     for (const npc of this.entities.npcs) {
       const npcMap = npc._map || oldMap;
-      if (npcMap === newMap) continue; // NPC is coming with us
+      if (npcMap === newMap) continue; // NPC comes with us
       const runner = this._taskRunners.get(npc.id);
+      const brain  = this._npcBrains?.get(npc.id);
       if (!runner) continue;
-      const status = runner.getStatus();
-      if (!status.running || status.tasks.length === 0) continue;
-      const task = status.tasks[0];
-      if (!['custom_task', 'mine_ore', 'gather'].includes(task.task)) continue;
+
+      // Ask LLM for goal with 5s timeout, fall back to drive-based
+      let goal = null;
+      if (brain) {
+        goal = await Promise.race([
+          brain.makeBackgroundGoal(),
+          new Promise(r => setTimeout(() => r(null), 5000)),
+        ]);
+        if (!goal) goal = brain._driveToBackgroundGoal();
+      } else {
+        // No brain — fall back to current task if eligible
+        const status = runner.getStatus();
+        const task = status.tasks[0];
+        if (!status.running || !task) continue;
+        if (!['custom_task', 'mine_ore', 'gather'].includes(task.task)) continue;
+      }
+
+      const effectiveTask = goal
+        ? { task: goal.steps[0] }
+        : (runner.getStatus().tasks[0] || { task: 'mine_ore' });
+
       conn.send({
         type: 'register_background_npc',
         npc_id: npc.id,
         map: npcMap,
-        task: task,
+        task: effectiveTask,
+        goal: goal ?? undefined,
+        drives: npc.soul?.drives ? { ...npc.soul.drives } : undefined,
       });
     }
   }
@@ -2343,6 +2363,21 @@ export default class GameScene extends Phaser.Scene {
       // Chat hints (resource pickup messages, etc.)
       if (evt?.type === 'chat_hint' && evt.text) {
         this.chatBox?._addLog(evt.text, '#88ccff');
+      }
+      // Background NPC return briefing
+      if (evt?.type === 'bg_npc_return' && evt.npc_id) {
+        const brain = this._npcBrains?.get(evt.npc_id);
+        if (brain && evt.summary) {
+          const { goal_intent, ticks, gathered, xp_gained } = evt.summary;
+          const parts = [];
+          if (goal_intent) parts.push(goal_intent);
+          if (xp_gained > 0) parts.push(`gained ${xp_gained} XP`);
+          const gatherStr = Object.entries(gathered || {})
+            .map(([k, v]) => `${v} ${k}`).join(', ');
+          if (gatherStr) parts.push(`gathered ${gatherStr}`);
+          const text = parts.length > 0 ? parts.join('; ') : 'returned from background';
+          brain.pushEvent({ type: 'background_return', text, importance: 0.4 });
+        }
       }
     }
     return this._combatFx.handleReplicatedFxEvents(events);

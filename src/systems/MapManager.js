@@ -11,6 +11,7 @@ export default class MapManager {
   constructor(scene) {
     this.scene = scene;
     this._tileImages = [];
+    this._tileImagesOverlay = []; // layer ≥1 tiles — never hidden by MineRenderer
     this._collisionGroup = null;
   }
 
@@ -24,9 +25,12 @@ export default class MapManager {
       if (!res.ok) throw new Error(`Map load failed: ${res.status}`);
       const mapData = await res.json();
 
-      const { treePositions, rockSpawnTiles, collisionRects, tileImages, width, height } = buildTilemapFromData(scene, mapData);
+      const { treePositions, rockSpawnTiles, collisionRects, tileImages, tileImagesOverlay, width, height } = buildTilemapFromData(scene, mapData);
       scene._currentMap = mapData.name || 'level_01';
       this._tileImages = tileImages;
+      this._tileImagesOverlay = tileImagesOverlay;
+      scene._tileImages = tileImages;
+      scene._tileImagesOverlay = tileImagesOverlay;
 
       // Update world dimensions on scene so other code can read them
       scene._mapCols = width;
@@ -76,7 +80,7 @@ export default class MapManager {
     const scene = this.scene;
 
     // Register background NPCs — NPCs staying on the old map with active tasks
-    scene._registerBackgroundNPCs(scene._currentMap, newMap);
+    await scene._registerBackgroundNPCs(scene._currentMap, newMap);
 
     // Determine which NPCs stay on old map vs come to new map
     for (const npc of scene.entities.npcs) {
@@ -102,7 +106,9 @@ export default class MapManager {
 
     // Destroy old tile images
     for (const img of (this._tileImages || [])) img?.destroy();
+    for (const img of (this._tileImagesOverlay || [])) img?.destroy();
     this._tileImages = [];
+    this._tileImagesOverlay = [];
 
     // Destroy old trees
     for (const tree of (scene.entities.trees || [])) tree?.destroy?.();
@@ -119,9 +125,12 @@ export default class MapManager {
       const res = await fetch(`${API_BASE}/load-map?name=${newMap}`);
       if (!res.ok) throw new Error(`Map load failed: ${res.status}`);
       const mapData = await res.json();
-      const { treePositions, rockSpawnTiles, collisionRects, tileImages, width, height } = buildTilemapFromData(scene, mapData);
+      const { treePositions, rockSpawnTiles, collisionRects, tileImages, tileImagesOverlay, width, height } = buildTilemapFromData(scene, mapData);
       scene._currentMap = newMap;
       this._tileImages = tileImages;
+      this._tileImagesOverlay = tileImagesOverlay;
+      scene._tileImages = tileImages;
+      scene._tileImagesOverlay = tileImagesOverlay;
       scene._mapCols = width;
       scene._mapRows = height;
       this.applyMapBounds(newMap, width, height);
@@ -182,8 +191,8 @@ export default class MapManager {
   applyMapBounds(mapName, cols, rows) {
     const scene = this.scene;
     if (mapName === 'cave_01') {
-      // Expand bounds for mineable area (-15..55 tiles beyond base 40x40)
-      const EXT = 15;
+      // Initial bounds — MineRenderer will tighten these once tile data arrives
+      const EXT = 100;
       const minX = -EXT * TILE_SIZE;
       const minY = -EXT * TILE_SIZE;
       const totalW = (cols + EXT * 2) * TILE_SIZE;

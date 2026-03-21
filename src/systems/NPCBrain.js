@@ -795,5 +795,40 @@ export class NPCBrain {
 
     return count;
   }
+
+  /** Deterministic fallback — picks background goal from dominant drive. */
+  _driveToBackgroundGoal() {
+    const drives = this._npc.soul?.drives || {};
+    const ranked = Object.entries(drives)
+      .filter(([k]) => !k.startsWith('_'))
+      .sort(([, a], [, b]) => b - a);
+    const driveTaskMap = {
+      greed:      { intent: 'gather resources', steps: ['mine_ore', 'deposit_to_crate'], repeat: true },
+      ambition:   { intent: 'train skills',     steps: ['train'],                        repeat: true },
+      aggression: { intent: 'train combat',     steps: ['train'],                        repeat: true },
+    };
+    for (const [drive] of ranked) {
+      if (driveTaskMap[drive]) {
+        return { ...driveTaskMap[drive], startedAt: Date.now(), maxMs: 600000 };
+      }
+    }
+    return { intent: 'rest', steps: ['wander_explore'], repeat: false, startedAt: Date.now(), maxMs: 60000 };
+  }
+
+  /**
+   * Ask LLM for a background goal for this NPC. Returns a goal object or null.
+   * Caller should use _driveToBackgroundGoal() as fallback on null/timeout.
+   */
+  async makeBackgroundGoal() {
+    try {
+      const packet = this._buildStatePacket();
+      packet._context = 'background_goal';
+      const resp = await generateDecision(packet);
+      if (resp?.goal && Array.isArray(resp.goal.steps) && resp.goal.steps.length > 0) {
+        return { ...resp.goal, startedAt: Date.now(), maxMs: resp.goal.maxMs ?? 600000 };
+      }
+    } catch { /* fall through */ }
+    return null;
+  }
 }
 
