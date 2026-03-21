@@ -1,7 +1,5 @@
 // LLMClient — talks to the player's local Ollama instance for all LLM calls.
 // Prompts are fetched from /api/prompts/{name} — no inline prompt building here.
-// PERSONALITY_TYPES metadata lives in NPCPersonality.js — import from there.
-
 import { API_BASE } from '../config.js';
 import {
   VALID_CATEGORIES,
@@ -16,7 +14,7 @@ const LLM_MODELS_URL = `${API_BASE}/llm/models`;
 let _model = 'tinyllama:latest';
 
 export function setModel(name) { _model = name; }
-export function setNumCtx(n) { /* reserved for future use */ }
+export function setNumCtx(_n) {}
 export function getModel() { return _model; }
 
 /** Fetch available models from the aux server proxy. Returns array of model name strings. */
@@ -45,7 +43,6 @@ export async function fetchPrompt(name, params = {}) {
   return _promptCache[key];
 }
 
-// ── Core Ollama calls ───────────────────────────────────────────────────────
 async function _llmFetch(messages, opts = {}) {
   const { temperature = 0.7, maxTokens = 300 } = opts;
   const res = await fetch(LLM_CHAT_URL, {
@@ -72,7 +69,7 @@ async function _callWithHistory(systemPrompt, chatHistory, userMessage, opts = {
   return _llmFetch(messages, opts);
 }
 
-/** Public transport wrapper — sends a single prompt string to the LLM and returns the raw response. */
+/** Send a raw prompt string; optionally swap model for this call only. */
 export async function generate(prompt, model) {
   const prev = _model;
   if (model) _model = model;
@@ -82,8 +79,6 @@ export async function generate(prompt, model) {
     if (model) _model = prev;
   }
 }
-
-// ── Public API ──────────────────────────────────────────────────────────────
 
 /** Route a player message to a category, then parse into task commands. */
 export async function parseCommand(text, worldContext = {}) {
@@ -147,10 +142,5 @@ export async function generateNPCChat(npcA, npcB) {
 
 /** Check if Ollama is reachable. */
 export async function checkConnection() {
-  try {
-    const res = await fetch(LLM_MODELS_URL, { method: 'GET' });
-    return res.ok;
-  } catch {
-    return false;
-  }
+  try { return (await fetch(LLM_MODELS_URL)).ok; } catch { return false; }
 }
