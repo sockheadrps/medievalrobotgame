@@ -1062,7 +1062,25 @@ export default class GameScene extends Phaser.Scene {
     return this._hud.buildPlayerFrame();
   }
   _updatePlayerFrame() {
-    return this._hud.updatePlayerFrame();
+    if (!this.player) return;
+    return this._hud.updatePlayerFrame({
+      hp: this.player.hp,
+      maxHp: this.player.maxHp,
+      ki: this.player.ki,
+      maxKi: this.player.maxKi,
+      level: this.player.level,
+      xp: this.player.xp,
+      name: this.player.name ?? this.player.id,
+      str: this.player.str,
+      def: this.player.def,
+      logs: this.player.logs,
+      stones: this.player.stones,
+      copper: this.player.copper,
+      crystals: this.player.crystals,
+      inventory: this.player.inventory,
+      kiSkillLevel: this.player.kiSkillLevel,
+      kiSkillXp: this.player.kiSkillXp,
+    });
   }
 
   // ── Target Unit Frame (top-center, shows selected entity) ─────────────────

@@ -80,10 +80,11 @@ export class HudController {
     }).setDepth(51));
   }
 
-  updatePlayerFrame() {
+  updatePlayerFrame(playerState) {
     const scene = this.scene;
-    const p = scene.player;
-    scene._pf_name.setText(scene.playerId || 'Player');
+    const p = playerState ?? scene.player;
+    if (!p) return;
+    scene._pf_name.setText(p.name ?? scene.playerId ?? 'Player');
     scene._pf_level.setText(`Lv ${p.level}`);
 
     const hpPct = p.hp / p.maxHp;
