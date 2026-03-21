@@ -22,7 +22,7 @@ def test_station_def_loads_from_json():
         "recipes": [{"inputs": {"raw_copper": 2, "raw_tin": 1},
                      "fuel_cost": 1, "outputs": {"bronze_bar": 1}, "process_time": 5.0}]
     }
-    st = CraftingStationDef(**raw)
+    st = CraftingStationDef.model_validate(raw)
     assert st.recipes[0].inputs == {"raw_copper": 2, "raw_tin": 1}
 
 
