@@ -188,6 +188,9 @@ class GameState:
         from services.player_manager import PlayerManager
         self.player_manager = PlayerManager(self)
 
+        from services.input_handler import InputHandler
+        self.input_handler = InputHandler(self)
+
         from services.portals import PortalService
         self.portals = PortalService(self)
 
@@ -291,8 +294,8 @@ class GameState:
         return self.player_manager.remove_player(pid)
 
     def handle_input(self, pid: str, data: dict):
-        """Delegate to PlayerManager.handle_input."""
-        return self.player_manager.handle_input(pid, data)
+        """Delegate to InputHandler.handle_input."""
+        return self.input_handler.handle_input(pid, data)
 
 
     # ── Tick ───────────────────────────────────────────────────────────────────
