@@ -672,7 +672,7 @@ def load_buildings() -> dict:
             "label": r["label"] if "label" in r.keys() else "",
             "stored": stored,
         }
-        # Save migration: remap legacy building kind strings
+        # Load-time migration: remap legacy building kind strings
         b = result[r["id"]]
         if b["kind"] == "furnace":
             b["kind"] = "crafting_station"
