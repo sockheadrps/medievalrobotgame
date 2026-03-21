@@ -1,5 +1,8 @@
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from fastapi.templating import Jinja2Templates
 
@@ -21,8 +24,8 @@ LLM_BASE_URL = os.environ.get("NANO_GPT_BASE_URL", os.environ.get("LLM_BASE_URL"
 LLM_API_KEY = os.environ.get("NANO_GPT_API_KEY", os.environ.get("LLM_API_KEY", ""))
 LLM_CHAT_URL = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
 MODEL = os.environ.get("NANO_GPT_MODEL", os.environ.get("LLM_MODEL", "tngtech/DeepSeek-TNG-R1T2-Chimera"))
-print(f"[config] LLM model: {MODEL}")
-print(f"[config] LLM base URL: {LLM_BASE_URL}")
+logger.info("LLM model: %s", MODEL)
+logger.info("LLM base URL: %s", LLM_BASE_URL)
 OLLAMA_URL = LLM_CHAT_URL
 
 DEV_MODE = os.environ.get("DEV_MODE", "1") == "1"

@@ -3,7 +3,10 @@
 
 import asyncio
 import json
+import logging
 import time
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -353,10 +356,10 @@ async def websocket_endpoint(ws: WebSocket):
         player["combat_mode"] = saved.get("combat_mode", "kill")
         player["equipment"] = saved.get("equipment", {})
         player["inventory"] = saved.get("inventory", {})
-        print(f"[ws] Restored player {pid} (level {player['level']}, {player['logs']} logs)")
+        logger.info("ws: Restored player %s (level %s, %s logs)", pid, player['level'], player['logs'])
     else:
         player["npc_ids"] = []
-        print(f"[ws] New player {pid}")
+        logger.info("ws: New player %s", pid)
 
     # Send welcome with saved NPC IDs
     snap = game.snapshot()
@@ -438,4 +441,4 @@ async def websocket_endpoint(ws: WebSocket):
         _save_player_state(pid)
         clients.pop(pid, None)
         game.remove_player(pid)
-        print(f"[ws] Player {pid} disconnected and saved")
+        logger.info("ws: Player %s disconnected and saved", pid)
