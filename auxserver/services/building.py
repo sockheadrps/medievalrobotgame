@@ -9,7 +9,11 @@ from services.game_state import (
     KI_TARGET_HP,
     KI_TARGET_LOG_COST,
     MINECART_PORTALS,
+    CAMPFIRE_RADIUS,
+    CAMPFIRE_HP_REGEN,
+    KI_MAX_BASE,
     tile_pos,
+    dist,
     _gen_dummy_id,
     _gen_anvil_id,
     _gen_item_id,
@@ -521,3 +525,66 @@ class BuildingService:
             else:
                 remaining.append(pc)  # keep for next tick if track is occupied
         self.gs.pending_carts = remaining
+
+    # ── Campfire Tick ──────────────────────────────────────────────────────────
+
+    def _tick_campfires(self, dt, now):
+        """Expire campfires and apply HP/Ki regen aura to nearby players and NPCs."""
+        KI_REGEN_BASE = 1.0 / 15.0
+        KI_REGEN_LEVEL_SCALE = 1.08
+
+        expired_campfires = []
+        for cid, cf in self.gs.campfires.items():
+            if cf.get("dead"):
+                expired_campfires.append(cid)
+                continue
+            elapsed = now - cf["lit_at"]
+            if elapsed >= cf["duration"]:
+                cf["dead"] = True
+                expired_campfires.append(cid)
+                continue
+            # Apply regen aura to nearby players and NPCs
+            cx, cy = cf["x"], cf["y"]
+            for p in self.gs.players.values():
+                if p.get("dead") or p.get("knocked_out"):
+                    continue
+                d = dist(p["x"], p["y"], cx, cy)
+                if d <= CAMPFIRE_RADIUS:
+                    # Bonus HP regen
+                    hp = p.get("hp", 0)
+                    maxHp = p.get("maxHp", 20)
+                    if hp < maxHp:
+                        p["_campfire_hp_accum"] = p.get("_campfire_hp_accum", 0.0) + CAMPFIRE_HP_REGEN * dt
+                        if p["_campfire_hp_accum"] >= 1.0:
+                            heal = min(int(p["_campfire_hp_accum"]), maxHp - hp)
+                            p["hp"] = hp + heal
+                            p["_campfire_hp_accum"] -= heal
+                    # Bonus ki regen (extra tick on top of normal regen)
+                    ki = p.get("ki", 0)
+                    maxKi = p.get("maxKi", KI_MAX_BASE)
+                    if ki < maxKi:
+                        level = max(1, p.get("level", 1))
+                        bonus_rate = KI_REGEN_BASE * (KI_REGEN_LEVEL_SCALE ** (level - 1))
+                        p["_ki_regen_accum"] = p.get("_ki_regen_accum", 0.0) + bonus_rate * dt
+                # NPC aura
+                for npc in p.get("npcs", {}).values():
+                    if npc.get("dead") or npc.get("knocked_out"):
+                        continue
+                    nd = dist(npc.get("x", 0), npc.get("y", 0), cx, cy)
+                    if nd <= CAMPFIRE_RADIUS:
+                        nhp = npc.get("hp", 0)
+                        nmaxHp = npc.get("maxHp", 20)
+                        if nhp < nmaxHp:
+                            npc["_campfire_hp_accum"] = npc.get("_campfire_hp_accum", 0.0) + CAMPFIRE_HP_REGEN * dt
+                            if npc["_campfire_hp_accum"] >= 1.0:
+                                heal = min(int(npc["_campfire_hp_accum"]), nmaxHp - nhp)
+                                npc["hp"] = nhp + heal
+                                npc["_campfire_hp_accum"] -= heal
+                        nki = npc.get("ki", 0)
+                        nmaxKi = npc.get("maxKi", KI_MAX_BASE)
+                        if nki < nmaxKi:
+                            nlevel = max(1, npc.get("level", 1))
+                            bonus_rate = KI_REGEN_BASE * (KI_REGEN_LEVEL_SCALE ** (nlevel - 1))
+                            npc["_ki_regen_accum"] = npc.get("_ki_regen_accum", 0.0) + bonus_rate * dt
+        for cid in expired_campfires:
+            del self.gs.campfires[cid]
