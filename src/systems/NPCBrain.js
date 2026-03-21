@@ -85,6 +85,9 @@ export class NPCBrain {
     this._lastAppliedTask = null; // track what task is actually running to avoid re-deciding
     this._lastEmotionReactTime = 0; // throttle emotion-triggered reactions
     this._lastDriveIntent = null; // track last drive-based intent to avoid re-firing
+    this._lastReflexCheck = 0;
+    this._goal = null;          // goal persistence (used in Task 4)
+    this._knownNearbyNpcIds = new Set(); // proximity tracking (used in Task 5)
 
     this._commandHandler = new PlayerCommandHandler(scene, npc, this);
     this._dataHelper = new NPCBrainData(scene, npc, this);
@@ -218,6 +221,12 @@ export class NPCBrain {
     const status = this._runner.getStatus();
     if (status.running && status.tasks[0]) {
       DriveSystem.applyTaskDecay(this._npc, status.tasks[0].task, delta);
+    }
+
+    // ── Environmental reflex (throttled 2s) ──
+    if (now - this._lastReflexCheck > 2000) {
+      this._lastReflexCheck = now;
+      if (this._reflexCheck(status, now)) return;
     }
 
     const elapsed = now - this._lastDecisionTime;
@@ -362,6 +371,76 @@ export class NPCBrain {
         this._lastEmotionReactTime = now;
         this._lastIntent = 'defend_player';
         console.log(`[NPCBrain] ${npc.getName()}: PROTECT reaction (anger ${rel.anger.toFixed(2)}) → defend`);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /** Returns the nearest friendly remote NPC within 6 tiles, or null. */
+  _nearbyFriendlyNpc() {
+    const npc = this._npc;
+    const entries = this._scene.getNearbyRemoteNpcs?.(npc, 6 * TILE_SIZE) ?? [];
+    let best = null, bestDist = Infinity;
+    for (const entry of entries) {
+      const sprite = entry.sprite;
+      if (!sprite) continue;
+      const threatKey = `npc:${entry.npcId}`;
+      if (this._scene._recentThreats?.[threatKey]) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, sprite.x, sprite.y);
+      if (dist < bestDist) { bestDist = dist; best = entry; }
+    }
+    return best ? { id: `${best.ownerPid}_${best.npcId}`, sprite: best.sprite } : null;
+  }
+
+  /**
+   * Check environmental triggers and fire a task if conditions match.
+   * Returns true if a reflex fired (caller should skip rest of update).
+   */
+  _reflexCheck(status, now) {
+    const npc = this._npc;
+    const drives = npc.soul?.drives || {};
+
+    // Survival override — bypasses ALL locks including manual
+    if ((npc.hp / npc.maxHp) < 0.25) {
+      this._runner.setTasks([{ task: 'follow' }]);
+      return true;
+    }
+
+    // Below this line: respect manual lock and commit lock
+    const isManualLocked = npc._manualCommandUntil && now < npc._manualCommandUntil;
+    const isCommitLocked = (drives._commitUntil ?? 0) > now;
+    if (isManualLocked || isCommitLocked) return false;
+
+    // Don't interrupt blocking tasks
+    const blockingTasks = ['give_logs','socialize_npc','steal_logs','practice_ki',
+                           'refine_stone','deposit_to_crate','custom_task','greet_npc'];
+    if (status.tasks.some(t => blockingTasks.includes(t.task))) return false;
+
+    // Ore nearby + high greed
+    if ((drives.greed ?? 0) > 0.45) {
+      const nearestOre = this._scene.getNearestOre?.(npc);
+      if (nearestOre) {
+        this._runner.setTasks([{ task: 'mine_ore' }]);
+        return true;
+      }
+    }
+
+    // Training dummy nearby + high ambition
+    if ((drives.ambition ?? 0) > 0.50) {
+      const nearDummy = this._scene.getNearestDummy?.(npc);
+      if (nearDummy) {
+        this._runner.setTasks([{ task: 'train' }]);
+        return true;
+      }
+    }
+
+    // Friendly NPC nearby + high social
+    if ((drives.social ?? 0) > 0.45) {
+      const friendly = this._nearbyFriendlyNpc();
+      if (friendly) {
+        this._runner.setTasks([{ task: 'greet_npc', target: friendly.id }]);
         return true;
       }
     }
