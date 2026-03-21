@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from schemas.assets import WorldObjectDef, EquipmentDef
+from schemas.assets import WorldObjectDef, EquipmentDef, CraftingStationDef
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ class AssetRegistry:
         # baseplayer frame → armor frame  (per equipment id)
         self.frame_remap: dict[str, dict[int, int]] = {}
         self._base_anims: dict[str, int] = {}   # flattened baseplayer name→frame
+        self.crafting_stations: dict[str, CraftingStationDef] = {}
         self._loaded: bool = False
 
     # ── public API ────────────────────────────────────────────────────────
@@ -34,14 +35,21 @@ class AssetRegistry:
         self._load_base_animations(assets_dir)
         self._scan_world_objects(assets_dir / "world_objects")
         self._scan_equipment(assets_dir / "equipment")
+        self._scan_crafting_stations(assets_dir / "crafting_stations")
         self._loaded = True
-        logger.info("Loaded %d world objects, %d equipment items", len(self.world_objects), len(self.equipment))
+        logger.info(
+            "Loaded %d world objects, %d equipment items, %d crafting stations",
+            len(self.world_objects), len(self.equipment), len(self.crafting_stations)
+        )
 
     def get_world_object(self, obj_id: str) -> Optional[WorldObjectDef]:
         return self.world_objects.get(obj_id)
 
     def get_equipment(self, eq_id: str) -> Optional[EquipmentDef]:
         return self.equipment.get(eq_id)
+
+    def get_crafting_station(self, station_id: str) -> Optional[CraftingStationDef]:
+        return self.crafting_stations.get(station_id)
 
     def get_manifest(self) -> dict:
         """Return JSON-serialisable manifest for the client."""
@@ -124,6 +132,24 @@ class AssetRegistry:
                 eq = EquipmentDef(**data)
                 self.equipment[eq.id] = eq
                 self._build_frame_remap(eq)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Asset registry: skipping malformed file %s: %s", cfg_path, e)
+            except Exception as e:
+                logger.warning("Asset registry: error loading %s: %s", cfg_path, e)
+
+    def _scan_crafting_stations(self, cs_dir: Path):
+        if not cs_dir.exists():
+            return
+        for folder in cs_dir.iterdir():
+            if not folder.is_dir():
+                continue
+            cfg_path = folder / "station.json"
+            if not cfg_path.exists():
+                continue
+            try:
+                data = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+                st = CraftingStationDef(**data)
+                self.crafting_stations[st.id] = st
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Asset registry: skipping malformed file %s: %s", cfg_path, e)
             except Exception as e:

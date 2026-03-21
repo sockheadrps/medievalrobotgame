@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, UploadFile, File
 from fastapi.responses import HTMLResponse
 
 from core.config import templates
+from services.asset_registry import asset_registry
 from services.asset_service import (
     list_world_objects, save_world_object, delete_world_object,
     list_equipment, save_equipment, delete_equipment,
@@ -114,3 +115,12 @@ async def post_station(request: Request):
 async def del_station(station_id: str):
     deleted = delete_station(station_id)
     return {"ok": deleted}
+
+
+@router.get("/crafting_stations")
+async def get_crafting_stations_manifest():
+    """Returns live-loaded crafting station definitions from the asset registry."""
+    return {
+        sid: st.model_dump()
+        for sid, st in asset_registry.crafting_stations.items()
+    }
