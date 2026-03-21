@@ -384,6 +384,12 @@ def _gen_campfire_id():
     return f"campfire_{_next_campfire_id}"
 
 
+def _gen_building_id():
+    global _next_building_id
+    _next_building_id += 1
+    return f"bld_{_next_building_id}"
+
+
 class GameState:
     def __init__(self):
         self.players = {}       # pid -> PlayerState

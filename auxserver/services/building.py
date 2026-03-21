@@ -13,8 +13,8 @@ from services.game_state import (
     _gen_dummy_id,
     _gen_anvil_id,
     _gen_item_id,
+    _gen_building_id,
 )
-import services.game_state as _gs_module
 
 
 class BuildingService:
@@ -133,8 +133,7 @@ class BuildingService:
 
         player_map = p.get("map", "level_01")
 
-        _gs_module._next_building_id += 1
-        bid = f"bld_{_gs_module._next_building_id}"
+        bid = _gen_building_id()
         bld = {
             "id": bid,
             "kind": kind,
