@@ -73,3 +73,9 @@ def test_all_services_import():
 def test_world_data_imports():
     from services.world_data import TILE_SIZE, PORTALS, WORLD_OBJECT_INSTANCES
     assert TILE_SIZE == 48
+
+
+def test_constants_loads():
+    from core.constants import TILE_SIZE
+    assert isinstance(TILE_SIZE, (int, float))
+    assert TILE_SIZE > 0
