@@ -1293,10 +1293,8 @@ class GameState:
     def _calc_blast_for_actor(self, actor):
         return self.combat._calc_blast_for_actor(actor)
 
-    @staticmethod
-    def _apply_blast_mode(cost, dmg, blast_mode):
-        from services.combat import CombatService as _CS
-        return _CS._apply_blast_mode(cost, dmg, blast_mode)
+    def _apply_blast_mode(self, cost, dmg, blast_mode):
+        return self.combat._apply_blast_mode(cost, dmg, blast_mode)
 
     def _calc_ki_damage_taken(self, raw_dmg, target):
         return self.combat._calc_ki_damage_taken(raw_dmg, target)
