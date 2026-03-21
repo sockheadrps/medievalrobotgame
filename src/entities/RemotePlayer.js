@@ -1,3 +1,7 @@
+// MULTIPLAYER — This file is only needed for multi-client scenarios.
+// Single-player mode does not use this class.
+// Deferred: see REFACTOR_PLAN.md Section 10.
+
 // RemotePlayer - renders another player's avatar based on server state.
 // No physics, no input - purely visual with interpolation.
 

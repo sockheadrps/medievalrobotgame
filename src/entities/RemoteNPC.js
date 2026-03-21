@@ -1,3 +1,7 @@
+// MULTIPLAYER — This file is only needed for multi-client scenarios.
+// Single-player mode does not use this class.
+// Deferred: see REFACTOR_PLAN.md Section 10.
+
 // RemoteNPC - renders another player's NPC based on server state.
 // Purely visual with interpolation + HP bar.
 

@@ -83,6 +83,7 @@ def _save_player_state(pid: str):
         db_save_npc(npc_id, npc.get("name", npc_id), npc.get("x", 0), npc.get("y", 0), stats, {})
 
 
+# MULTIPLAYER — iterates all connected clients to persist their state.
 def _save_all_players():
     """Save all connected players (including AI rival)."""
     for pid in list(clients.keys()):
@@ -91,6 +92,7 @@ def _save_all_players():
     _save_player_state(AI_PID)
 
 
+# MULTIPLAYER — ticks world state and broadcasts game state to all connected clients each frame.
 async def game_loop():
     """Server game loop — ticks world state and broadcasts to all clients."""
     global _last_save
@@ -216,7 +218,7 @@ async def game_loop():
         all_fx = list(game.fx_events)
         game.fx_events.clear()
 
-        # Broadcast per-client — filter entities to the receiving player's map
+        # MULTIPLAYER — broadcast per-client, filtering entities to each player's current map.
         disconnected = []
         for pid, ws in clients.items():
             recipient_map = game.players.get(pid, {}).get("map", "level_01")
@@ -391,7 +393,7 @@ async def websocket_endpoint(ws: WebSocket):
                         npc_list = player.get("npc_ids", [])
                         if npc_id in npc_list:
                             npc_list.remove(npc_id)
-                # Chat relay — forward to target player's client
+                # MULTIPLAYER — chat relay: forward message to another connected player's client.
                 elif msg_type == "chat_to_npc":
                     target_owner = data.get("target_owner")
                     target_ws = clients.get(target_owner)
