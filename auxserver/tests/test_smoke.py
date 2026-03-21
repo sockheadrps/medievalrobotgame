@@ -25,3 +25,11 @@ def test_resources_imports():
     gs = GameState.__new__(GameState)  # bypass __init__ (avoids DB requirement)
     gs.resources = ResourceService(gs)
     assert isinstance(gs.resources, ResourceService)
+
+
+def test_building_imports():
+    from services.game_state import GameState
+    from services.building import BuildingService
+    gs = GameState.__new__(GameState)  # bypass __init__ (avoids DB requirement)
+    gs.building = BuildingService(gs)
+    assert isinstance(gs.building, BuildingService)
