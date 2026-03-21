@@ -552,17 +552,17 @@ export class AdminPanel {
 
   _bindAdjButtons(container) {
     container.querySelectorAll('.pdp-adj-plus').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
         const field = btn.dataset.field;
         const step = Number(btn.dataset.step) || 1;
-        this._send(field, step);
+        this._send(field, e.shiftKey ? step * 10 : step);
       });
     });
     container.querySelectorAll('.pdp-adj-minus').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
         const field = btn.dataset.field;
         const step = Number(btn.dataset.step) || 1;
-        this._send(field, -step);
+        this._send(field, e.shiftKey ? -step * 10 : -step);
       });
     });
     container.querySelectorAll('.pdp-adj-action').forEach(btn => {
