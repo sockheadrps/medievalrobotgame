@@ -13,6 +13,7 @@ import {
 } from '../constants.js';
 import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
 import { createEquipmentOverlay, syncEquipmentOverlay } from './EquipmentOverlay.js';
+import NPCPersonality from '../systems/NPCPersonality.js';
 
 const HP_REGEN_MS = 30000;
 const SCALE = TILE_SIZE / NPC_FRAME_H; // 48/32 = 1.5
@@ -117,6 +118,10 @@ export class NPC extends Phaser.GameObjects.Sprite {
 
     // Soul / personality
     this.soul = _makeSoul();
+    // NPCPersonality instance — holds personality type + runtime personality state
+    // (phrases, per-personality memory, relationship deltas).
+    // Emotion decay and the authoritative soul object remain on NPC.js.
+    this.personality = new NPCPersonality(this.soul.personality.type);
     // Behavioral modifiers derived from personality type
     this._personalityMod = getPersonalityModifiers(this.soul.personality.type);
 
@@ -497,30 +502,18 @@ export class NPC extends Phaser.GameObjects.Sprite {
    * Learn a phrase from the owner's speech. NPCs pick up nicknames, insults,
    * catchphrases, and distinctive expressions their owner uses frequently.
    */
+  /**
+   * Learn a phrase from the owner's speech.
+   * Thin wrapper — delegates to NPCPersonality.learnPhrase and keeps
+   * soul.learned_phrases in sync so serialisation is unaffected.
+   *
+   * Emotion logic lives in NPC.js; personality metadata lives in NPCPersonality.
+   */
   learnPhrase(phraseData) {
-    if (!this.soul.learned_phrases) this.soul.learned_phrases = [];
-    const phrases = this.soul.learned_phrases;
-    // Support both old string format and new { phrase, usage, tone } format
-    const phrase = typeof phraseData === 'string' ? phraseData : phraseData.phrase;
-    const usage = (typeof phraseData === 'object' && phraseData.usage) || 'catchphrase';
-    const tone = (typeof phraseData === 'object' && phraseData.tone) || 'neutral';
-    // Check if already learned (case-insensitive)
-    const lower = phrase.toLowerCase();
-    const existing = phrases.find(p => p.phrase.toLowerCase() === lower);
-    if (existing) {
-      existing.uses++;
-      existing.last_heard = Date.now();
-      // Update tone/usage if we get a more specific classification
-      if (tone !== 'neutral') existing.tone = tone;
-      if (usage !== 'catchphrase') existing.usage = usage;
-      return;
-    }
-    phrases.push({ phrase, uses: 1, last_heard: Date.now(), usage, tone });
-    // Keep max 8 phrases, drop least-used
-    if (phrases.length > 8) {
-      phrases.sort((a, b) => b.uses - a.uses);
-      phrases.length = 8;
-    }
+    // Delegate to NPCPersonality (canonical logic lives there)
+    this.personality.learnPhrase(phraseData);
+    // Keep soul.learned_phrases in sync for persistence / getSoulContext callers
+    this.soul.learned_phrases = this.personality.phrases;
   }
 
   getSoulContext(playerId = 'default') {
@@ -816,6 +809,9 @@ export class NPC extends Phaser.GameObjects.Sprite {
       };
       // Update behavioral modifiers when personality type changes
       this._personalityMod = getPersonalityModifiers(this.soul.personality.type);
+      // Sync NPCPersonality instance with restored soul data
+      this.personality.type   = this.soul.personality.type;
+      this.personality.phrases = this.soul.learned_phrases;
       // Migrate old flat memories array to { global: [...] }
       if (Array.isArray(data.soul.memories)) {
         this.soul.memories = { global: data.soul.memories };
