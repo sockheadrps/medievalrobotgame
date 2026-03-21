@@ -20,7 +20,7 @@ export class WorldSyncController {
   syncTrees(serverTrees) {
     if (!serverTrees) return;
     for (const st of serverTrees) {
-      const tree = this.scene.entities.trees[st.id];
+      const tree = this.scene.entities.trees.find(t => t.treeIndex === st.id);
       if (!tree) continue;
       tree.setChopped(st.chopped);
     }

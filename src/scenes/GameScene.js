@@ -64,6 +64,12 @@ export default class GameScene extends Phaser.Scene {
     super('GameScene');
   }
 
+  // Backward-compat shims — callers migrated gradually to scene.entities.X
+  get trees() { return this.entities.trees; }
+  get npcs() { return this.entities.npcs; }
+  get groundItems() { return this.entities.groundItems; }
+  get dummies() { return this.entities.dummies; }
+
   preload() {
     this.load.spritesheet(SHEET_KEY, SHEET_PATH, {
       frameWidth:  SHEET_TILE,

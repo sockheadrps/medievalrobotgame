@@ -15,6 +15,7 @@ export default class EntityManager {
   }
 
   add(type, entity) {
+    if (!Array.isArray(this[type])) throw new Error(`EntityManager: unknown entity type "${type}"`);
     this[type].push(entity);
     return entity;
   }
