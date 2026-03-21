@@ -18,6 +18,7 @@ import { HudController } from '../ui/HudController.js';
 import { AdminPanelController } from '../ui/AdminPanelController.js';
 import { InventoryController } from '../ui/InventoryController.js';
 import { InspectPanel } from '../ui/InspectPanel.js';
+import { StationViewerPanel } from '../ui/StationViewerPanel.js';
 import { DriveIndicator } from '../ui/DriveIndicator.js';
 import { PlacementSystem } from '../systems/PlacementSystem.js';
 import { TaskRecorder } from '../systems/TaskRecorder.js';
@@ -163,12 +164,18 @@ export default class GameScene extends Phaser.Scene {
     this._buildingSprites = {};
     this._placement = new PlacementSystem(this, this.grid, this._conveyors);
     this._taskRecorder = new TaskRecorder(this);
+    this._stationViewer = new StationViewerPanel(this);
 
     // Map manager — handles map loading, bounds, tile images, collision group
     this._mapManager = new MapManager(this);
 
     // Right-click on buildings → context menu to remove
     this.events.on('object-right-clicked', ({ type, obj, ptr }) => {
+      if (type === 'crafting_station') {
+        const stationDef = this._craftingStationManifest?.[obj._assetId];
+        this._stationViewer?.open(obj, stationDef);
+        return;
+      }
       if (type === 'conveyor' || type === 'crate' || type === 'furnace' || type === 'log_cutter' || type === 'track' || type === 'gate' || type === 'fence') {
         const bid = obj._serverId;
         if (!bid) return;
@@ -665,6 +672,8 @@ export default class GameScene extends Phaser.Scene {
           remap,
         };
       }
+      const stResp = await fetch(`${API_BASE}/api/assets/crafting_stations`);
+      this._craftingStationManifest = await stResp.json();
     } catch (e) {
       console.warn('[GameScene] Failed to fetch asset manifest:', e);
     }
