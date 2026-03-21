@@ -54,8 +54,8 @@ export default class NPCPersonality {
     /** @type {string} */
     this.type = PERSONALITY_TYPES.includes(personalityType) ? personalityType : 'Pragmatist';
 
-    // Emotion state per relationship — mirrors soul.relationships structure.
-    // NPC.js is still the authoritative store; this object mirrors/shadows it.
+    // Personality-scoped relationship tracking; note soul.relationships in NPC.js
+    // is a separate store used by LLM context (the two are never synced).
     /** @type {Object.<string, {trust:number, fear:number, anger:number}>} */
     this.relationships = {};
 

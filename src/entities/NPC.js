@@ -499,10 +499,6 @@ export class NPC extends Phaser.GameObjects.Sprite {
   }
 
   /**
-   * Learn a phrase from the owner's speech. NPCs pick up nicknames, insults,
-   * catchphrases, and distinctive expressions their owner uses frequently.
-   */
-  /**
    * Learn a phrase from the owner's speech.
    * Thin wrapper — delegates to NPCPersonality.learnPhrase and keeps
    * soul.learned_phrases in sync so serialisation is unaffected.
