@@ -634,12 +634,15 @@ def save_buildings(buildings: dict):
         dir_str = b.get("direction", "")
         out_dir = b.get("out_direction", "")
         packed_dir = f"{dir_str}|{out_dir}" if out_dir else dir_str
+        stored = dict(b.get("stored", {}))
+        if b.get("asset_id"):
+            stored["_asset_id"] = b["asset_id"]
         conn.execute("""
             INSERT INTO buildings (id, kind, col, row, map, owner, direction, stored, label)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (b["id"], b["kind"], b["col"], b["row"],
               b.get("map", "level_01"), b.get("owner", ""),
-              packed_dir, json.dumps(b.get("stored", {})),
+              packed_dir, json.dumps(stored),
               b.get("label", "")))
     conn.commit()
 
@@ -669,6 +672,17 @@ def load_buildings() -> dict:
             "label": r["label"] if "label" in r.keys() else "",
             "stored": stored,
         }
+        # Save migration: remap legacy building kind strings
+        b = result[r["id"]]
+        if b["kind"] == "furnace":
+            b["kind"] = "crafting_station"
+            b["stored"]["_asset_id"] = "bronze_furnace"
+        elif b["kind"] == "log_cutter":
+            b["kind"] = "crafting_station"
+            b["stored"]["_asset_id"] = "log_cutter"
+        # Restore asset_id from stored sentinel for all crafting_station rows
+        if b["kind"] == "crafting_station" and "_asset_id" in b["stored"]:
+            b["asset_id"] = b["stored"].pop("_asset_id")
     return result
 
 
