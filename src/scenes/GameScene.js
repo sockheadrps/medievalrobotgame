@@ -2374,7 +2374,7 @@ export default class GameScene extends Phaser.Scene {
 
   // ── Entity Query Helpers (used by NPCBrain reflex layer) ────────────────────
 
-  /** Returns the nearest non-depleted world-object sprite within range, or null. */
+  /** Returns the nearest non-depleted world-object sprite within rangeTiles tiles, or null. */
   getNearestOre(npc, rangeTiles = 8) {
     let best = null, bestDist = rangeTiles * TILE_SIZE;
     for (const [, wo] of Object.entries(this._worldObjSprites || {})) {
@@ -2385,10 +2385,10 @@ export default class GameScene extends Phaser.Scene {
     return best;
   }
 
-  /** Returns the nearest living training dummy within range, or null. */
+  /** Returns the nearest living training dummy within rangeTiles tiles, or null. */
   getNearestDummy(npc, rangeTiles = 8) {
     let best = null, bestDist = rangeTiles * TILE_SIZE;
-    for (const dummy of (this.dummies ?? [])) {
+    for (const dummy of (this.entities?.dummies ?? [])) {
       if (dummy.isDead?.()) continue;
       const dist = Phaser.Math.Distance.Between(npc.x, npc.y, dummy.x, dummy.y);
       if (dist < bestDist) { bestDist = dist; best = dummy; }
@@ -2396,7 +2396,7 @@ export default class GameScene extends Phaser.Scene {
     return best;
   }
 
-  /** Returns array of remote NPC sprite entries within rangePixels of npc. */
+  /** Returns array of remote NPC entries within rangePixels pixels of npc. Caller passes pixels (e.g. 6 * TILE_SIZE). */
   getNearbyRemoteNpcs(npc, rangePixels) {
     const result = [];
     for (const [, entry] of Object.entries(this._remoteNPCSprites || {})) {
