@@ -1,12 +1,15 @@
-"""Player management: init, stats, inventory, crafting, death/respawn, input dispatch."""
+"""Player management: init, stats, inventory, crafting, death/respawn.
+
+Also contains handle_input(), the server-side message router for all
+client actions. This is a temporary home; see handle_input docstring.
+"""
 
 import math
 import random
 import time
 
 from services.asset_registry import asset_registry
-
-TILE_SIZE = 48
+from services.world_data import TILE_SIZE
 PLAYER_SPEED = 160
 PLAYER_RUN_SPEED = 280
 KI_MAX_BASE = 20
@@ -431,7 +434,12 @@ class PlayerManager:
     # ── Input dispatch (moved from GameState) ────────────────────────────────
 
     def handle_input(self, pid: str, data: dict):
-        """Process input from a client. Dispatches to service methods."""
+        """
+        Full server-side message router — dispatches all client actions to the
+        appropriate service (combat, resources, building, npc_manager, portals,
+        player). Lives in PlayerManager for historical reasons; a future refactor
+        may extract this to a dedicated InputDispatcher.
+        """
         gs = self.gs
         p = gs.players.get(pid)
         if not p:

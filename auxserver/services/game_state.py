@@ -17,11 +17,10 @@ from services.animal_service import animal_manager
 from services.crop_service import crop_manager
 from services.asset_registry import asset_registry
 from services.world_data import (
+    TILE_SIZE,
     TREE_POSITIONS, ROCK_SPAWN_POSITIONS, COLLISION_TILES, MAP_COLS, MAP_ROWS,
     PORTALS, MINECART_PORTALS, WORLD_OBJECT_INSTANCES, init_world_objects,
 )
-
-TILE_SIZE = 48
 PLAYER_SPEED = 160
 PLAYER_RUN_SPEED = 280
 NPC_SPEED = 120
