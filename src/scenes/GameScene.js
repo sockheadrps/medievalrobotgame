@@ -1,10 +1,7 @@
 import Phaser from 'phaser';
 import { Player }       from '../entities/Player.js';
-import { RemotePlayer } from '../entities/RemotePlayer.js';
 import { Tree }         from '../entities/Tree.js';
-import { Rock }         from '../entities/Rock.js';
 import { GridSystem }   from '../systems/GridSystem.js';
-import { GroundItem }   from '../entities/GroundItem.js';
 import { NPC }          from '../entities/NPC.js';
 import { ChatBox }      from '../ui/ChatBox.js';
 import { NPCTaskRunner } from '../systems/NPCTaskRunner.js';
@@ -14,8 +11,6 @@ import { StateSyncController } from '../systems/StateSyncController.js';
 import { SelectionController } from '../systems/SelectionController.js';
 import { WorldSyncController } from '../systems/WorldSyncController.js';
 import { DialogueController } from '../systems/DialogueController.js';
-import { TrainingDummy } from '../entities/TrainingDummy.js';
-import { RemoteNPC }    from '../entities/RemoteNPC.js';
 import { Connection }   from '../net/Connection.js';
 import { NPCDetailPanel } from '../ui/NPCDetailPanel.js';
 import { PlayerDetailPanel } from '../ui/PlayerDetailPanel.js';
@@ -31,35 +26,28 @@ import EntityManager from '../systems/EntityManager.js';
 import InputController from '../systems/InputController.js';
 import MovementController from '../systems/MovementController.js';
 import MapManager from '../systems/MapManager.js';
-import { Crate } from '../entities/Crate.js';
-import { Furnace } from '../entities/Furnace.js';
 import {
   TILE_SIZE, MAP_COLS, MAP_ROWS,
   SHEET_KEY, SHEET_PATH, SHEET_TILE, SHEET_SPACING,
   PLAYER_KEY, PLAYER_PATH, PLAYER_FRAME_W, PLAYER_FRAME_H,
   NPC_KEY, NPC_PATH, NPC_FRAME_W, NPC_FRAME_H,
-  INTERACT_DIST, tilePos,
+  tilePos,
   LOG1_KEY, LOG1_PATH, LOG2_KEY, LOG2_PATH, LOG3_KEY, LOG3_PATH,
   BARRIER_KEY, BARRIER_PATH, BARRIER_FRAME_W, BARRIER_FRAME_H,
   ABSORB_KEY, ABSORB_PATH, ABSORB_FRAME_W, ABSORB_FRAME_H,
-  FRAME_ROCK, FRAME_ANVIL, FRAME_CRYSTAL,
   NRG_KEY, NRG_PATH, NRG_FRAME_W, NRG_FRAME_H,
   FIRE_KEY, FIRE_PATH, FIRE_FRAME_W, FIRE_FRAME_H,
-  KI_MAX_BASE, KI_REGEN_MS, KI_BLAST_BASE_COST, KI_BLAST_BASE_DMG, KI_BLAST_SCALE,
   DINOBIRD_KEY, DINOBIRD_PATH, DINOBIRD_FRAME_W, DINOBIRD_FRAME_H,
-  worldToTile,
 } from '../constants.js';
+import { API_BASE } from '../config.js';
+import { generateDialogue } from '../net/LLMClient.js';
 
 const DUMMY_KEY  = 'trainingdummy';
 const DUMMY_PATH = 'assets/trainingdummy.png';
-import { API_BASE } from '../config.js';
 const AUTOSAVE_MS = 30000;
 const HUD_SCALE = 0.7;
-const PLAYER_FRAME_SCALE = 0.7;
-const TARGET_FRAME_RELATIVE_TO_PLAYER = 1.2;
 const TOP_HUD_MARGIN = Math.round(190 * HUD_SCALE);
 const RIGHT_HUD_MARGIN = 360;
-const HOTBAR_SLOT_COUNT = 6;
 
 export default class GameScene extends Phaser.Scene {
   constructor() {
@@ -569,7 +557,6 @@ export default class GameScene extends Phaser.Scene {
       this._netStatus.setText(`Online: ${playerCount} player${playerCount > 1 ? 's' : ''}`);
     }
 
-    this._updateNPCPanel();
   }
 
   // ── Server state sync ─────────────────────────────────────────────────────────
@@ -647,10 +634,6 @@ export default class GameScene extends Phaser.Scene {
       for (const m of this._minecartMarkers) m.destroy();
     }
     this._minecartMarkers = [];
-  }
-
-  _applyMapBounds(mapName, cols, rows) {
-    this._mapManager.applyMapBounds(mapName, cols, rows);
   }
 
   _syncBuildingStored() {
@@ -781,10 +764,6 @@ export default class GameScene extends Phaser.Scene {
       }
     }
   }
-  _syncRemoteNPCs(players) {
-    return this._stateSync.syncRemoteNPCs(players);
-  }
-
   // ── Player Death ───────────────────────────────────────────────────────────────
 
   _showDeathScreen() {
@@ -1401,11 +1380,6 @@ export default class GameScene extends Phaser.Scene {
 
   // ── NPC Info Panel ─────────────────────────────────────────────────────────────
 
-  _showNPCPanel(npc) {
-    this._hideNPCPanel();
-    this._npcPanelNPC = npc ?? null;
-  }
-
   _hideNPCPanel() {
     this._npcPanelNPC = null;
     if (this._npcPanelEls) {
@@ -1418,10 +1392,6 @@ export default class GameScene extends Phaser.Scene {
   _openNPCDetail(npc) {
     if (!npc) return;
     this._npcDetailPanel.open(npc);
-  }
-
-  _updateNPCPanel() {
-    return;
   }
 
   _findNpcAtPointer(ptr) {
@@ -1471,8 +1441,6 @@ export default class GameScene extends Phaser.Scene {
 
     return best;
   }
-
-  // ── Admin Menu ──────────────────────────────────────────────────────────────────
 
   // ── Escape Menu ──────────────────────────────────────────────────────────────
 
@@ -2209,22 +2177,6 @@ export default class GameScene extends Phaser.Scene {
    */
   _tryExecuteCoercedCommand(npc, text, fromPlayerId) {
     return this._dialogue.tryExecuteCoercedCommand(npc, text, fromPlayerId);
-  }
-
-  async _tryLoadNPC(npcId, npc) {
-    try {
-      const res = await fetch(`${API_BASE}/npc_load/${npcId}`);
-      if (!res.ok) return false;
-      const { found, data } = await res.json();
-      if (found && data) {
-        npc.loadFrom(data);
-        console.log(`[load] Restored NPC ${npcId}`);
-        return true;
-      }
-    } catch (e) {
-      console.warn('[load] Failed to load NPC:', e.message);
-    }
-    return false;
   }
 
   // ── Hotbar ──────────────────────────────────────────────────────────────────
