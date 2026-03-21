@@ -207,6 +207,12 @@ export class SocialTaskHandler {
       return; // still approaching, called again next frame
     }
 
+    // Guard against missing soul before any async work
+    if (!npc.soul) {
+      this._runner._tasks.shift();
+      return;
+    }
+
     // At this point NPC is within range — if async greeting already in-flight, don't start a new one
     if (this._runner._greeting) return;
 
@@ -236,12 +242,6 @@ export class SocialTaskHandler {
       // Show speech bubbles
       npc.showBubble?.(line, 3000);
       targetSprite.showBubble?.('...', 2000);
-
-      // Guard against missing soul before writing relationships
-      if (!npc.soul) {
-        this._runner._tasks.shift();
-        return;
-      }
 
       // Apply trust delta
       const rel = npc.soul?.relationships ?? {};
