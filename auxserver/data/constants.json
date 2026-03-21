@@ -1,0 +1,25 @@
+{
+  "_comment": "Single source of truth for constants shared between Python server and JS client.",
+
+  "TILE_SIZE":    48,
+  "MAP_COLS":     80,
+  "MAP_ROWS":     50,
+
+  "PLAYER_SPEED":     160,
+  "PLAYER_RUN_SPEED": 280,
+  "NPC_SPEED":        120,
+
+  "PICKUP_DIST":       28.8,
+  "INTERACT_DIST":     90,
+  "TREE_CHOP_DIST":    80,
+  "ROCK_MINE_DIST":    80,
+  "ROCK_HITS":         5,
+  "ROCK_LIFESPAN_MS":  60000,
+
+  "KI_MAX_BASE":       20,
+  "KI_MAX_PER_LEVEL":  2,
+  "KI_REGEN_MS":       5000,
+  "KI_BLAST_BASE_COST": 8,
+  "KI_BLAST_BASE_DMG":  2,
+  "KI_BLAST_SCALE":     0.02
+}
