@@ -9,3 +9,8 @@ def test_game_state_imports():
 def test_database_imports():
     from services.database import init_db
     assert init_db is not None
+
+
+def test_combat_imports():
+    from services.combat import CombatService
+    assert CombatService is not None
