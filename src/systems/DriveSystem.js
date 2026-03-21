@@ -52,7 +52,7 @@ export const DRIVE_TASK_SATISFACTION = {
 };
 
 // Decay applied to a drive per second while its task is executing
-const TASK_DECAY_RATE = 0.06; // drive drops ~6% per second while task runs
+const TASK_DECAY_RATE = 0.15; // drive drops ~15% per second while task runs
 
 // Conflict threshold — two drives this close and both above this value → LLM needed
 const CONFLICT_THRESHOLD    = 0.05;
@@ -106,27 +106,27 @@ export class DriveSystem {
       return 1 + (1 - hpPct) * 2.0;
     }
     if (drive === 'greed') {
-      // More trees nearby → greed grows faster
+      // More trees nearby → greed grows slightly faster
       const treeCount = (scene.trees ?? []).filter(t => !t._chopped).length;
-      return 1 + Math.min(treeCount / 10, 1.0);
+      return 1 + Math.min(treeCount / 20, 0.4);
     }
     if (drive === 'social') {
-      // Remote NPCs nearby boost social
+      // Remote NPCs nearby boost social slightly
       const remoteNpcs = Object.values(scene._remoteNPCSprites || {});
       const nearbyCount = remoteNpcs.filter(r => {
         const d = Phaser.Math.Distance.Between(npc.x, npc.y, r.x, r.y);
         return d < TILE_SIZE * 8;
       }).length;
-      return 1 + Math.min(nearbyCount * 0.3, 1.0);
+      return 1 + Math.min(nearbyCount * 0.1, 0.3);
     }
     if (drive === 'ambition') {
-      // Nearby dummies/etrainers boost ambition — NPCs want to train
+      // Nearby dummies boost ambition slightly
       const dummies = (scene.dummies ?? []).filter(d => !d.isDead?.());
       const nearbyDummies = dummies.filter(d => {
         const dist = Phaser.Math.Distance.Between(npc.x, npc.y, d.x, d.y);
         return dist < TILE_SIZE * 10;
       }).length;
-      return 1 + Math.min(nearbyDummies * 0.8, 2.0);
+      return 1 + Math.min(nearbyDummies * 0.2, 0.4);
     }
     return 1.0;
   }
