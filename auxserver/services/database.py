@@ -25,9 +25,36 @@ def _get_conn() -> sqlite3.Connection:
     return _local.conn
 
 
+def _migrate_v1(conn):
+    """Schema v1: remove unused tables identified in the audit.
+    Audit result: all 11 tables (players, npcs, settings, ground_items, fences,
+    dummies, ki_targets, anvils, campfires, buildings, mine_states) are actively
+    used — no tables to drop at this version.
+    """
+    unused: list[str] = []  # none found in audit
+    for table in unused:
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+
+
 def init_db():
     """Create tables if they don't exist."""
     conn = _get_conn()
+
+    # Schema versioning — must run before the main CREATE TABLE block so that
+    # migrations execute on first boot against an existing (pre-versioning) DB.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY
+        )
+    """)
+    row = conn.execute("SELECT version FROM schema_version").fetchone()
+    current = row[0] if row else 0
+
+    if current < 1:
+        _migrate_v1(conn)
+        conn.execute("INSERT OR REPLACE INTO schema_version VALUES (1)")
+    conn.commit()
+
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS players (
             username TEXT PRIMARY KEY,
