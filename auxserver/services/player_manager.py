@@ -4,6 +4,7 @@ Also contains handle_input(), the server-side message router for all
 client actions. This is a temporary home; see handle_input docstring.
 """
 
+import logging
 import math
 import random
 import time
@@ -11,6 +12,9 @@ import time
 from services.asset_registry import asset_registry
 from services.world_data import TILE_SIZE
 from core.constants import PLAYER_SPEED, PLAYER_RUN_SPEED, KI_MAX_BASE, KI_MAX_PER_LEVEL
+
+logger = logging.getLogger(__name__)
+
 DEFAULT_KI_MOVES = ["absorb"]
 AI_RIVAL_PID = "__ai_rival__"
 
@@ -772,7 +776,7 @@ class PlayerManager:
                     "task": task,
                     "last_tick": time.time(),
                 }
-                print(f"[bg] Registered background NPC {npc_id} on {npc_map}: {task.get('task', '?')}")
+                logger.debug("Registered background NPC %s on %s: %s", npc_id, npc_map, task.get('task', '?'))
 
         elif msg_type == "unregister_background_npcs":
             target_map = data.get("map", "")
@@ -782,4 +786,4 @@ class PlayerManager:
                     removed.append(npc_id)
                     del gs.background_npcs[npc_id]
             if removed:
-                print(f"[bg] Unregistered background NPCs on {target_map}: {removed}")
+                logger.debug("Unregistered background NPCs on %s: %s", target_map, removed)
