@@ -3,8 +3,11 @@
 # from the maps directory at import time.
 
 import json
+import logging
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from services.asset_registry import asset_registry
 from core.constants import TILE_SIZE
@@ -58,13 +61,14 @@ def _load_map_positions():
             col_data = json.loads(col_path.read_text(encoding="utf-8"))
             for ct in col_data.get("collisionTiles", []):
                 collision_set.add((int(ct["x"]), int(ct["y"])))
-            print(f"[world_data] Loaded {len(collision_set)} collision tiles from level_01_collision.json")
+            logger.info("Loaded %d collision tiles from level_01_collision.json", len(collision_set))
 
         if trees:
-            print(f"[world_data] Loaded {len(trees)} trees, {len(rock_spawns)} rock spawn tiles from level_01.json ({width}x{height})")
+            logger.info("Loaded %d trees, %d rock spawn tiles from level_01.json (%dx%d)",
+                        len(trees), len(rock_spawns), width, height)
             return trees, rock_spawns, collision_set, width, height
     except Exception as e:
-        print(f"[world_data] Failed to load map: {e}")
+        logger.warning("Failed to load map: %s", e)
     return FALLBACK_TREE_POSITIONS, [], set(), 80, 50
 
 
@@ -121,12 +125,12 @@ def _load_portals():
                             "spawn_row": sr,
                         })
                     else:
-                        print(f"[world_data] Portal to '{target}' has no 'spawn' item on that map — place one or use explicit coords")
+                        logger.warning("Portal to '%s' has no 'spawn' item on that map — place one or use explicit coords", target)
 
-        print(f"[world_data] Loaded {len(portals)} portals, spawn points: {spawn_points}")
+        logger.info("Loaded %d portals, spawn points: %s", len(portals), spawn_points)
         return portals
     except Exception as e:
-        print(f"[world_data] Failed to load portals: {e}")
+        logger.warning("Failed to load portals: %s", e)
         return []
 
 
@@ -173,12 +177,12 @@ def _load_minecart_portals():
                     "entrance_row": er,
                 })
             else:
-                print(f"[world_data] Minecart exit to '{target}' has no entrance — place a 'minecart_entrance' item on that map")
+                logger.warning("Minecart exit to '%s' has no entrance — place a 'minecart_entrance' item on that map", target)
 
-        print(f"[world_data] Loaded {len(portals)} minecart portals, entrances: {entrances}")
+        logger.info("Loaded %d minecart portals, entrances: %s", len(portals), entrances)
         return portals
     except Exception as e:
-        print(f"[world_data] Failed to load minecart portals: {e}")
+        logger.warning("Failed to load minecart portals: %s", e)
         return []
 
 
@@ -203,7 +207,7 @@ def _load_world_objects():
                 asset_id = m.group(1)
                 wo_def = asset_registry.get_world_object(asset_id)
                 if not wo_def:
-                    print(f"[world_data] Unknown world object asset '{asset_id}' in {items_file.name}")
+                    logger.warning("Unknown world object asset '%s' in %s", asset_id, items_file.name)
                     continue
                 col = int(item["tileCol"])
                 row = int(item["tileRow"])
@@ -222,10 +226,10 @@ def _load_world_objects():
                     "respawn_at": None,
                 }
         if instances:
-            print(f"[world_data] Loaded {len(instances)} world object instances")
+            logger.info("Loaded %d world object instances", len(instances))
         return instances
     except Exception as e:
-        print(f"[world_data] Failed to load world objects: {e}")
+        logger.warning("Failed to load world objects: %s", e)
         return {}
 
 
