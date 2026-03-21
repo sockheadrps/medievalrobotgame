@@ -33,7 +33,7 @@ import {
   SHEET_KEY, SHEET_PATH, SHEET_TILE, SHEET_SPACING,
   PLAYER_KEY, PLAYER_PATH, PLAYER_FRAME_W, PLAYER_FRAME_H,
   NPC_KEY, NPC_PATH, NPC_FRAME_W, NPC_FRAME_H,
-  tilePos,
+  tilePos, RESOURCE_FRAME, SHEET_COLS,
   LOG1_KEY, LOG1_PATH, LOG2_KEY, LOG2_PATH, LOG3_KEY, LOG3_PATH,
   BARRIER_KEY, BARRIER_PATH, BARRIER_FRAME_W, BARRIER_FRAME_H,
   ABSORB_KEY, ABSORB_PATH, ABSORB_FRAME_W, ABSORB_FRAME_H,
@@ -663,6 +663,15 @@ export default class GameScene extends Phaser.Scene {
       }
       const stResp = await fetch(`${API_BASE}/api/assets/crafting_stations`);
       this._craftingStationManifest = await stResp.json();
+
+      // Populate RESOURCE_FRAME from item definitions
+      const itemsResp = await fetch(`${API_BASE}/api/assets/items`);
+      const itemsList = await itemsResp.json();
+      for (const item of (Array.isArray(itemsList) ? itemsList : Object.values(itemsList))) {
+        if (item.id && item.sprite?.tileCol != null) {
+          RESOURCE_FRAME[item.id] = item.sprite.tileCol + (item.sprite.tileRow ?? 0) * SHEET_COLS;
+        }
+      }
     } catch (e) {
       console.warn('[GameScene] Failed to fetch asset manifest:', e);
     }
