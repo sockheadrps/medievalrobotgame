@@ -6,11 +6,14 @@ world-object and equipment definitions, and builds frame-remap tables.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Optional
 
 from schemas.assets import WorldObjectDef, EquipmentDef
+
+logger = logging.getLogger(__name__)
 
 
 class AssetRegistry:
@@ -20,14 +23,18 @@ class AssetRegistry:
         # baseplayer frame → armor frame  (per equipment id)
         self.frame_remap: dict[str, dict[int, int]] = {}
         self._base_anims: dict[str, int] = {}   # flattened baseplayer name→frame
+        self._loaded: bool = False
 
     # ── public API ────────────────────────────────────────────────────────
 
     def load_all(self, assets_dir: Path):
         """Scan assets/ tree and populate registries."""
+        if self._loaded:
+            return  # already scanned at startup
         self._load_base_animations(assets_dir)
         self._scan_world_objects(assets_dir / "world_objects")
         self._scan_equipment(assets_dir / "equipment")
+        self._loaded = True
         print(f"[asset_registry] Loaded {len(self.world_objects)} world objects, "
               f"{len(self.equipment)} equipment items")
 
@@ -99,8 +106,10 @@ class AssetRegistry:
                 data = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
                 wo = WorldObjectDef(**data)
                 self.world_objects[wo.id] = wo
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Asset registry: skipping malformed file %s: %s", cfg_path, e)
             except Exception as e:
-                print(f"[asset_registry] Error loading {cfg_path}: {e}")
+                logger.warning("Asset registry: error loading %s: %s", cfg_path, e)
 
     def _scan_equipment(self, eq_dir: Path):
         if not eq_dir.exists():
@@ -116,8 +125,10 @@ class AssetRegistry:
                 eq = EquipmentDef(**data)
                 self.equipment[eq.id] = eq
                 self._build_frame_remap(eq)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Asset registry: skipping malformed file %s: %s", cfg_path, e)
             except Exception as e:
-                print(f"[asset_registry] Error loading {cfg_path}: {e}")
+                logger.warning("Asset registry: error loading %s: %s", cfg_path, e)
 
     def _build_frame_remap(self, eq: EquipmentDef):
         """Build baseplayer_frame → armor_frame mapping.

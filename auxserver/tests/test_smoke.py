@@ -89,3 +89,8 @@ def test_prompts_router_imports():
 def test_llm_gateway_imports():
     from services.llm_gateway import call_llm
     assert callable(call_llm)
+
+
+def test_asset_registry_caches():
+    from services.asset_registry import asset_registry
+    assert hasattr(asset_registry, '_loaded')
