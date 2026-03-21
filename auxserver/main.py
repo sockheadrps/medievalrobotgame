@@ -20,6 +20,7 @@ from api.playground_tests import router as playground_tests_router
 from api.assets import router as assets_router
 from api.ollama import router as ollama_router
 from api.misc import router as misc_router
+from api.prompts import router as prompts_router
 from core.config import STATIC_DIR, TEMPLATES_DIR, DEV_MODE, ASSETS_DIR
 from services.database import init_db, migrate_json_files, ensure_dev_accounts
 from services.asset_registry import asset_registry
@@ -47,6 +48,7 @@ app.include_router(playground_tests_router)
 app.include_router(assets_router)
 app.include_router(ollama_router)
 app.include_router(misc_router)
+app.include_router(prompts_router)
 
 
 @app.on_event("startup")

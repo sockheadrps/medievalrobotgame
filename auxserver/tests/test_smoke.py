@@ -79,3 +79,8 @@ def test_constants_loads():
     from core.constants import TILE_SIZE
     assert isinstance(TILE_SIZE, (int, float))
     assert TILE_SIZE > 0
+
+
+def test_prompts_router_imports():
+    from api.prompts import router
+    assert router is not None
