@@ -222,6 +222,12 @@ export class NPCBrainData {
           survival:   +(npc.soul.drives.survival   ?? 0).toFixed(2),
           ambition:   +(npc.soul.drives.ambition   ?? 0).toFixed(2),
         } : null,
+        current_goal: this._brain._goal ? {
+          intent: this._brain._goal.intent,
+          current_step: this._brain._goal.steps[this._brain._goal.stepIndex],
+          steps_remaining: this._brain._goal.steps.length - this._brain._goal.stepIndex,
+          age_ms: Date.now() - this._brain._goal.startedAt,
+        } : null,
       },
       player: {
         id: playerId,

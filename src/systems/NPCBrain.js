@@ -261,7 +261,7 @@ export class NPCBrain {
 
     const isManualLocked = this._npc._manualCommandUntil && now < this._npc._manualCommandUntil;
     const isCommitLocked = (this._npc.soul?.drives?._commitUntil ?? 0) > now;
-    if (!isManualLocked && !isCommitLocked) {
+    if (!isManualLocked && !isCommitLocked && !this._goal) {
       const dominantDrive = DriveSystem.getDominantIntent(this._npc, this._scene);
       if (dominantDrive && dominantDrive !== this._lastDriveIntent) {
         const taskDef = DriveSystem.driveToTask(dominantDrive, this._npc, this._scene);
@@ -285,6 +285,9 @@ export class NPCBrain {
 
     let shouldDecide = false;
     const isBusy = status.running;
+    if (!isBusy) {
+      if (this._advanceGoal(now)) return; // goal has next step, skip LLM
+    }
 
     // Use personality-scaled cooldowns
     const minCooldown = isBusy ? this._getBusyRefresh() : this._getDecisionCooldown();
@@ -448,6 +451,29 @@ export class NPCBrain {
     }
 
     return false;
+  }
+
+  /**
+   * Advance the active goal to its next step.
+   * Returns true if a step was dispatched, false if goal is expired/exhausted.
+   */
+  _advanceGoal(now) {
+    if (!this._goal) return false;
+    if (now - this._goal.startedAt > this._goal.maxMs) {
+      this._goal = null;
+      return false;
+    }
+    this._goal.stepIndex++;
+    if (this._goal.stepIndex >= this._goal.steps.length) {
+      if (this._goal.repeat) {
+        this._goal.stepIndex = 0;
+      } else {
+        this._goal = null;
+        return false;
+      }
+    }
+    this._runner.setTasks([{ task: this._goal.steps[this._goal.stepIndex] }]);
+    return true;
   }
 
   // ── Build state packet — delegated to NPCBrainData ───────────────────────
@@ -630,6 +656,30 @@ export class NPCBrain {
     }
 
     this._lastDecision = decision;
+
+    // Store goal if LLM returned one
+    if (decision.goal && Array.isArray(decision.goal.steps) && decision.goal.steps.length > 0) {
+      const ALLOWED_GOAL_TASKS = new Set([
+        'mine_ore','gather','gather_stone','gather_all','deposit_to_crate',
+        'train','practice_ki','wander_explore','follow','observe'
+      ]);
+      const validSteps = decision.goal.steps.filter(s => ALLOWED_GOAL_TASKS.has(s));
+      if (validSteps.length > 0) {
+        this._goal = {
+          intent: decision.goal.intent || 'pursue goal',
+          steps: validSteps,
+          stepIndex: 0,
+          repeat: !!decision.goal.repeat,
+          startedAt: Date.now(),
+          maxMs: decision.goal.maxMs ?? 120000,
+        };
+      }
+    } else if (decision.goal === null) {
+      // LLM explicitly cleared the goal
+      this._goal = null;
+    }
+    // If decision.goal is absent (undefined), leave existing goal unchanged
+
     this._syncToServer();
   }
 
