@@ -7,9 +7,9 @@ import re
 from pathlib import Path
 
 from services.asset_registry import asset_registry
+from core.constants import TILE_SIZE
 
 # ── Tile-sheet constants (used only for map parsing) ─────────────────────────
-TILE_SIZE = 48  # pixels per tile — shared with game_state
 SHEET_COLS = 57
 FRAME_TREE = 531  # tileX=18, tileY=9
 FRAME_BARE = 6    # tileX=6,  tileY=0 — bare ground (rock spawn tile)

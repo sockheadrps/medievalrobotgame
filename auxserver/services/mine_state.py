@@ -17,10 +17,9 @@ from pathlib import Path
 from typing import Optional
 
 from core.config import MAPS_DIR
+from core.constants import TILE_SIZE
 
 # ── Constants ────────────────────────────────────────────────────────────────
-
-TILE_SIZE = 48
 
 # Base cave is 40x40 (indices 0-39). Mineable area extends 15 tiles beyond.
 BASE_SIZE = 40

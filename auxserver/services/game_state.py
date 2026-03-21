@@ -16,18 +16,21 @@ from services.database import (
 from services.animal_service import animal_manager
 from services.crop_service import crop_manager
 from services.asset_registry import asset_registry
+from core.constants import (
+    TILE_SIZE, MAP_COLS, MAP_ROWS,
+    PLAYER_SPEED, PLAYER_RUN_SPEED, NPC_SPEED,
+    PICKUP_DIST,
+    TREE_CHOP_DIST, ROCK_MINE_DIST, ROCK_HITS, ROCK_LIFESPAN_MS,
+    KI_MAX_BASE, KI_MAX_PER_LEVEL,
+    KI_BLAST_BASE_COST, KI_BLAST_BASE_DMG, KI_BLAST_SCALE,
+)
 from services.world_data import (
-    TILE_SIZE,
-    TREE_POSITIONS, ROCK_SPAWN_POSITIONS, COLLISION_TILES, MAP_COLS, MAP_ROWS,
+    TREE_POSITIONS, ROCK_SPAWN_POSITIONS, COLLISION_TILES,
     PORTALS, MINECART_PORTALS, WORLD_OBJECT_INSTANCES, init_world_objects,
 )
-PLAYER_SPEED = 160
-PLAYER_RUN_SPEED = 280
-NPC_SPEED = 120
-TREE_CHOP_DIST = 80
+ROCK_LIFESPAN = ROCK_LIFESPAN_MS / 1000  # seconds — despawns if not mined
 TREE_REGROW_MIN = 15.0
 TREE_REGROW_MAX = 30.0
-PICKUP_DIST = TILE_SIZE * 0.6
 PVP_ATTACK_RANGE = TILE_SIZE * 2.0  # slightly more generous than client (1.5 tiles) to account for sync lag
 PVP_COOLDOWN = 0.6
 PLAYER_RESPAWN_TIME = 5.0
@@ -37,11 +40,6 @@ PVP_XP_KILL = 25
 AI_RIVAL_PID = "__ai_rival__"
 
 # Ki / blast constants
-KI_MAX_BASE = 20
-KI_MAX_PER_LEVEL = 2
-KI_BLAST_BASE_COST = 8
-KI_BLAST_BASE_DMG = 2
-KI_BLAST_SCALE = 0.02  # 2% improvement per blast level
 KI_DEF_REDUCTION_DIVISOR = 2
 KI_SKILL_RESIST_PER_LEVEL = 0.01
 KI_SKILL_RESIST_CAP = 0.50
@@ -53,9 +51,6 @@ DEFAULT_KI_MOVES = ["absorb"]
 # Rock spawning
 ROCK_SPAWN_INTERVAL = 45.0    # seconds
 ROCK_SPAWN_CHANCE = 0.45      # 45% per tile per interval
-ROCK_LIFESPAN = 60.0          # seconds — despawns if not mined
-ROCK_HITS = 5                 # clicks to mine
-ROCK_MINE_DIST = 80           # px
 
 # Barrier constants
 BARRIER_BASE_PHYSICAL_REDUCTION = 10

@@ -10,10 +10,7 @@ import time
 
 from services.asset_registry import asset_registry
 from services.world_data import TILE_SIZE
-PLAYER_SPEED = 160
-PLAYER_RUN_SPEED = 280
-KI_MAX_BASE = 20
-KI_MAX_PER_LEVEL = 2
+from core.constants import PLAYER_SPEED, PLAYER_RUN_SPEED, KI_MAX_BASE, KI_MAX_PER_LEVEL
 DEFAULT_KI_MOVES = ["absorb"]
 AI_RIVAL_PID = "__ai_rival__"
 

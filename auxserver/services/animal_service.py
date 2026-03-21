@@ -13,7 +13,7 @@ import random
 import time
 from pathlib import Path
 
-TILE_SIZE  = 48
+from core.constants import TILE_SIZE
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
 MAPS_DIR   = Path(__file__).resolve().parent.parent / "maps"
 

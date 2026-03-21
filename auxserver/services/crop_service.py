@@ -12,7 +12,7 @@ import json
 import time
 from pathlib import Path
 
-TILE_SIZE     = 48
+from core.constants import TILE_SIZE
 MAPS_DIR      = Path(__file__).resolve().parent.parent / "maps"
 
 GROW_TIME     = 300.0   # 5 minutes to go from planted → ready to sprout
