@@ -39,7 +39,7 @@ const HOTBAR_ACTIONS = {
   empty: { id: 'empty', label: 'Empty', frame: 6 },
 };
 
-const HOTBAR_DEFAULT_ASSIGNMENTS = ['drop_log', 'drop_stone', 'place_anvil', 'use_crystal', 'ki_shot', 'barrier'];
+const HOTBAR_DEFAULT_ASSIGNMENTS = ['drop_log', 'drop_stone', 'place_anvil', 'place_crafting_station', 'ki_shot', 'barrier'];
 const IMPLEMENTED_HOTBAR_MOVES = ['ki_shot', 'absorb', 'barrier'];
 
 export class InventoryController {
