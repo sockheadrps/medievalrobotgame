@@ -30,6 +30,7 @@ import { TaskRecorder } from '../systems/TaskRecorder.js';
 import MineRenderer from '../systems/MineRenderer.js';
 import EntityManager from '../systems/EntityManager.js';
 import InputController from '../systems/InputController.js';
+import MovementController from '../systems/MovementController.js';
 import { Crate } from '../entities/Crate.js';
 import { Furnace } from '../entities/Furnace.js';
 import {
@@ -189,6 +190,9 @@ export default class GameScene extends Phaser.Scene {
     // Player — will be repositioned by server
     const sp = tilePos(10, 10);
     this.player = new Player(this, sp.x, sp.y);
+
+    // Movement controller — handles client-side prediction, collision, barrier resolution
+    this._movement = new MovementController(this, this.player, this.entities);
 
     // Track ground item visuals by server ID
     this._groundItemSprites = {};
@@ -456,46 +460,7 @@ export default class GameScene extends Phaser.Scene {
     this._input.update();
 
     // ── Send input to server + client-side prediction ─────────────────────────
-    if (this._conn.connected && !this.chatBox?.isOpen() && !this.player._punching && !this._namingNPC && !this._playerDead && !this._playerKnockedOut && !this._escMenuOpen && !this._inventoryOpen && !this._charMenuOpen) {
-      const keys = this.player._keys;
-      let dx = 0, dy = 0;
-      if (keys.left.isDown)  dx -= 1;
-      if (keys.right.isDown) dx += 1;
-      if (keys.up.isDown)    dy -= 1;
-      if (keys.down.isDown)  dy += 1;
-      const running = keys.run.isDown;
-      this._conn.sendMove(dx, dy, running);
-
-      // Client-side prediction: move locally for responsive feel
-      if (dx !== 0 || dy !== 0) {
-        const speed = running ? 280 : 160;
-        let mx = dx, my = dy;
-        if (mx !== 0 && my !== 0) { mx /= Math.SQRT2; my /= Math.SQRT2; }
-        const dt = delta / 1000;
-        const prevX = this.player.x;
-        const prevY = this.player.y;
-        this.player.x += mx * speed * dt;
-        this.player.y += my * speed * dt;
-        // Clamp to world bounds
-        if (this._currentMap === 'cave_01') {
-          const EXT = 15;
-          const minB = -EXT * TILE_SIZE;
-          const maxW = (this._mapCols + EXT) * TILE_SIZE;
-          const maxH = (this._mapRows + EXT) * TILE_SIZE;
-          this.player.x = Math.max(minB, Math.min(maxW, this.player.x));
-          this.player.y = Math.max(minB, Math.min(maxH, this.player.y));
-        } else {
-          const worldW = this._mapCols * TILE_SIZE;
-          const worldH = this._mapRows * TILE_SIZE;
-          this.player.x = Math.max(0, Math.min(worldW, this.player.x));
-          this.player.y = Math.max(0, Math.min(worldH, this.player.y));
-        }
-        // Fence/gate collision — push back if overlapping
-        this._resolveBarrierCollision(prevX, prevY);
-      }
-    } else if (this._conn.connected) {
-      this._conn.sendMove(0, 0, false);
-    }
+    this._movement.update(delta);
 
     // Local player visual update (animations etc)
     this.player.update(delta);
@@ -908,7 +873,7 @@ export default class GameScene extends Phaser.Scene {
         this._collisionGroup.add(body);
       }
       if (this.player) {
-        this.physics.add.collider(this.player, this._collisionGroup);
+        this._movement.addCollisionGroup(this._collisionGroup);
       }
 
       console.log(`[map] Loaded level_01: ${width}x${height}, ${treePositions.length} trees, ${rockSpawnTiles.length} rock spawn tiles, ${collisionRects.length} collision tiles`);
@@ -998,7 +963,7 @@ export default class GameScene extends Phaser.Scene {
         this._collisionGroup.add(body);
       }
       if (this.player) {
-        this.physics.add.collider(this.player, this._collisionGroup);
+        this._movement.addCollisionGroup(this._collisionGroup);
       }
 
       // Mine renderer: request tiles when entering cave, destroy when leaving
@@ -2116,34 +2081,6 @@ export default class GameScene extends Phaser.Scene {
     });
 
     this._buildingContextEls = els;
-  }
-
-  /**
-   * After client-side movement prediction, check if player overlaps any
-   * fence or gate they shouldn't pass through, and push back.
-   */
-  _resolveBarrierCollision(prevX, prevY) {
-    const p = this.player;
-    if (!p) return;
-    const halfBody = TILE_SIZE * 0.35; // approximate player half-width
-    for (const entity of Object.values(this._buildingSprites || {})) {
-      if (entity._kind !== 'fence' && entity._kind !== 'gate') continue;
-      // Gates: owner can pass through
-      if (entity._kind === 'gate' && entity._owner === this.playerId) continue;
-      const bx = entity.x;
-      const by = entity.y;
-      const halfTile = TILE_SIZE / 2;
-      // AABB overlap check
-      const overlapX = (halfBody + halfTile) - Math.abs(p.x - bx);
-      const overlapY = (halfBody + halfTile) - Math.abs(p.y - by);
-      if (overlapX <= 0 || overlapY <= 0) continue;
-      // Push back on the axis of least penetration
-      if (overlapX < overlapY) {
-        p.x = p.x < bx ? bx - halfTile - halfBody : bx + halfTile + halfBody;
-      } else {
-        p.y = p.y < by ? by - halfTile - halfBody : by + halfTile + halfBody;
-      }
-    }
   }
 
   _closeBuildingContextMenu() {
