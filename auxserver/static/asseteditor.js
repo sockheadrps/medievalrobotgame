@@ -1280,6 +1280,15 @@ function updateSTBuildRecipe() {
 
 // ── Station Recipes (processing) ──
 
+function _itemOptions(selected) {
+  const opts = items.map(it => {
+    const sel = it.id === selected ? ' selected' : '';
+    const label = it.label || it.id;
+    return `<option value="${it.id}"${sel}>${label}</option>`;
+  }).join('');
+  return `<option value="">— select item —</option>${opts}`;
+}
+
 function renderSTRecipes() {
   const container = document.getElementById('stRecipes');
   if (!container) return;
@@ -1292,7 +1301,7 @@ function renderSTRecipes() {
 
     const inputRows = Object.entries(r.inputs || {}).map(([res, qty], j) =>
       `<div class="ing-row">
-        <input class="ing-res" value="${res}" oninput="updateSTRecipeDict(this, ${i}, 'inputs', ${j})" />
+        <select onchange="updateSTRecipeDict(this, ${i}, 'inputs', ${j})">${_itemOptions(res)}</select>
         <input class="ing-amt" type="number" value="${qty}" min="1" oninput="updateSTRecipeDictQty(this, ${i}, 'inputs', ${j})" />
         <button onclick="removeSTRecipeDictRow(${i}, 'inputs', '${res}')">x</button>
       </div>`
@@ -1300,7 +1309,7 @@ function renderSTRecipes() {
 
     const outputRows = Object.entries(r.outputs || {}).map(([res, qty], j) =>
       `<div class="ing-row">
-        <input class="ing-res" value="${res}" oninput="updateSTRecipeDict(this, ${i}, 'outputs', ${j})" />
+        <select onchange="updateSTRecipeDict(this, ${i}, 'outputs', ${j})">${_itemOptions(res)}</select>
         <input class="ing-amt" type="number" value="${qty}" min="1" oninput="updateSTRecipeDictQty(this, ${i}, 'outputs', ${j})" />
         <button onclick="removeSTRecipeDictRow(${i}, 'outputs', '${res}')">x</button>
       </div>`
@@ -1354,7 +1363,10 @@ function updateSTRecipeScalar(el) {
 
 function addSTRecipeDictRow(i, side) {
   if (!selectedST.recipes[i][side]) selectedST.recipes[i][side] = {};
-  selectedST.recipes[i][side][''] = 1;
+  const defaultItem = items[0]?.id || '';
+  if (!(defaultItem in selectedST.recipes[i][side])) {
+    selectedST.recipes[i][side][defaultItem] = 1;
+  }
   renderSTRecipes();
 }
 
