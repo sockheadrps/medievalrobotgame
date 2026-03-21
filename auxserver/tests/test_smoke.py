@@ -41,3 +41,11 @@ def test_npc_manager_imports():
     gs = GameState.__new__(GameState)  # bypass __init__ (avoids DB requirement)
     gs.npc_manager = NPCManager(gs)
     assert isinstance(gs.npc_manager, NPCManager)
+
+
+def test_player_manager_imports():
+    from services.game_state import GameState
+    from services.player_manager import PlayerManager
+    gs = GameState.__new__(GameState)  # bypass __init__ (avoids DB requirement)
+    gs.player_manager = PlayerManager(gs)
+    assert isinstance(gs.player_manager, PlayerManager)

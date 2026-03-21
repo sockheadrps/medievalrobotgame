@@ -430,6 +430,9 @@ class GameState:
         from services.npc_manager import NPCManager
         self.npc_manager = NPCManager(self)
 
+        from services.player_manager import PlayerManager
+        self.player_manager = PlayerManager(self)
+
     def _init_trees(self):
         for i, (col, row) in enumerate(TREE_POSITIONS):
             x, y = tile_pos(col, row)
@@ -441,15 +444,7 @@ class GameState:
             })
 
     def _ensure_default_ki_moves(self, actor):
-        if not actor:
-            return
-        moves = actor.get("ki_moves")
-        if not isinstance(moves, list):
-            moves = []
-        for move_id in DEFAULT_KI_MOVES:
-            if move_id not in moves:
-                moves.append(move_id)
-        actor["ki_moves"] = moves
+        return self.player_manager._ensure_default_ki_moves(actor)
 
     def _load_persisted(self):
         """Load ground items, dummies, anvils, campfires, and buildings from the database."""
@@ -535,58 +530,10 @@ class GameState:
             print(f"[game_state] Failed to save world state: {e}")
 
     def add_player(self, pid: str):
-        # Spawn near center with slight random offset
-        sx, sy = tile_pos(10, 10)
-        sx += random.randint(-48, 48)
-        sy += random.randint(-48, 48)
-        self.players[pid] = {
-            "id": pid,
-            "x": sx, "y": sy,
-            "vx": 0, "vy": 0,
-            "facing": "down",
-            "anim": "idle",
-            "punching": False,
-            "hp": 20, "maxHp": 20,
-            "ki": 20, "maxKi": 20,
-            "inf_ki": False,
-            "blastLevel": 0,
-            "kiSkillLevel": 1,
-            "kiSkillXp": 0,
-            "barrier_proc_until": 0.0,
-            "barrier_proc_facing": "down",
-            "str": 1, "def": 1,
-            "level": 1, "xp": 0,
-            "logs": 0,
-            "stones": 0,
-            "crystals": 0,
-            "copper": 0,
-            "ki_blast_bonuses": {
-                "blast_speed": 0,
-                "blast_range": 0,
-                "blast_dmg": 0,
-                "blast_cooldown": 0,
-                "barrier_duration": 0,
-                "barrier_cooldown": 0,
-            },
-            "ki_moves": list(DEFAULT_KI_MOVES),
-            "dead": False,
-            "knocked_out": False,
-            "knocked_until": None,
-            "respawn_at": None,
-            "last_hit_by_player": {},  # attacker_pid -> timestamp
-            "npcs": {},  # npc_id -> { hp, maxHp, str, def, x, y, owner }
-            "npc_ids": [],  # persistent list of owned NPC IDs
-            "chatColor": "#cccccc",
-            "map": "level_01",
-            "equipment": {},   # slot -> item_id
-            "inventory": {},   # item_id -> quantity (data-driven items)
-            "combat_mode": "kill",  # "kill" or "ko" — determines NPC defeat behavior
-        }
-        self._ensure_default_ki_moves(self.players[pid])
-        return self.players[pid]
+        return self.player_manager.add_player(pid)
 
     def remove_player(self, pid: str):
-        self.players.pop(pid, None)
+        return self.player_manager.remove_player(pid)
 
     def handle_input(self, pid: str, data: dict):
         """Process input from a client."""
@@ -996,75 +943,7 @@ class GameState:
                 print(f"[bg] Unregistered background NPCs on {target_map}: {removed}")
 
     def _handle_admin(self, p, data):
-        field = data.get("field")
-        value = data.get("value", 0)
-        target_npc_id = data.get("target_npc_id")
-        actor = p.get("npcs", {}).get(target_npc_id) if target_npc_id else p
-        if actor is None:
-            actor = p
-        if field == "logs":
-            actor["logs"] = actor.get("logs", 0) + int(value)
-        elif field == "stones":
-            actor["stones"] = actor.get("stones", 0) + int(value)
-        elif field == "crystals":
-            actor["crystals"] = max(0, int(actor.get("crystals", 0) or 0) + int(value))
-        elif field == "copper":
-            actor["copper"] = actor.get("copper", 0) + int(value)
-        elif field == "seeds":
-            actor["seeds"] = actor.get("seeds", 0) + int(value)
-        elif field == "meat":
-            actor["meat"] = actor.get("meat", 0) + int(value)
-        elif field == "vegetables":
-            actor["vegetables"] = actor.get("vegetables", 0) + int(value)
-        elif field == "full_hp":
-            actor["hp"] = actor.get("maxHp", actor.get("hp", 1))
-        elif field == "maxHp":
-            actor["maxHp"] = actor.get("maxHp", 20) + int(value)
-            actor["hp"] = actor["maxHp"]
-        elif field == "str":
-            actor["str"] = actor.get("str", 1) + int(value)
-        elif field == "def":
-            actor["def"] = actor.get("def", 1) + int(value)
-        elif field == "full_ki":
-            actor["ki"] = actor.get("maxKi", KI_MAX_BASE)
-        elif field == "inf_ki":
-            actor["inf_ki"] = not bool(actor.get("inf_ki", False))
-            if actor["inf_ki"]:
-                actor["ki"] = actor.get("maxKi", KI_MAX_BASE)
-        elif field == "maxKi":
-            actor["maxKi"] = actor.get("maxKi", KI_MAX_BASE) + int(value)
-            actor["ki"] = actor["maxKi"]
-        elif field == "ki_level":
-            actor["kiSkillLevel"] = max(1, int(actor.get("kiSkillLevel", 1))) + int(value)
-            actor["kiSkillXp"] = 0
-        elif field == "ki_move_toggle":
-            move_id = data.get("move_id")
-            if move_id:
-                moves = actor.get("ki_moves", [])
-                if move_id in moves:
-                    moves.remove(move_id)
-                else:
-                    moves.append(move_id)
-                actor["ki_moves"] = moves
-        elif field == "feathers":
-            actor["feathers"] = actor.get("feathers", 0) + int(value)
-        elif field == "blastLevel":
-            actor["blastLevel"] = max(0, actor.get("blastLevel", 0) + int(value))
-        elif field == "xp_multiplier_set":
-            scope = str(data.get("scope", "") or "")
-            if scope in self.xp_multipliers:
-                try:
-                    new_value = float(data.get("multiplier", value))
-                except (TypeError, ValueError):
-                    new_value = self.xp_multipliers[scope]
-                self.xp_multipliers[scope] = max(0.0, min(100.0, round(new_value, 2)))
-        elif field.startswith("inv:"):
-            # Inventory items: field = "inv:raw_copper", etc.
-            item_id = field[4:]
-            inv = actor.setdefault("inventory", {})
-            inv[item_id] = max(0, inv.get(item_id, 0) + int(value))
-            if inv[item_id] <= 0:
-                inv.pop(item_id, None)
+        return self.player_manager._handle_admin(p, data)
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1093,69 +972,22 @@ class GameState:
         return self.combat._get_blast_cooldown(actor)
 
     def _grant_xp(self, entity, amount):
-        xp = self._scale_xp_gain(entity, amount)
-        if xp <= 0 or not entity:
-            return False
-        entity["xp"] = int(entity.get("xp", 0)) + xp
-        leveled = False
-        while entity["xp"] >= max(1, int(entity.get("level", 1))) * 20:
-            needed = max(1, int(entity.get("level", 1))) * 20
-            entity["xp"] -= needed
-            entity["level"] = int(entity.get("level", 1)) + 1
-            entity["maxHp"] = int(entity.get("maxHp", 1)) + 2
-            entity["hp"] = entity["maxHp"]
-            entity["str"] = int(entity.get("str", 1)) + 1
-            entity["def"] = int(entity.get("def", 1)) + 1
-            leveled = True
-        if leveled:
-            self._ensure_level_based_ki(entity, refill=True)
-        return leveled
+        return self.player_manager._grant_xp(entity, amount)
 
     def _level_based_max_ki(self, level):
-        lvl = max(1, int(level or 1))
-        return KI_MAX_BASE + max(0, lvl - 1) * KI_MAX_PER_LEVEL
+        return self.player_manager._level_based_max_ki(level)
 
     def _ensure_level_based_ki(self, entity, refill=False):
-        if not entity:
-            return
-        current_max = int(entity.get("maxKi", KI_MAX_BASE))
-        target_max = max(current_max, self._level_based_max_ki(entity.get("level", 1)))
-        current_ki = int(entity.get("ki", target_max))
-        if target_max > current_max:
-            entity["maxKi"] = target_max
-            entity["ki"] = target_max if refill else min(target_max, current_ki + (target_max - current_max))
-            return
-        entity["ki"] = min(current_ki, current_max)
+        return self.player_manager._ensure_level_based_ki(entity, refill)
 
     def _grant_ki_skill_xp(self, entity, amount):
-        xp = self._scale_xp_gain(entity, amount)
-        if xp <= 0 or not entity:
-            return False
-        entity["kiSkillXp"] = int(entity.get("kiSkillXp", 0)) + xp
-        entity["kiSkillLevel"] = max(1, int(entity.get("kiSkillLevel", 1)))
-        leveled = False
-        while entity["kiSkillXp"] >= max(1, int(entity.get("kiSkillLevel", 1))) * 20:
-            needed = max(1, int(entity.get("kiSkillLevel", 1))) * 20
-            entity["kiSkillXp"] -= needed
-            entity["kiSkillLevel"] = int(entity.get("kiSkillLevel", 1)) + 1
-            leveled = True
-        return leveled
+        return self.player_manager._grant_ki_skill_xp(entity, amount)
 
     def _xp_scope_for_entity(self, entity):
-        if not entity:
-            return "player"
-        owner_id = entity.get("owner")
-        if owner_id:
-            return "ai_npc" if owner_id == AI_RIVAL_PID else "npc"
-        return "ai_player" if entity.get("id") == AI_RIVAL_PID else "player"
+        return self.player_manager._xp_scope_for_entity(entity)
 
     def _scale_xp_gain(self, entity, amount):
-        base = max(0.0, float(amount or 0))
-        if base <= 0 or not entity:
-            return 0
-        scope = self._xp_scope_for_entity(entity)
-        mult = float(self.xp_multipliers.get(scope, 1.0) or 0.0)
-        return max(0, int(round(base * max(0.0, mult))))
+        return self.player_manager._scale_xp_gain(entity, amount)
 
     # ── Barrier ────────────────────────────────────────────────────────────────
 
@@ -1169,18 +1001,7 @@ class GameState:
         return self.combat._try_spend_plain_ki(actor, amount)
 
     def _queue_ai_alert(self, pid, message, speech=None, source_pid=None, action=None):
-        player = self.players.get(pid)
-        if not player:
-            return
-        alerts = player.setdefault("_ai_alerts", [])
-        alerts.append({
-            "message": str(message or "")[:200],
-            "speech": str(speech or "")[:120] if speech else None,
-            "source_pid": str(source_pid or "")[:64] if source_pid else None,
-            "action": str(action or "")[:64] if action else None,
-        })
-        if len(alerts) > 20:
-            del alerts[:-20]
+        return self.player_manager._queue_ai_alert(pid, message, speech, source_pid, action)
 
     def _activate_barrier(self, pid, npc_id=None):
         return self.combat._activate_barrier(pid, npc_id)
@@ -1352,170 +1173,24 @@ class GameState:
         return self.npc_manager._try_carry_npc(pid, owner_id, npc_id)
 
     def _try_carry_player(self, pid, target_id):
-        """Player picks up a knocked-out player."""
-        p = self.players.get(pid)
-        if not p or p.get("dead") or p.get("knocked_out"):
-            return
-        if p.get("_carrying"):
-            return
-        target = self.players.get(target_id)
-        if not target or not target.get("knocked_out"):
-            return
-        if dist(p["x"], p["y"], target["x"], target["y"]) > TILE_SIZE * 2:
-            return
-        p["_carrying"] = {"type": "player", "target_id": target_id}
-        target["carried_by"] = pid
+        return self.player_manager._try_carry_player(pid, target_id)
 
     def _drop_carried(self, pid):
-        """Drop whatever the player is carrying."""
-        p = self.players.get(pid)
-        if not p:
-            return
-        carrying = p.pop("_carrying", None)
-        if not carrying:
-            return
-        if carrying["type"] == "npc":
-            owner = self.players.get(carrying["owner_id"])
-            if owner:
-                npc = owner.get("npcs", {}).get(carrying["npc_id"])
-                if npc:
-                    npc.pop("carried_by", None)
-        elif carrying["type"] == "player":
-            target = self.players.get(carrying["target_id"])
-            if target:
-                target.pop("carried_by", None)
+        return self.player_manager._drop_carried(pid)
 
     def _try_craft_equipment(self, pid, eq_id):
-        """Attempt to craft and equip a piece of equipment at an anvil."""
-        p = self.players.get(pid)
-        if not p or not eq_id:
-            return
-        eq_def = asset_registry.get_equipment(eq_id)
-        if not eq_def:
-            return
-        # Must be near an anvil
-        near_anvil = False
-        for anvil in self.anvils.values():
-            if anvil.get("dead"):
-                continue
-            if dist(p["x"], p["y"], anvil["x"], anvil["y"]) <= TILE_SIZE * 2:
-                near_anvil = True
-                break
-        if not near_anvil:
-            self.fx_events.append({"type": "chat_hint", "pid": pid,
-                                   "text": "Must be near an anvil to craft."})
-            return
-        # Level check
-        if p.get("level", 1) < eq_def.recipe.required_level:
-            self.fx_events.append({"type": "chat_hint", "pid": pid,
-                                   "text": f"Need level {eq_def.recipe.required_level} to craft {eq_def.label}."})
-            return
-        # Ingredient check — resources may be top-level (logs, stones) or in inventory
-        top_level = {"logs", "stones", "crystals", "copper", "meat", "feathers", "vegetables", "seeds"}
-        for resource, needed in eq_def.recipe.ingredients.items():
-            if resource in top_level:
-                have = p.get(resource, 0)
-            else:
-                have = p.get("inventory", {}).get(resource, 0)
-            if have < needed:
-                self.fx_events.append({"type": "chat_hint", "pid": pid,
-                                       "text": f"Not enough {resource} (need {needed}, have {have})."})
-                return
-        # Deduct ingredients
-        for resource, needed in eq_def.recipe.ingredients.items():
-            if resource in top_level:
-                p[resource] = p.get(resource, 0) - needed
-            else:
-                inv = p.setdefault("inventory", {})
-                inv[resource] = inv.get(resource, 0) - needed
-        # Add to inventory (not auto-equip)
-        inv = p.setdefault("inventory", {})
-        inv[eq_id] = inv.get(eq_id, 0) + 1
-        self.fx_events.append({"type": "chat_hint", "pid": pid,
-                               "text": f"Crafted {eq_def.label}! (added to inventory)"})
+        return self.player_manager._try_craft_equipment(pid, eq_id)
 
     # ── Equipment inventory ────────────────────────────────────────────────────
 
     def _try_equip_item(self, pid, eq_id):
-        """Equip an equipment item from player inventory."""
-        p = self.players.get(pid)
-        if not p or not eq_id or p.get("dead"):
-            return
-        eq_def = asset_registry.get_equipment(eq_id)
-        if not eq_def:
-            return
-        inv = p.get("inventory", {})
-        if inv.get(eq_id, 0) < 1:
-            return
-        # If something is already in that slot, swap it back to inventory
-        old_eq = p["equipment"].get(eq_def.slot)
-        if old_eq:
-            # Remove old equipment stat bonuses
-            old_def = asset_registry.get_equipment(old_eq)
-            if old_def and old_def.stats.hp_bonus > 0:
-                p["maxHp"] = max(1, p.get("maxHp", 20) - old_def.stats.hp_bonus)
-                p["hp"] = min(p["hp"], p["maxHp"])
-            inv[old_eq] = inv.get(old_eq, 0) + 1
-        # Equip new item
-        inv[eq_id] = inv.get(eq_id, 0) - 1
-        if inv[eq_id] <= 0:
-            del inv[eq_id]
-        p["equipment"][eq_def.slot] = eq_id
-        # Apply hp_bonus
-        if eq_def.stats.hp_bonus > 0:
-            p["maxHp"] = p.get("maxHp", 20) + eq_def.stats.hp_bonus
-            p["hp"] = min(p["hp"] + eq_def.stats.hp_bonus, p["maxHp"])
-        self.fx_events.append({"type": "chat_hint", "pid": pid,
-                               "text": f"Equipped {eq_def.label}."})
+        return self.player_manager._try_equip_item(pid, eq_id)
 
     def _try_unequip_item(self, pid, slot):
-        """Unequip an item from a slot back to inventory."""
-        p = self.players.get(pid)
-        if not p or not slot or p.get("dead"):
-            return
-        eq_id = p["equipment"].get(slot)
-        if not eq_id:
-            return
-        eq_def = asset_registry.get_equipment(eq_id)
-        # Remove stat bonuses
-        if eq_def and eq_def.stats.hp_bonus > 0:
-            p["maxHp"] = max(1, p.get("maxHp", 20) - eq_def.stats.hp_bonus)
-            p["hp"] = min(p["hp"], p["maxHp"])
-        del p["equipment"][slot]
-        inv = p.setdefault("inventory", {})
-        inv[eq_id] = inv.get(eq_id, 0) + 1
-        label = eq_def.label if eq_def else eq_id
-        self.fx_events.append({"type": "chat_hint", "pid": pid,
-                               "text": f"Unequipped {label}."})
+        return self.player_manager._try_unequip_item(pid, slot)
 
     def _try_drop_equipment(self, pid, eq_id):
-        """Drop an equipment item from inventory onto the ground."""
-        p = self.players.get(pid)
-        if not p or not eq_id or p.get("dead"):
-            return
-        inv = p.get("inventory", {})
-        if inv.get(eq_id, 0) < 1:
-            return
-        inv[eq_id] = inv.get(eq_id, 0) - 1
-        if inv[eq_id] <= 0:
-            del inv[eq_id]
-        col = int(p["x"] // TILE_SIZE)
-        row = int(p["y"] // TILE_SIZE)
-        tx, ty = tile_pos(col, row)
-        item_id = _gen_item_id()
-        self.ground_items.append({
-            "id": item_id,
-            "x": tx, "y": ty,
-            "resource": eq_id,
-            "amount": 1,
-            "_placed": True,
-            "_equipment": True,
-            "map": p.get("map", "level_01"),
-        })
-        eq_def = asset_registry.get_equipment(eq_id)
-        label = eq_def.label if eq_def else eq_id
-        self.fx_events.append({"type": "chat_hint", "pid": pid,
-                               "text": f"Dropped {label}."})
+        return self.player_manager._try_drop_equipment(pid, eq_id)
 
     def _try_npc_pickup_equipment(self, pid, npc_id, item_id):
         return self.npc_manager._try_npc_pickup_equipment(pid, npc_id, item_id)
