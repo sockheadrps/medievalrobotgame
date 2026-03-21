@@ -234,6 +234,15 @@ export default class InputController {
           return;
         }
       }
+
+      // Check crafting stations
+      for (const station of (scene._craftingStations || [])) {
+        if (station.updateProximity(px, py)) {
+          const stationDef = scene._craftingStationManifest?.[station._assetId];
+          scene._stationViewer?.open(station, stationDef);
+          return;
+        }
+      }
     });
   }
 

@@ -33,8 +33,10 @@ export class CraftingStation extends Phaser.GameObjects.Image {
 
   updateProximity(playerX, playerY) {
     const d = Phaser.Math.Distance.Between(playerX, playerY, this.x, this.y);
-    this._prompt.setVisible(d <= INTERACT_DIST);
+    const inRange = d <= INTERACT_DIST;
+    this._prompt.setVisible(inRange);
     this._label.setVisible(d <= TILE_SIZE * 2);
+    return inRange;
   }
 
   getStored() { return { ...this._stored }; }
