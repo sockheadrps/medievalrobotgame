@@ -1,6 +1,11 @@
-// NPCBrain — LLM decision layer for NPC behavior.
-// Calls the player's local Ollama directly for high-level intent decisions,
-// then feeds validated commands to NPCTaskRunner.
+// NPCBrain.js — decides WHAT to do, produces a task descriptor object.
+// It does NOT execute tasks. Output: { type, target, priority, ... }
+//
+// Pipeline: NPCBrain.tick() → task descriptor → NPCTaskRunner.execute(task)
+//
+// LLM decisions, emotion reactions, drive-based intent, and personality-scaled
+// cooldowns all live here. NPCBrain calls this._runner.setTasks([descriptor])
+// to hand off — it never moves the NPC or applies physics directly.
 
 import Phaser from 'phaser';
 import { TILE_SIZE } from '../constants.js';

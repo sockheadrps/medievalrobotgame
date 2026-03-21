@@ -1,5 +1,14 @@
-// NPCTaskRunner — lightweight task executor for NPC commands.
-// Supports: gather, follow, attack_nearest_enemy, defend_player, attack_player, attack_npc, idle.
+// NPCTaskRunner.js — executes task descriptors produced by NPCBrain.
+// It does NOT make decisions about what task to run.
+// See docs/superpowers/plans/2026-03-20-05a-npc-task-runner-subsplit.md for planned split.
+//
+// Supported tasks: gather, follow, attack_nearest_enemy, defend_player,
+//   attack_player, attack_npc, idle, give_logs, deposit_to_crate,
+//   socialize_npc, steal_logs, practice_ki, refine_stone, mine_ore, custom_task.
+//
+// NOTE: _decideNPCInteraction() is a decision helper that lives here due to
+// tight coupling with _doGather() state (_lastInteraction, _tasks). It is a
+// candidate for migration to NPCBrain in the sub-split refactor.
 
 import Phaser from 'phaser';
 import { TILE_SIZE, TREE_CHOP_DIST, ROCK_MINE_DIST, NRG_KEY } from '../constants.js';
