@@ -1,3 +1,7 @@
+// Shared constants — must match auxserver/data/constants.json.
+// To verify sync: compare with GET /api/constants.
+// Do NOT replace with an async fetch — static imports are required at Phaser init time.
+
 // --- Tilemap ---
 export const TILE_SIZE    = 48;
 export const MAP_COLS     = 80;
