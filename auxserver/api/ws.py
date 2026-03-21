@@ -345,7 +345,7 @@ async def websocket_endpoint(ws: WebSocket):
         player["seeds"] = saved.get("seeds", 0)
         player["ki_blast_bonuses"] = saved.get("ki_blast_bonuses", player.get("ki_blast_bonuses", {}))
         player["ki_moves"] = saved.get("ki_moves", [])
-        game._ensure_default_ki_moves(player)
+        game.player_manager._ensure_default_ki_moves(player)
         player["npc_ids"] = saved.get("npc_ids", [])
         player["map"] = saved.get("map", "level_01")
         player["combat_mode"] = saved.get("combat_mode", "kill")

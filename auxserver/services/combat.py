@@ -282,14 +282,14 @@ class CombatService:
         if entity.get("inf_ki"):
             entity["ki"] = entity.get("maxKi", KI_MAX_BASE)
             entity["blastLevel"] = entity.get("blastLevel", 0) + 1
-            self.gs._grant_ki_skill_xp(entity, 1)
+            self.gs.player_manager._grant_ki_skill_xp(entity, 1)
             return True
         ki = entity.get("ki", 0)
         if ki < cost:
             return False
         entity["ki"] = ki - cost
         entity["blastLevel"] = entity.get("blastLevel", 0) + 1
-        self.gs._grant_ki_skill_xp(entity, 1)
+        self.gs.player_manager._grant_ki_skill_xp(entity, 1)
         return True
 
     # ── NPC combat helpers ────────────────────────────────────────────────────
@@ -324,12 +324,12 @@ class CombatService:
             dummy["hp"] = max(0, dummy_hp - dmg)
         if dummy.get("owner") and dummy.get("owner") != owner_pid:
             npc_name = npc_state.get("name", npc_id)
-            self.gs._queue_ai_alert(dummy.get("owner"), f"{owner_pid}'s NPC {npc_name} hit my training dummy.", f"{owner_pid}'s NPC is hitting my dummy.", source_pid=owner_pid, action="hit_my_dummy")
-        self.gs._grant_xp(npc_state, 5)
+            self.gs.player_manager._queue_ai_alert(dummy.get("owner"), f"{owner_pid}'s NPC {npc_name} hit my training dummy.", f"{owner_pid}'s NPC is hitting my dummy.", source_pid=owner_pid, action="hit_my_dummy")
+        self.gs.player_manager._grant_xp(npc_state, 5)
         if dummy["hp"] <= 0 and not dummy.get("_etrainer"):
             if dummy.get("owner") and dummy.get("owner") != owner_pid:
                 npc_name = npc_state.get("name", npc_id)
-                self.gs._queue_ai_alert(dummy.get("owner"), f"{owner_pid}'s NPC {npc_name} destroyed my training dummy.", f"{owner_pid}'s NPC broke my dummy.", source_pid=owner_pid, action="hit_my_dummy")
+                self.gs.player_manager._queue_ai_alert(dummy.get("owner"), f"{owner_pid}'s NPC {npc_name} destroyed my training dummy.", f"{owner_pid}'s NPC broke my dummy.", source_pid=owner_pid, action="hit_my_dummy")
             dummy["dead"] = True
 
     # ── PvP Combat ────────────────────────────────────────────────────────────
@@ -362,17 +362,17 @@ class CombatService:
         dmg = self._calc_melee_damage(attacker, target)
         dmg = self._apply_barrier_reduction(target, "physical", dmg)
         target["hp"] = max(0, target["hp"] - dmg)
-        self.gs._queue_ai_alert(target_pid, f"{attacker_pid} hit me for {dmg} damage.", f"{attacker_pid} struck me.", source_pid=attacker_pid, action="attack_me")
+        self.gs.player_manager._queue_ai_alert(target_pid, f"{attacker_pid} hit me for {dmg} damage.", f"{attacker_pid} struck me.", source_pid=attacker_pid, action="attack_me")
 
         # Punch anim
         attacker["punching"] = True
         attacker["punch_until"] = now + 0.3
 
         # XP for hitting a player
-        self.gs._grant_xp(attacker, 8)
+        self.gs.player_manager._grant_xp(attacker, 8)
 
         if target["hp"] <= 0:
-            self.gs._queue_ai_alert(target_pid, f"{attacker_pid} knocked me out.", f"{attacker_pid} put me down.", source_pid=attacker_pid, action="knockout_me")
+            self.gs.player_manager._queue_ai_alert(target_pid, f"{attacker_pid} knocked me out.", f"{attacker_pid} put me down.", source_pid=attacker_pid, action="knockout_me")
             self._knock_out_player(target)
 
     def _try_attack_npc(self, attacker_pid, target_owner_pid, target_npc_id):
@@ -405,16 +405,16 @@ class CombatService:
         npc_state["hp"] = max(0, npc_state["hp"] - dmg)
         npc_state["_last_attacked_by"] = {"type": "player", "id": attacker_pid}
         npc_name = npc_state.get("name", target_npc_id)
-        self.gs._queue_ai_alert(target_owner_pid, f"{attacker_pid} hit my NPC {npc_name} for {dmg} damage.", f"Hands off {npc_name}.", source_pid=attacker_pid, action="attack_my_npc")
+        self.gs.player_manager._queue_ai_alert(target_owner_pid, f"{attacker_pid} hit my NPC {npc_name} for {dmg} damage.", f"Hands off {npc_name}.", source_pid=attacker_pid, action="attack_my_npc")
 
         attacker["punching"] = True
         attacker["punch_until"] = now + 0.3
 
         # XP
-        self.gs._grant_xp(attacker, 5)
+        self.gs.player_manager._grant_xp(attacker, 5)
 
         if npc_state["hp"] <= 0:
-            self.gs._queue_ai_alert(target_owner_pid, f"{attacker_pid} knocked out my NPC {npc_name}.", f"You dropped {npc_name}.", source_pid=attacker_pid, action="kill_or_drop_my_npc")
+            self.gs.player_manager._queue_ai_alert(target_owner_pid, f"{attacker_pid} knocked out my NPC {npc_name}.", f"You dropped {npc_name}.", source_pid=attacker_pid, action="kill_or_drop_my_npc")
             self._knock_out_npc(npc_state, attacker_pid=attacker_pid)
 
     def _npc_attack_player(self, owner_pid, target_pid, npc_str, npc_id):
@@ -444,13 +444,13 @@ class CombatService:
         dmg = self._apply_barrier_reduction(target, "physical", dmg)
         target["hp"] = max(0, target["hp"] - dmg)
         attacker_name = npc_state.get("name", npc_id)
-        self.gs._queue_ai_alert(target_pid, f"{attacker_name} hit me for {dmg} damage.", f"{attacker_name} is on me.", source_pid=owner_pid, action="attack_me")
-        self.gs._grant_xp(npc_state, 8)
+        self.gs.player_manager._queue_ai_alert(target_pid, f"{attacker_name} hit me for {dmg} damage.", f"{attacker_name} is on me.", source_pid=owner_pid, action="attack_me")
+        self.gs.player_manager._grant_xp(npc_state, 8)
 
         if target["hp"] <= 0:
             # Credit kill XP to the NPC's owner
             if owner:
-                self.gs._grant_xp(owner, PVP_XP_KILL)
+                self.gs.player_manager._grant_xp(owner, PVP_XP_KILL)
             self._knock_out_player(target)
 
     def _npc_attack_npc(self, owner_pid, attacker_npc_id, target_owner_pid, target_npc_id, npc_str):
@@ -484,11 +484,11 @@ class CombatService:
         npc_state["_last_attacked_by"] = {"type": "npc", "id": attacker_npc_id, "owner": owner_pid}
         npc_name = npc_state.get("name", target_npc_id)
         attacker_name = attacker_npc.get("name", attacker_npc_id)
-        self.gs._queue_ai_alert(target_owner_pid, f"{attacker_name} hit my NPC {npc_name} for {dmg} damage.", f"{attacker_name} is hitting {npc_name}.", source_pid=owner_pid, action="attack_my_npc")
-        self.gs._grant_xp(attacker_npc, 5)
+        self.gs.player_manager._queue_ai_alert(target_owner_pid, f"{attacker_name} hit my NPC {npc_name} for {dmg} damage.", f"{attacker_name} is hitting {npc_name}.", source_pid=owner_pid, action="attack_my_npc")
+        self.gs.player_manager._grant_xp(attacker_npc, 5)
 
         if npc_state["hp"] <= 0:
-            self.gs._queue_ai_alert(target_owner_pid, f"{attacker_name} knocked out my NPC {npc_name}.", f"{attacker_name} dropped {npc_name}.", source_pid=owner_pid, action="kill_or_drop_my_npc")
+            self.gs.player_manager._queue_ai_alert(target_owner_pid, f"{attacker_name} knocked out my NPC {npc_name}.", f"{attacker_name} dropped {npc_name}.", source_pid=owner_pid, action="kill_or_drop_my_npc")
             self._knock_out_npc(npc_state, attacker_pid=owner_pid)
 
     def _npc_steal_logs(self, owner_pid, attacker_npc_id, target_owner_pid, target_npc_id, npc_str, steal_amount):
@@ -533,7 +533,7 @@ class CombatService:
                 "amount": stolen,
                 "at": now,
             }
-            self.gs._queue_ai_alert(target_owner_pid, f"My NPC {npc_name} was jumped and lost {stolen} logs.", f"They robbed {npc_name}.", source_pid=owner_pid, action="attack_my_npc")
+            self.gs.player_manager._queue_ai_alert(target_owner_pid, f"My NPC {npc_name} was jumped and lost {stolen} logs.", f"They robbed {npc_name}.", source_pid=owner_pid, action="attack_my_npc")
 
         if npc_state["hp"] <= 0:
             self._knock_out_npc(npc_state, attacker_pid=owner_pid)
@@ -567,19 +567,19 @@ class CombatService:
         cost, dmg = self._apply_blast_mode(cost, dmg, blast_mode)
         if not self._try_ki_spend(attacker, cost):
             return
-        self.gs._grant_ki_skill_xp(attacker, 1)
+        self.gs.player_manager._grant_ki_skill_xp(attacker, 1)
         self._queue_ki_blast_fx(attacker, target=target)
 
         attacker.setdefault("last_hit_by_player", {})[cooldown_key] = now
 
         final_dmg = self._apply_barrier_reduction(target, "ki", self._calc_ki_damage_taken(dmg, target))
         target["hp"] = max(0, target["hp"] - final_dmg)
-        self.gs._queue_ai_alert(target_pid, f"{attacker_pid} hit me with a ki blast for {final_dmg} damage.", f"{attacker_pid} blasted me.", source_pid=attacker_pid, action="attack_me")
+        self.gs.player_manager._queue_ai_alert(target_pid, f"{attacker_pid} hit me with a ki blast for {final_dmg} damage.", f"{attacker_pid} blasted me.", source_pid=attacker_pid, action="attack_me")
 
-        self.gs._grant_xp(attacker, 8)
+        self.gs.player_manager._grant_xp(attacker, 8)
 
         if target["hp"] <= 0:
-            self.gs._queue_ai_alert(target_pid, f"{attacker_pid} knocked me out with a ki blast.", f"{attacker_pid} blasted me down.", source_pid=attacker_pid, action="knockout_me")
+            self.gs.player_manager._queue_ai_alert(target_pid, f"{attacker_pid} knocked me out with a ki blast.", f"{attacker_pid} blasted me down.", source_pid=attacker_pid, action="knockout_me")
             self._knock_out_player(target)
 
     def _ki_blast_npc(self, attacker_pid, target_owner_pid, target_npc_id, blast_mode=""):
@@ -611,7 +611,7 @@ class CombatService:
         cost, dmg = self._apply_blast_mode(cost, dmg, blast_mode)
         if not self._try_ki_spend(attacker, cost):
             return
-        self.gs._grant_ki_skill_xp(attacker, 1)
+        self.gs.player_manager._grant_ki_skill_xp(attacker, 1)
         self._queue_ki_blast_fx(attacker, target=npc_state)
 
         attacker.setdefault("last_hit_by_player", {})[cooldown_key] = now
@@ -620,12 +620,12 @@ class CombatService:
         npc_state["hp"] = max(0, npc_state["hp"] - final_dmg)
         npc_state["_last_attacked_by"] = {"type": "player", "id": attacker_pid}
         npc_name = npc_state.get("name", target_npc_id)
-        self.gs._queue_ai_alert(target_owner_pid, f"{attacker_pid} blasted my NPC {npc_name} for {final_dmg} damage.", f"{attacker_pid} blasted {npc_name}.", source_pid=attacker_pid, action="attack_my_npc")
+        self.gs.player_manager._queue_ai_alert(target_owner_pid, f"{attacker_pid} blasted my NPC {npc_name} for {final_dmg} damage.", f"{attacker_pid} blasted {npc_name}.", source_pid=attacker_pid, action="attack_my_npc")
 
-        self.gs._grant_xp(attacker, 5)
+        self.gs.player_manager._grant_xp(attacker, 5)
 
         if npc_state["hp"] <= 0:
-            self.gs._queue_ai_alert(target_owner_pid, f"{attacker_pid} knocked out my NPC {npc_name} with a ki blast.", f"{attacker_pid} blasted {npc_name} down.", source_pid=attacker_pid, action="kill_or_drop_my_npc")
+            self.gs.player_manager._queue_ai_alert(target_owner_pid, f"{attacker_pid} knocked out my NPC {npc_name} with a ki blast.", f"{attacker_pid} blasted {npc_name} down.", source_pid=attacker_pid, action="kill_or_drop_my_npc")
             self._knock_out_npc(npc_state, attacker_pid=attacker_pid)
 
     def _ki_blast_dummy(self, pid, dummy_id, blast_mode=""):
@@ -653,16 +653,16 @@ class CombatService:
         cost, dmg = self._apply_blast_mode(cost, dmg, blast_mode)
         if not self._try_ki_spend(p, cost):
             return
-        self.gs._grant_ki_skill_xp(p, 2)
+        self.gs.player_manager._grant_ki_skill_xp(p, 2)
         p.setdefault("last_hit_by_player", {})[cooldown_key] = now
 
         dummy["hp"] = max(0, dummy["hp"] - max(1, dmg))
         if dummy.get("owner"):
-            self.gs._queue_ai_alert(dummy.get("owner"), f"{pid} hit my training dummy with a ki blast.", f"{pid} is hitting my dummy.", source_pid=pid, action="hit_my_dummy")
-        self.gs._grant_xp(p, 3)
+            self.gs.player_manager._queue_ai_alert(dummy.get("owner"), f"{pid} hit my training dummy with a ki blast.", f"{pid} is hitting my dummy.", source_pid=pid, action="hit_my_dummy")
+        self.gs.player_manager._grant_xp(p, 3)
         if dummy["hp"] <= 0:
             if dummy.get("owner"):
-                self.gs._queue_ai_alert(dummy.get("owner"), f"{pid} destroyed my training dummy.", f"{pid} broke my dummy.", source_pid=pid, action="hit_my_dummy")
+                self.gs.player_manager._queue_ai_alert(dummy.get("owner"), f"{pid} destroyed my training dummy.", f"{pid} broke my dummy.", source_pid=pid, action="hit_my_dummy")
             dummy["dead"] = True
 
     def _ki_blast_ground_item(self, pid, item_id, blast_mode=""):
@@ -737,14 +737,14 @@ class CombatService:
         if npc_state.get("inf_ki"):
             npc_state["ki"] = npc_state.get("maxKi", KI_MAX_BASE)
             npc_state["blastLevel"] = npc_state.get("blastLevel", 0) + 1
-            self.gs._grant_ki_skill_xp(npc_state, 2)
+            self.gs.player_manager._grant_ki_skill_xp(npc_state, 2)
         else:
             ki = npc_state.get("ki", 0)
             if ki < cost:
                 return
             npc_state["ki"] = ki - cost
             npc_state["blastLevel"] = npc_state.get("blastLevel", 0) + 1
-            self.gs._grant_ki_skill_xp(npc_state, 2)
+            self.gs.player_manager._grant_ki_skill_xp(npc_state, 2)
         self._queue_ki_blast_fx(npc_state, target=target, owner_pid=owner_pid, npc_id=npc_id)
 
         target.setdefault("last_hit_by_player", {})[cooldown_key] = now
@@ -752,13 +752,13 @@ class CombatService:
         final_dmg = self._apply_barrier_reduction(target, "ki", self._calc_ki_damage_taken(dmg, target))
         target["hp"] = max(0, target["hp"] - final_dmg)
         attacker_name = npc_state.get("name", npc_id)
-        self.gs._queue_ai_alert(target_pid, f"{attacker_name} hit me with a ki blast for {final_dmg} damage.", f"{attacker_name} blasted me.", source_pid=owner_pid, action="attack_me")
-        self.gs._grant_xp(npc_state, 8)
+        self.gs.player_manager._queue_ai_alert(target_pid, f"{attacker_name} hit me with a ki blast for {final_dmg} damage.", f"{attacker_name} blasted me.", source_pid=owner_pid, action="attack_me")
+        self.gs.player_manager._grant_xp(npc_state, 8)
 
         if target["hp"] <= 0:
             if owner:
-                self.gs._grant_xp(owner, PVP_XP_KILL)
-            self.gs._queue_ai_alert(target_pid, f"{attacker_name} knocked me out with a ki blast.", f"{attacker_name} blasted me down.", source_pid=owner_pid, action="knockout_me")
+                self.gs.player_manager._grant_xp(owner, PVP_XP_KILL)
+            self.gs.player_manager._queue_ai_alert(target_pid, f"{attacker_name} knocked me out with a ki blast.", f"{attacker_name} blasted me down.", source_pid=owner_pid, action="knockout_me")
             self._knock_out_player(target)
 
     def _npc_ki_blast_npc(self, owner_pid, attacker_npc_id, target_owner_pid, target_npc_id):
@@ -788,14 +788,14 @@ class CombatService:
         if attacker_npc.get("inf_ki"):
             attacker_npc["ki"] = attacker_npc.get("maxKi", KI_MAX_BASE)
             attacker_npc["blastLevel"] = attacker_npc.get("blastLevel", 0) + 1
-            self.gs._grant_ki_skill_xp(attacker_npc, 2)
+            self.gs.player_manager._grant_ki_skill_xp(attacker_npc, 2)
         else:
             ki = attacker_npc.get("ki", 0)
             if ki < cost:
                 return
             attacker_npc["ki"] = ki - cost
             attacker_npc["blastLevel"] = attacker_npc.get("blastLevel", 0) + 1
-            self.gs._grant_ki_skill_xp(attacker_npc, 2)
+            self.gs.player_manager._grant_ki_skill_xp(attacker_npc, 2)
         self._queue_ki_blast_fx(attacker_npc, target=npc_state, owner_pid=owner_pid, npc_id=attacker_npc_id)
 
         npc_state.setdefault("last_hit", {})[cooldown_key] = now
@@ -805,11 +805,11 @@ class CombatService:
         npc_state["_last_attacked_by"] = {"type": "npc", "id": attacker_npc_id, "owner": owner_pid}
         npc_name = npc_state.get("name", target_npc_id)
         attacker_name = attacker_npc.get("name", attacker_npc_id)
-        self.gs._queue_ai_alert(target_owner_pid, f"{attacker_name} blasted my NPC {npc_name} for {final_dmg} damage.", f"{attacker_name} blasted {npc_name}.", source_pid=owner_pid, action="attack_my_npc")
-        self.gs._grant_xp(attacker_npc, 5)
+        self.gs.player_manager._queue_ai_alert(target_owner_pid, f"{attacker_name} blasted my NPC {npc_name} for {final_dmg} damage.", f"{attacker_name} blasted {npc_name}.", source_pid=owner_pid, action="attack_my_npc")
+        self.gs.player_manager._grant_xp(attacker_npc, 5)
 
         if npc_state["hp"] <= 0:
-            self.gs._queue_ai_alert(target_owner_pid, f"{attacker_name} knocked out my NPC {npc_name} with a ki blast.", f"{attacker_name} blasted {npc_name} down.", source_pid=owner_pid, action="kill_or_drop_my_npc")
+            self.gs.player_manager._queue_ai_alert(target_owner_pid, f"{attacker_name} knocked out my NPC {npc_name} with a ki blast.", f"{attacker_name} blasted {npc_name} down.", source_pid=owner_pid, action="kill_or_drop_my_npc")
             self._knock_out_npc(npc_state, attacker_pid=owner_pid)
 
     # ── Knockout / Respawn ────────────────────────────────────────────────────
@@ -837,7 +837,7 @@ class CombatService:
         target["blastLevel"] = max(0, int(math.floor(max(0, int(target.get("blastLevel", 0))) * 0.9)))
         target["xp"] = min(int(target.get("xp", 0) or 0), max(0, target["level"] * 20 - 1))
         target["kiSkillXp"] = min(int(target.get("kiSkillXp", 0) or 0), max(0, target["kiSkillLevel"] * 20 - 1))
-        self.gs._ensure_level_based_ki(target, refill=False)
+        self.gs.player_manager._ensure_level_based_ki(target, refill=False)
         target["hp"] = min(int(target.get("hp", 0) or 0), int(target.get("maxHp", 20) or 20))
 
     def _knock_out_player(self, target):
@@ -907,7 +907,7 @@ class CombatService:
         attacker = self.gs.players.get(attacker_pid)
         if not attacker or attacker.get("dead") or attacker.get("knocked_out"):
             return
-        self.gs._ensure_default_ki_moves(attacker)
+        self.gs.player_manager._ensure_default_ki_moves(attacker)
         if "absorb" not in attacker.get("ki_moves", []):
             return
         self._start_absorb(attacker_pid, None, target_owner_pid, target_npc_id)
@@ -917,7 +917,7 @@ class CombatService:
         npc_state = owner.get("npcs", {}).get(npc_id) if owner else None
         if not npc_state or npc_state.get("dead") or npc_state.get("knocked_out"):
             return
-        self.gs._ensure_default_ki_moves(npc_state)
+        self.gs.player_manager._ensure_default_ki_moves(npc_state)
         if "absorb" not in npc_state.get("ki_moves", []):
             return
         self._start_absorb(owner_pid, npc_id, target_owner_pid, target_npc_id)
@@ -1025,7 +1025,7 @@ class CombatService:
         p["punch_until"] = now + 0.3
 
         # XP
-        self.gs._grant_xp(p, 5)
+        self.gs.player_manager._grant_xp(p, 5)
 
         if dummy["hp"] <= 0 and not dummy.get("_etrainer"):
             dummy["dead"] = True
@@ -1090,8 +1090,8 @@ class CombatService:
         cost, _dmg = self._calc_blast(p.get("blastLevel", 0))
         if not self._try_ki_spend(p, cost):
             return
-        self.gs._grant_ki_skill_xp(p, 2)
-        self.gs._grant_xp(p, 3)
+        self.gs.player_manager._grant_ki_skill_xp(p, 2)
+        self.gs.player_manager._grant_xp(p, 3)
 
         # Check if NPC learns (1/25 chance)
         npc_learned = False
@@ -1143,15 +1143,15 @@ class CombatService:
         if npc_state.get("inf_ki"):
             npc_state["ki"] = npc_state.get("maxKi", KI_MAX_BASE)
             npc_state["blastLevel"] = npc_state.get("blastLevel", 0) + 1
-            self.gs._grant_ki_skill_xp(npc_state, 3)
+            self.gs.player_manager._grant_ki_skill_xp(npc_state, 3)
         else:
             ki = npc_state.get("ki", 0)
             if ki < cost:
                 return
             npc_state["ki"] = ki - cost
             npc_state["blastLevel"] = npc_state.get("blastLevel", 0) + 1
-            self.gs._grant_ki_skill_xp(npc_state, 3)
-        self.gs._grant_xp(npc_state, 3)
+            self.gs.player_manager._grant_ki_skill_xp(npc_state, 3)
+        self.gs.player_manager._grant_xp(npc_state, 3)
 
         # 40% chance target breaks
         broke = random.random() < KI_TARGET_BREAK_CHANCE

@@ -66,7 +66,7 @@ class NPCManager:
             "inf_ki": False,
             "map": p.get("map", "level_01"),
         }
-        self.gs._ensure_default_ki_moves(npc_state)
+        self.gs.player_manager._ensure_default_ki_moves(npc_state)
         p.setdefault("npcs", {})[npc_id] = npc_state
         p.setdefault("npc_ids", []).append(npc_id)
         print(f"[npc_manager] {pid} built NPC {npc_id} at ({nx:.0f}, {ny:.0f})")
@@ -109,8 +109,8 @@ class NPCManager:
                 npc_data["knocked_out"] = True
                 npc_data["knocked_until"] = existing.get("knocked_until")
                 npc_data["hp"] = existing.get("hp", 0)
-            self.gs._ensure_default_ki_moves(npc_data)
-            self.gs._ensure_level_based_ki(npc_data)
+            self.gs.player_manager._ensure_default_ki_moves(npc_data)
+            self.gs.player_manager._ensure_level_based_ki(npc_data)
             npc_data["owner"] = pid
             p.setdefault("npcs", {})[npc_id] = npc_data
 
