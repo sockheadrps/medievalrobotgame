@@ -267,6 +267,7 @@ class NPCManager:
                 # Phase: deposit if full
                 if total_inv >= self.BG_NPC_MAX_INVENTORY:
                     self._bg_npc_deposit(npc_state, npc_inv, task, npc_map)
+                    self._advance_bg_goal(bg)
                     continue
 
                 # Phase: mine — find a non-depleted world object on this map
@@ -287,6 +288,8 @@ class NPCManager:
                     for drop in wo_def.drops:
                         amount = random.randint(drop.min, drop.max)
                         npc_inv[drop.resource] = npc_inv.get(drop.resource, 0) + amount
+                        bg.setdefault("_gathered", {})[drop.resource] = bg["_gathered"].get(drop.resource, 0) + amount
+                        bg["_tick_count"] = bg.get("_tick_count", 0) + 1
                     if wo["hp"] <= 0:
                         wo["depleted"] = True
                         respawn_secs = random.uniform(wo_def.respawn_min, wo_def.respawn_max)
@@ -294,6 +297,18 @@ class NPCManager:
                     mined = True
                     break
                 # If nothing to mine, just wait (ores will respawn)
+
+            elif task_type == "train":
+                npc_stats = npc_state.setdefault("stats", {})
+                xp_gain = npc_stats.get("level", 1) * 2
+                npc_stats["xp"] = npc_stats.get("xp", 0) + xp_gain
+                bg["_xp_gained"] = bg.get("_xp_gained", 0) + xp_gain
+                bg["_tick_count"] = bg.get("_tick_count", 0) + 1
+                self._advance_bg_goal(bg)
+
+            elif task_type == "wander_explore":
+                bg["_tick_count"] = bg.get("_tick_count", 0) + 1
+                self._advance_bg_goal(bg)
 
     def _bg_npc_deposit(self, npc_state, npc_inv, task, npc_map):
         """Background NPC deposits inventory into matching crates."""
@@ -338,3 +353,22 @@ class NPCManager:
         for k in list(npc_inv.keys()):
             if npc_inv[k] <= 0:
                 del npc_inv[k]
+
+    def _advance_bg_goal(self, bg):
+        """Advance background NPC to the next goal step. Returns True if advanced."""
+        goal = bg.get("goal")
+        if not goal:
+            return False
+        steps = goal.get("steps", [])
+        if not steps:
+            return False
+        idx = bg.get("_goal_step", 0) + 1
+        if idx >= len(steps):
+            if goal.get("repeat"):
+                idx = 0
+            else:
+                bg["task"] = None
+                return False
+        bg["_goal_step"] = idx
+        bg["task"] = {"task": steps[idx]}
+        return True

@@ -350,12 +350,18 @@ class InputHandler:
             npc_id = data.get("npc_id")
             npc_map = data.get("map", "level_01")
             task = data.get("task", {})
+            goal = data.get("goal")  # new: multi-step goal
             if npc_id and task:
                 gs.background_npcs[npc_id] = {
                     "pid": pid,
                     "npc_id": npc_id,
                     "map": npc_map,
                     "task": task,
+                    "goal": goal,
+                    "_goal_step": 0,
+                    "_tick_count": 0,
+                    "_gathered": {},
+                    "_xp_gained": 0,
                     "last_tick": time.time(),
                 }
                 logger.debug("Registered background NPC %s on %s: %s", npc_id, npc_map, task.get('task', '?'))
@@ -367,5 +373,18 @@ class InputHandler:
                 if bg["pid"] == pid and bg["map"] == target_map:
                     removed.append(npc_id)
                     del gs.background_npcs[npc_id]
+                    # Send return briefing if NPC did anything meaningful
+                    if bg.get("_gathered") or bg.get("_xp_gained"):
+                        gs.fx_events.append({
+                            "type": "bg_npc_return",
+                            "pid": pid,
+                            "npc_id": npc_id,
+                            "summary": {
+                                "goal_intent": bg.get("goal", {}).get("intent") if bg.get("goal") else None,
+                                "ticks": bg.get("_tick_count", 0),
+                                "gathered": bg.get("_gathered", {}),
+                                "xp_gained": bg.get("_xp_gained", 0),
+                            }
+                        })
             if removed:
                 logger.debug("Unregistered background NPCs on %s: %s", target_map, removed)
