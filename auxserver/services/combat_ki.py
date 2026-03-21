@@ -20,8 +20,10 @@ from services.game_state import (
     _gen_campfire_id,
 )
 
+from services.combat_utils import CombatUtilsMixin
 
-class CombatKiService:
+
+class CombatKiService(CombatUtilsMixin):
     """Ki blast, absorb, and ki-target combat."""
 
     # ── Ki Blast Combat ───────────────────────────────────────────────────────
