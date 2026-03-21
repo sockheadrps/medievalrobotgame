@@ -735,6 +735,13 @@ def load_mine_state(player_id: str) -> str | None:
     return row["grid_json"]
 
 
+def delete_all_mine_states():
+    """Delete all mine grid records (used by map wipe for cave maps)."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM mine_states")
+    conn.commit()
+
+
 # ── Dev-mode seed accounts ────────────────────────────────────────────────────
 
 def ensure_dev_accounts():

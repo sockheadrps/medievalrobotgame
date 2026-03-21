@@ -2,7 +2,14 @@
   "id": "coal",
   "label": "Coal",
   "category": "resource",
-  "sprite": { "type": "tilemap", "tileCol": 53, "tileRow": 15 },
+  "sprite": {
+    "type": "spritesheet",
+    "file": "Reforged - ore pack/ore_orepack.png",
+    "frameW": 16,
+    "frameH": 16,
+    "spacing": 0,
+    "frame": 4
+  },
   "stackable": true,
   "maxStack": 99,
   "color": "#444444",

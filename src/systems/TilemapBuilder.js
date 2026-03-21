@@ -23,12 +23,19 @@ export function buildTilemapFromData(scene, mapData) {
   const treePositions = [];
   const rockSpawnTiles = [];
   const collisionRects = [];
+  /** Layer-0 tiles — hidden by MineRenderer when in cave */
   const tileImages = [];
+  /** Layer ≥1 tiles — always visible, rendered above mine grid (depth 5) */
+  const tileImagesOverlay = [];
 
-  // Build a lookup: "col,row" -> {tileX, tileY}
+  // Build a lookup: "col,row" -> tile entry (includes layer)
   const lookup = {};
   for (const t of tiles) {
-    lookup[`${t.x},${t.y}`] = t;
+    const key = `${t.x},${t.y}`;
+    // Keep the highest-layer tile per cell when duplicates exist
+    if (!lookup[key] || (t.layer ?? 0) > (lookup[key].layer ?? 0)) {
+      lookup[key] = t;
+    }
   }
 
   for (let row = 0; row < height; row++) {
@@ -37,6 +44,8 @@ export function buildTilemapFromData(scene, mapData) {
       const y = row * TILE_SIZE + TILE_SIZE / 2;
 
       const t = lookup[`${col},${row}`];
+      const isOverlay = (t?.layer ?? 0) >= 1;
+
       if (!t) {
         tileImages.push(scene.add.image(x, y, SHEET_KEY, FRAME_GRASS).setScale(SCALE).setDepth(0));
         continue;
@@ -45,12 +54,14 @@ export function buildTilemapFromData(scene, mapData) {
       const frame = frameFromGrid(t.tileX, t.tileY);
 
       if (frame === FRAME_TREE) {
-        // Render grass underneath the tree
+        // Grass under the tree always goes in base layer
         tileImages.push(scene.add.image(x, y, SHEET_KEY, FRAME_GRASS).setScale(SCALE).setDepth(0));
         treePositions.push({ col, row });
+      } else if (isOverlay) {
+        // Layer ≥1: render above mine grid, never hidden by MineRenderer
+        tileImagesOverlay.push(scene.add.image(x, y, SHEET_KEY, frame).setScale(SCALE).setDepth(5));
       } else {
         tileImages.push(scene.add.image(x, y, SHEET_KEY, frame).setScale(SCALE).setDepth(0));
-        // Bare ground tiles can spawn rocks
         if (frame === FRAME_BARE) {
           rockSpawnTiles.push({ col, row });
         }
@@ -65,7 +76,7 @@ export function buildTilemapFromData(scene, mapData) {
     collisionRects.push({ x: cx, y: cy, w: TILE_SIZE, h: TILE_SIZE });
   }
 
-  return { treePositions, rockSpawnTiles, collisionRects, tileImages, width, height };
+  return { treePositions, rockSpawnTiles, collisionRects, tileImages, tileImagesOverlay, width, height };
 }
 
 /**

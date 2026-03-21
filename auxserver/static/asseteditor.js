@@ -146,13 +146,8 @@ function renderWOEditor() {
         <div style="display:flex;align-items:center;">
           <canvas id="wo_tilePreview" class="tile-preview" width="48" height="48"></canvas>
           <button type="button" class="btn-pick-tile" onclick="openTilePicker(
-            Number(document.getElementById('wo_tileCol').value),
-            Number(document.getElementById('wo_tileRow').value),
-            (col, row) => {
-              document.getElementById('wo_tileCol').value = col;
-              document.getElementById('wo_tileRow').value = row;
-              drawTilePreview('wo_tilePreview', col, row);
-            }
+            {type:'tilemap',tileCol:Number(document.getElementById('wo_tileCol').value),tileRow:Number(document.getElementById('wo_tileRow').value)},
+            _pickTileWO
           )">Pick tile</button>
         </div>
       </div>
@@ -575,14 +570,47 @@ function renderEQNamedFrames() {
     container.innerHTML = '<div style="color:#556;font-size:11px;">No frames assigned yet.</div>';
     return;
   }
+  const fw = Number(document.getElementById('eq_frameW')?.value) || 32;
+  const fh = Number(document.getElementById('eq_frameH')?.value) || 32;
+  const cols = _eqSheetImg ? Math.max(1, Math.floor(_eqSheetImg.width / fw)) : 1;
+  const thumbSize = 32;
+
   for (const [frameStr, animName] of entries) {
     const row = document.createElement('div');
     row.className = 'ingredient-row';
-    row.innerHTML = `
-      <span style="color:#88aacc;width:50px;font-size:11px;">#${frameStr}</span>
-      <input style="flex:1;" value="${animName}" onchange="updateEQNamedFrame('${frameStr}', this.value)" />
-      <button onclick="removeEQNamedFrame('${frameStr}')">x</button>
-    `;
+    row.style.alignItems = 'center';
+
+    // Mini canvas thumbnail of the frame
+    const thumb = document.createElement('canvas');
+    thumb.width = thumbSize;
+    thumb.height = thumbSize;
+    thumb.style.cssText = `width:${thumbSize}px;height:${thumbSize}px;border:1px solid #333;background:#080818;image-rendering:pixelated;flex-shrink:0;`;
+    if (_eqSheetImg) {
+      const fi = Number(frameStr);
+      const sc = fi % cols;
+      const sr = Math.floor(fi / cols);
+      const tctx = thumb.getContext('2d');
+      tctx.imageSmoothingEnabled = false;
+      tctx.drawImage(_eqSheetImg, sc * fw, sr * fh, fw, fh, 0, 0, thumbSize, thumbSize);
+    }
+    row.appendChild(thumb);
+
+    const span = document.createElement('span');
+    span.style.cssText = 'color:#88aacc;width:40px;font-size:11px;text-align:center;flex-shrink:0;';
+    span.textContent = `#${frameStr}`;
+    row.appendChild(span);
+
+    const inp = document.createElement('input');
+    inp.style.flex = '1';
+    inp.value = animName;
+    inp.onchange = function() { updateEQNamedFrame(frameStr, this.value); };
+    row.appendChild(inp);
+
+    const btn = document.createElement('button');
+    btn.textContent = 'x';
+    btn.onclick = () => removeEQNamedFrame(frameStr);
+    row.appendChild(btn);
+
     // Hover to highlight in picker
     row.onmouseenter = () => { _eqSelectedFrame = Number(frameStr); redrawEQSheetPicker(); };
     container.appendChild(row);
@@ -838,13 +866,8 @@ function renderITEditor() {
           <div style="display:flex;align-items:center;">
             <canvas id="it_tilePreview" class="tile-preview" width="48" height="48"></canvas>
             <button type="button" class="btn-pick-tile" onclick="openTilePicker(
-              Number(document.getElementById('it_tileCol').value),
-              Number(document.getElementById('it_tileRow').value),
-              (col, row) => {
-                document.getElementById('it_tileCol').value = col;
-                document.getElementById('it_tileRow').value = row;
-                drawTilePreview('it_tilePreview', col, row);
-              }
+              {type:document.getElementById('it_spriteType').value,tileCol:Number(document.getElementById('it_tileCol').value),tileRow:Number(document.getElementById('it_tileRow').value),file:document.getElementById('it_sheetFile')?.value,frame:Number(document.getElementById('it_frame')?.value||0)},
+              _pickTileIT
             )">Pick tile</button>
           </div>
         </div>
@@ -965,15 +988,17 @@ function openItemSpritesheet() {
 function loadItemSpritesheet(filename) {
   const id = selectedIT?.id;
   if (!id || !filename) return;
+  // Shared ore-pack sheets use a path like "Reforged - ore pack/ore_orepack.png"
+  // and are served from /assets/ directly, not /assets/items/{id}/
+  const sharedSheet = PICK_SHEETS.find(s => s.file === filename);
+  const src = sharedSheet ? `/assets/${filename}` : `/assets/items/${id}/${filename}`;
   const img = new Image();
   img.onload = () => {
     _itSheetImg = img;
     _itSheetFile = filename;
     redrawSheetPicker();
   };
-  // Items are served from /static/items/{id}/{filename} — but they're in assets/items/
-  // We need a route to serve them. Use the existing file path pattern.
-  img.src = `/assets/items/${id}/${filename}`;
+  img.src = src;
 }
 
 function redrawSheetPicker() {
@@ -1179,13 +1204,8 @@ function renderSTEditor() {
         <div style="display:flex;align-items:center;">
           <canvas id="st_tilePreview" class="tile-preview" width="48" height="48"></canvas>
           <button type="button" class="btn-pick-tile" onclick="openTilePicker(
-            Number(document.getElementById('st_tileCol').value),
-            Number(document.getElementById('st_tileRow').value),
-            (col, row) => {
-              document.getElementById('st_tileCol').value = col;
-              document.getElementById('st_tileRow').value = row;
-              drawTilePreview('st_tilePreview', col, row);
-            }
+            {type:'tilemap',tileCol:Number(document.getElementById('st_tileCol').value),tileRow:Number(document.getElementById('st_tileRow').value)},
+            _pickTileST
           )">Pick tile</button>
         </div>
       </div>
@@ -1442,23 +1462,71 @@ async function deleteST() {
 
 const TILE_PX = 16;
 const TILE_SPACING = 1;
-const TILE_SLOT = TILE_PX + TILE_SPACING; // 17px per cell in the sheet
+const TILE_SLOT = TILE_PX + TILE_SPACING; // 17px per cell in the roguelike sheet
 const TILE_COLS = 57;
-let _tilePickerImg = null;
+
+// Spritesheets available in the tile picker
+const PICK_SHEETS = [
+  {
+    id: 'roguelike',
+    label: 'Roguelike Sheet',
+    src: '/static/Spritesheet/roguelikeSheet_transparent.png',
+    tileW: 16, tileH: 16, spacing: 1,
+    type: 'tilemap',
+  },
+  {
+    id: 'ingots_orepack',
+    label: 'Ingots (Ore Pack)',
+    src: '/assets/Reforged - ore pack/ingots_orepack.png',
+    tileW: 16, tileH: 16, spacing: 0,
+    type: 'spritesheet',
+    file: 'Reforged - ore pack/ingots_orepack.png',
+  },
+  {
+    id: 'ore_orepack',
+    label: 'Ore Pack',
+    src: '/assets/Reforged - ore pack/ore_orepack.png',
+    tileW: 16, tileH: 16, spacing: 0,
+    type: 'spritesheet',
+    file: 'Reforged - ore pack/ore_orepack.png',
+  },
+];
+
+const _pickSheetImgs = {};
+let _tilePickerImg = null; // legacy alias → roguelike cache
 let _tilePickerCb = null;
 
-function loadTileSheet() {
-  if (_tilePickerImg) return Promise.resolve(_tilePickerImg);
-  return new Promise((resolve) => {
+function _loadPickSheet(sheetId) {
+  if (_pickSheetImgs[sheetId]) return Promise.resolve(_pickSheetImgs[sheetId]);
+  const sh = PICK_SHEETS.find(s => s.id === sheetId);
+  if (!sh) return Promise.reject(new Error(`Unknown sheet: ${sheetId}`));
+  return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => { _tilePickerImg = img; resolve(img); };
-    img.src = '/static/Spritesheet/roguelikeSheet_transparent.png';
+    img.onload = () => {
+      _pickSheetImgs[sheetId] = img;
+      if (sheetId === 'roguelike') _tilePickerImg = img;
+      resolve(img);
+    };
+    img.onerror = reject;
+    img.src = sh.src;
   });
 }
 
-async function openTilePicker(currentCol, currentRow, onPick) {
-  const img = await loadTileSheet();
+function loadTileSheet() {
+  return _loadPickSheet('roguelike');
+}
+
+async function openTilePicker(currentSprite, onPick) {
   _tilePickerCb = onPick;
+
+  // Determine which sheet to start on
+  let activeSheetId = 'roguelike';
+  if (currentSprite?.type === 'spritesheet' && currentSprite.file) {
+    const match = PICK_SHEETS.find(s => s.file === currentSprite.file);
+    if (match) activeSheetId = match.id;
+  }
+
+  let activeImg = await _loadPickSheet(activeSheetId);
 
   const overlay = document.createElement('div');
   overlay.className = 'tile-picker-overlay';
@@ -1467,39 +1535,100 @@ async function openTilePicker(currentCol, currentRow, onPick) {
   const modal = document.createElement('div');
   modal.className = 'tile-picker-modal';
 
+  // Header: sheet selector + info + close
   const header = document.createElement('div');
   header.className = 'tile-picker-header';
-  header.innerHTML = `<span>Click a tile to select — current: col ${currentCol}, row ${currentRow}</span>`;
+
+  const sheetSel = document.createElement('select');
+  sheetSel.style.cssText = 'margin-right:8px;background:#1a1a2e;color:#ccc;border:1px solid #334;padding:2px 6px;border-radius:3px;font-size:12px;';
+  for (const sh of PICK_SHEETS) {
+    const opt = document.createElement('option');
+    opt.value = sh.id;
+    opt.textContent = sh.label;
+    if (sh.id === activeSheetId) opt.selected = true;
+    sheetSel.appendChild(opt);
+  }
+
+  const infoSpan = document.createElement('span');
+  infoSpan.style.cssText = 'font-size:11px;color:#aaa;flex:1;';
+  const updateInfo = (img) => {
+    const sh = PICK_SHEETS.find(s => s.id === activeSheetId);
+    const slot = sh.tileW + sh.spacing;
+    const cols = Math.floor(img.width / slot);
+    const rows = Math.floor(img.height / sh.tileH);
+    infoSpan.textContent = `${cols}×${rows} tiles  (${sh.tileW}px)`;
+  };
+  updateInfo(activeImg);
+
   const closeBtn = document.createElement('button');
   closeBtn.className = 'tile-picker-close';
   closeBtn.textContent = 'Close';
   closeBtn.onclick = () => overlay.remove();
+
+  header.appendChild(sheetSel);
+  header.appendChild(infoSpan);
   header.appendChild(closeBtn);
 
   const body = document.createElement('div');
   body.className = 'tile-picker-body';
 
-  const scale = 2;
   const canvas = document.createElement('canvas');
-  canvas.width = img.width * scale;
-  canvas.height = img.height * scale;
-  const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const scale = 2;
 
-  // Highlight current tile
-  ctx.strokeStyle = '#66aaff';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(currentCol * TILE_SLOT * scale, currentRow * TILE_SLOT * scale, TILE_PX * scale, TILE_PX * scale);
+  function renderSheet(img) {
+    const sh = PICK_SHEETS.find(s => s.id === activeSheetId);
+    const slot = sh.tileW + sh.spacing;
+    canvas.width  = img.width  * scale;
+    canvas.height = img.height * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    // Highlight current selection on this sheet
+    if (currentSprite) {
+      let hCol = null, hRow = null;
+      if (sh.type === 'tilemap' && currentSprite.type === 'tilemap') {
+        hCol = currentSprite.tileCol ?? 0;
+        hRow = currentSprite.tileRow ?? 0;
+      } else if (sh.type === 'spritesheet' && currentSprite.type === 'spritesheet' && currentSprite.file === sh.file) {
+        const cols = Math.floor(img.width / slot);
+        hCol = (currentSprite.frame ?? 0) % cols;
+        hRow = Math.floor((currentSprite.frame ?? 0) / cols);
+      }
+      if (hCol !== null) {
+        ctx.strokeStyle = '#66aaff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(hCol * slot * scale, hRow * sh.tileH * scale, sh.tileW * scale, sh.tileH * scale);
+      }
+    }
+  }
+  renderSheet(activeImg);
 
   canvas.onclick = (e) => {
+    const sh = PICK_SHEETS.find(s => s.id === activeSheetId);
+    const slot = sh.tileW + sh.spacing;
     const rect = canvas.getBoundingClientRect();
     const sx = canvas.width / rect.width;
     const sy = canvas.height / rect.height;
-    const col = Math.floor((e.clientX - rect.left) * sx / (TILE_SLOT * scale));
-    const row = Math.floor((e.clientY - rect.top) * sy / (TILE_SLOT * scale));
-    if (_tilePickerCb) _tilePickerCb(col, row);
+    const col = Math.floor((e.clientX - rect.left) * sx / (slot * scale));
+    const row = Math.floor((e.clientY - rect.top) * sy / (sh.tileH * scale));
+    let spriteData;
+    if (sh.type === 'tilemap') {
+      spriteData = { type: 'tilemap', tileCol: col, tileRow: row };
+    } else {
+      const cols = Math.floor(activeImg.width / slot);
+      spriteData = { type: 'spritesheet', file: sh.file, frameW: sh.tileW, frameH: sh.tileH, spacing: 0, frame: row * cols + col };
+    }
+    if (_tilePickerCb) _tilePickerCb(spriteData);
     overlay.remove();
+  };
+
+  sheetSel.onchange = async () => {
+    activeSheetId = sheetSel.value;
+    activeImg = await _loadPickSheet(activeSheetId);
+    updateInfo(activeImg);
+    renderSheet(activeImg);
   };
 
   body.appendChild(canvas);
@@ -1518,6 +1647,51 @@ function drawTilePreview(canvasId, col, row) {
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.drawImage(img, col * TILE_SLOT, row * TILE_SLOT, TILE_PX, TILE_PX, 0, 0, c.width, c.height);
   });
+}
+
+// Named tile-pick callbacks used by inline onclick handlers in templates
+
+function _pickTileWO(sprite) {
+  if (sprite.type === 'tilemap') {
+    document.getElementById('wo_tileCol').value = sprite.tileCol;
+    document.getElementById('wo_tileRow').value = sprite.tileRow;
+    drawTilePreview('wo_tilePreview', sprite.tileCol, sprite.tileRow);
+  }
+}
+
+function _pickTileST(sprite) {
+  if (sprite.type === 'tilemap') {
+    document.getElementById('st_tileCol').value = sprite.tileCol;
+    document.getElementById('st_tileRow').value = sprite.tileRow;
+    drawTilePreview('st_tilePreview', sprite.tileCol, sprite.tileRow);
+  }
+}
+
+function _pickTileIT(sprite) {
+  if (sprite.type === 'tilemap') {
+    document.getElementById('it_spriteType').value = 'tilemap';
+    document.getElementById('it_tileCol').value = sprite.tileCol;
+    document.getElementById('it_tileRow').value = sprite.tileRow;
+    toggleItemSpriteMode();
+    drawTilePreview('it_tilePreview', sprite.tileCol, sprite.tileRow);
+  } else if (sprite.type === 'spritesheet') {
+    document.getElementById('it_spriteType').value = 'spritesheet';
+    document.getElementById('it_sheetFile').value = sprite.file;
+    document.getElementById('it_frameW').value = sprite.frameW;
+    document.getElementById('it_frameH').value = sprite.frameH;
+    document.getElementById('it_spacing').value = sprite.spacing;
+    document.getElementById('it_frame').value = sprite.frame;
+    toggleItemSpriteMode();
+    // Load the ore pack image into the spritesheet picker
+    const sheetId = PICK_SHEETS.find(s => s.type === 'spritesheet' && s.file === sprite.file)?.id;
+    if (sheetId) {
+      _loadPickSheet(sheetId).then(img => {
+        _itSheetImg = img;
+        _itSheetFile = sprite.file;
+        redrawSheetPicker();
+      });
+    }
+  }
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────

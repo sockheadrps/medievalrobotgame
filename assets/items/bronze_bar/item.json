@@ -3,12 +3,15 @@
   "label": "Bronze bar",
   "category": "resource",
   "sprite": {
-    "type": "tilemap",
-    "tileCol": 45,
-    "tileRow": 17
+    "type": "spritesheet",
+    "file": "Reforged - ore pack/ingots_orepack.png",
+    "frameW": 16,
+    "frameH": 16,
+    "spacing": 0,
+    "frame": 7
   },
   "stackable": true,
   "maxStack": 99,
-  "color": "#cccccc",
+  "color": "#a06718",
   "description": ""
 }

@@ -13,20 +13,22 @@
  */
 
 import {
-  TILE_SIZE, SHEET_KEY, SHEET_TILE, SHEET_COLS,
+  TILE_SIZE, SHEET_KEY, SHEET_TILE,
   MINE_FRAME_WALL, MINE_FRAME_HARDWALL, MINE_FRAME_BEDROCK, MINE_FRAME_FLOOR,
   MINE_FRAME_ORE_IRON, MINE_FRAME_ORE_GOLD, MINE_FRAME_GEODE,
   tilePos,
 } from '../constants.js';
 
 const SCALE = TILE_SIZE / SHEET_TILE;
+// Scale for 16px ore-pack tiles displayed at TILE_SIZE world pixels (same as roguelike sheet)
+const ORE_PACK_SCALE = TILE_SIZE / 16;
 
-// Ore type → overlay frame
-const ORE_FRAME_MAP = {
+// Fallback ore overlay map (roguelike sheet frames) — used until asset manifest loads
+const ORE_FRAME_FALLBACK = {
   raw_iron_ore: MINE_FRAME_ORE_IRON,
   raw_gold_ore: MINE_FRAME_ORE_GOLD,
   geode:        MINE_FRAME_GEODE,
-  coal:         MINE_FRAME_ORE_IRON,  // reuse iron frame tinted
+  coal:         MINE_FRAME_ORE_IRON,
 };
 
 // Tile type → base frame
@@ -38,6 +40,8 @@ const TYPE_FRAME_MAP = {
 };
 
 const WALL_TYPES = new Set(['wall', 'hardwall', 'bedrock']);
+// Ore types that should NOT get an overlay (they're terrain fills, not mineable ores)
+const NO_ORE_OVERLAY = new Set(['stone', 'clay']);
 const DIM_ALPHA = 0.35;
 
 export default class MineRenderer {
@@ -113,20 +117,26 @@ export default class MineRenderer {
 
       // Ore overlay (only on visible wall/hardwall)
       let oreSprite = this._oreSprites.get(key);
-      if (tile.o && tile.v && (tile.t === 'wall' || tile.t === 'hardwall')) {
-        const oreFrame = ORE_FRAME_MAP[tile.o];
+      if (tile.o && !NO_ORE_OVERLAY.has(tile.o) && tile.v && (tile.t === 'wall' || tile.t === 'hardwall')) {
+        // Prefer item-configured sprite; fall back to roguelike sheet constants
+        const oreOverlays = this.scene._oreOverlaySprites || {};
+        const ov = oreOverlays[tile.o];
+        const textureKey = ov?.textureKey ?? SHEET_KEY;
+        const oreFrame   = ov?.frame ?? ORE_FRAME_FALLBACK[tile.o];
+        const oreScale   = (textureKey === SHEET_KEY) ? SCALE * 0.7 : ORE_PACK_SCALE * 0.85;
         if (oreFrame !== undefined) {
           if (!oreSprite) {
-            oreSprite = this.scene.add.image(x, y, SHEET_KEY, oreFrame)
-              .setScale(SCALE * 0.7)
+            oreSprite = this.scene.add.image(x, y, textureKey, oreFrame)
+              .setScale(oreScale)
               .setDepth(1)
-              .setAlpha(0.8);
+              .setAlpha(0.85);
             this._oreSprites.set(key, oreSprite);
           } else {
-            oreSprite.setFrame(oreFrame);
+            oreSprite.setTexture(textureKey, oreFrame);
+            oreSprite.setScale(oreScale);
             oreSprite.setPosition(x, y);
             oreSprite.setVisible(true);
-            oreSprite.setAlpha(0.8);
+            oreSprite.setAlpha(0.85);
           }
         }
       } else if (oreSprite) {
@@ -146,7 +156,7 @@ export default class MineRenderer {
       } else {
         // Tile became open (was mined) — remove physics body
         if (body) {
-          body.destroy();
+          this._wallGroup.remove(body, true, true);
           this._wallBodies.delete(key);
         }
       }
@@ -165,11 +175,14 @@ export default class MineRenderer {
         }
         const body = this._wallBodies.get(key);
         if (body) {
-          body.destroy();
+          this._wallGroup.remove(body, true, true);
           this._wallBodies.delete(key);
         }
       }
     }
+
+    // Rebuild the static group's broadphase so mined tiles stop blocking
+    this._wallGroup?.refresh();
   }
 
   /**

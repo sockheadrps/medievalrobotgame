@@ -1,0 +1,29 @@
+{
+  "id": "metalurgy_station",
+  "label": "metalurgy station",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 13,
+    "tileRow": 0
+  },
+  "station_type": "smelter",
+  "speed_bonus": 1,
+  "required_metallurgy": 0,
+  "fuel_type": "coal",
+  "recipes": [
+    {
+      "inputs": {
+        "iron_nugget": 10
+      },
+      "outputs": {
+        "iron_bar": 3
+      },
+      "fuel_cost": 1,
+      "process_time": 5
+    }
+  ],
+  "build_recipe": {
+    "clay": 100,
+    "stone": 100
+  }
+}

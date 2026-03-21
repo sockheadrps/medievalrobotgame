@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 
@@ -25,6 +26,16 @@ from core.config import STATIC_DIR, TEMPLATES_DIR, DEV_MODE, ASSETS_DIR
 from services.database import init_db, migrate_json_files, ensure_dev_accounts
 from services.asset_registry import asset_registry
 from services.game_state import game, init_world_objects
+
+class _SuppressNoisy(logging.Filter):
+    _SUPPRESS = ("/api/prompts/", "/api/npc", "/api/aip", "/llm/", "/npc_save")
+
+    def filter(self, record):
+        msg = record.getMessage()
+        return not any(p in msg for p in self._SUPPRESS)
+
+
+logging.getLogger("uvicorn.access").addFilter(_SuppressNoisy())
 
 app = FastAPI()
 

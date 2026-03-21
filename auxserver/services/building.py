@@ -446,10 +446,41 @@ class BuildingService:
                     break
 
             # ── Minecart Track ────────────────────────────────────────
-            elif kind == "track" and b.get("_cart"):
+            elif kind == "track":
                 # Skip if this track just received a cart this tick
                 if bid in _received_this_tick:
                     continue
+
+                # Spawn a cart from an adjacent crafting station or crate on the input side
+                if not b.get("_cart"):
+                    in_dir = b.get("direction", "right")
+                    idc, idr = self._DIR_DELTA.get(in_dir, (1, 0))
+                    in_col = b["col"] - idc
+                    in_row = b["row"] - idr
+                    _, src = self._building_at(in_col, in_row, bmap)
+                    if src and src["kind"] in ("crate", "crafting_station"):
+                        src_stored = src.get("stored", {})
+                        if src["kind"] == "crafting_station":
+                            src_asset_id = src.get("asset_id", "")
+                            src_def = asset_registry.get_crafting_station(src_asset_id)
+                            pull_keys = (
+                                [k for k in src_stored if k in {ok for r in src_def.recipes for ok in r.outputs}]
+                                if src_def else []
+                            )
+                        else:
+                            pull_keys = list(src_stored.keys())
+                        for res in pull_keys:
+                            qty = src_stored.get(res, 0)
+                            if qty > 0:
+                                src_stored[res] = qty - 1
+                                if src_stored[res] <= 0:
+                                    del src_stored[res]
+                                b["_cart"] = {"resource": res, "amount": 1}
+                                break
+
+                if not b.get("_cart"):
+                    continue
+
                 accum = b.get("_track_accum", 0.0) + dt
                 if accum < TRACK_INTERVAL:
                     b["_track_accum"] = accum
@@ -482,6 +513,13 @@ class BuildingService:
                         crate_stored[cart["resource"]] = crate_stored.get(cart["resource"], 0) + cart["amount"]
                         b["_cart"] = None
                         continue
+
+                # Deposit into crafting station (e.g. log cutter)
+                if nb and nb["kind"] == "crafting_station":
+                    station_stored = nb.setdefault("stored", {})
+                    station_stored[cart["resource"]] = station_stored.get(cart["resource"], 0) + cart["amount"]
+                    b["_cart"] = None
+                    continue
 
                 # Check for minecart exit portal
                 for portal in MINECART_PORTALS:

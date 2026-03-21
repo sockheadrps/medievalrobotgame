@@ -9,9 +9,10 @@
     <div class="toolbar">
       <section>
         <strong>MAP</strong>
-        <input type="text" id="mapName" value="level_01" />
+        <select id="mapSelect" style="min-width:120px;background:#222;color:#eee;border:1px solid #555;padding:2px 4px;border-radius:3px;"></select>
+        <button id="newMapBtn">New Map</button>
         <button id="saveBtn">Save</button>
-        <button id="loadBtn">Load</button>
+        <button id="wipeMapBtn" style="background:#5a1010;color:#ffaaaa;" title="Wipe all in-game data for this map (buildings, items, mine grids)">Wipe Map</button>
       </section>
 
       <section id="mapToolsSection">
@@ -51,6 +52,12 @@
         <button class="mode-btn" id="btnModeSprite" onclick="setEditorMode('sprite')">
           Sprite
         </button>
+      </section>
+
+      <section>
+        <strong>LAYER</strong>
+        <button class="tool-btn active" id="btnLayer0" onclick="setLayer(0);document.getElementById('btnLayer0').classList.add('active');document.getElementById('btnLayer1').classList.remove('active');" title="Layer 0 — base tiles (hidden in cave by mine renderer)">0</button>
+        <button class="tool-btn" id="btnLayer1" onclick="setLayer(1);document.getElementById('btnLayer1').classList.add('active');document.getElementById('btnLayer0').classList.remove('active');" title="Layer 1 — overlay tiles (always visible, rendered above mine grid)">1</button>
       </section>
 
       <button id="clearBtn">Clear All</button>

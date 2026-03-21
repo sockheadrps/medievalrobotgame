@@ -2,7 +2,14 @@
   "id": "raw_iron_ore",
   "label": "Raw Iron Ore",
   "category": "resource",
-  "sprite": { "type": "tilemap", "tileCol": 54, "tileRow": 21 },
+  "sprite": {
+    "type": "spritesheet",
+    "file": "Reforged - ore pack/ore_orepack.png",
+    "frameW": 16,
+    "frameH": 16,
+    "spacing": 0,
+    "frame": 3
+  },
   "stackable": true,
   "maxStack": 99,
   "color": "#aa7755",

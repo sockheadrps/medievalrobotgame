@@ -237,8 +237,8 @@ export const TRACK_FRAME_LOOKUP = {
 };
 
 // --- Cave Mining ---
-export const MINE_FRAME_WALL     = 887;   // col=53 row=15 — grey rock (standard wall)
-export const MINE_FRAME_HARDWALL = 1060;  // col=34 row=18 — dark dense rock (depth 30+)
+export const MINE_FRAME_WALL     = 1271;  // col=39 row=22
+export const MINE_FRAME_HARDWALL = 1271;  // col=39 row=22
 export const MINE_FRAME_BEDROCK  = 1174;  // col=34 row=20 — unbreakable boundary
 export const MINE_FRAME_FLOOR    = 578;   // col=8  row=10 — cave floor
 export const MINE_FRAME_ORE_IRON = 1251;  // col=54 row=21 — iron ore overlay

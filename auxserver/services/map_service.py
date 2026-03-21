@@ -103,11 +103,32 @@ def save_map_data(data: MapData) -> None:
         if existing.name not in saved_files:
             existing.unlink(missing_ok=True)
 
+    # Preserve layer >= 1 values from the existing file.
+    # A stale browser session may send layer=0 for tiles that were manually
+    # promoted to layer=1 on disk; merging here prevents silent regressions.
+    existing_layer_overrides: dict[tuple[int, int], int] = {}
+    if map_path.exists():
+        try:
+            existing = json.loads(map_path.read_text(encoding="utf-8"))
+            for t in existing.get("tiles", []):
+                if (t.get("layer") or 0) >= 1:
+                    existing_layer_overrides[(t["x"], t["y"])] = t["layer"]
+        except Exception:
+            pass
+
+    tiles_out = []
+    for t in data.tiles:
+        td = t.model_dump(exclude_none=True)
+        key = (t.x, t.y)
+        if key in existing_layer_overrides and td.get("layer", 0) < existing_layer_overrides[key]:
+            td["layer"] = existing_layer_overrides[key]
+        tiles_out.append(td)
+
     map_payload = {
         "name": data.name,
         "width": data.width,
         "height": data.height,
-        "tiles": [t.model_dump(exclude_none=True) for t in data.tiles],
+        "tiles": tiles_out,
         "customSprites": custom_sprites_out,
     }
 

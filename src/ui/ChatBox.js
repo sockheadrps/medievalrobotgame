@@ -484,6 +484,15 @@ export class ChatBox {
 
       npc.addMemory(`Player said: "${text}" → responded: "${reply}"`, 'dialogue', playerId);
 
+      // Push dialogue event to brain and sync to server for /npc dashboard
+      const brain = this._scene?._npcBrains?.get(npc.id);
+      console.log(`[ChatBox] dialogue done for ${npc.id}, brain found:`, !!brain, 'conn:', !!this._scene?._conn?.connected);
+      if (brain) {
+        brain.pushEvent({ type: 'dialogue', text: `"${text}" → "${reply}"`, importance: 0.5 });
+        console.log(`[ChatBox] calling _syncToServer for ${npc.id}`);
+        brain._syncToServer();
+      }
+
       // Log NPC reply + deltas
       let logLine = `${npc.getName()}: ${reply}`;
       if (deltaStr) logLine += ` ${deltaStr}`;

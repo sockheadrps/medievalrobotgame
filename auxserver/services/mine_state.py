@@ -23,7 +23,7 @@ from core.constants import TILE_SIZE
 
 # Base cave is 40x40 (indices 0-39). Mineable area extends 15 tiles beyond.
 BASE_SIZE = 40
-EXTEND = 15
+EXTEND = 100
 GRID_MIN = -EXTEND          # -15
 GRID_MAX = BASE_SIZE + EXTEND  # 55
 GRID_SIZE = GRID_MAX - GRID_MIN  # 70

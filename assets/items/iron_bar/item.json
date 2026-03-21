@@ -1,14 +1,14 @@
 {
-  "id": "geode",
-  "label": "Geode",
+  "id": "iron_bar",
+  "label": "Iron bar",
   "category": "resource",
   "sprite": {
     "type": "spritesheet",
-    "file": "Reforged - ore pack/ore_orepack.png",
+    "file": "Reforged - ore pack/ingots_orepack.png",
     "frameW": 16,
     "frameH": 16,
     "spacing": 0,
-    "frame": 9
+    "frame": 3
   },
   "stackable": true,
   "maxStack": 99,

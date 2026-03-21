@@ -710,9 +710,11 @@ sCanvas.addEventListener('mousemove', (e) => {
   // Red highlight box on the centre tile
   zCtx.strokeStyle = '#f00';
   zCtx.lineWidth = 2;
-  const centerSize = (TILE / viewSize) * zCanvas.width;
-  const centerPos = (zCanvas.width - centerSize) / 2;
-  zCtx.strokeRect(centerPos, centerPos, centerSize, centerSize);
+  const centerW = (SLOT / viewSize) * zCanvas.width;
+  const centerH = (SLOT / viewSize) * zCanvas.height;
+  const centerX = (zCanvas.width - centerW) / 2;
+  const centerY = (zCanvas.height - centerH) / 2;
+  zCtx.strokeRect(centerX, centerY, centerW, centerH);
 });
 
 sCanvas.addEventListener('mousedown', (e) => {
@@ -1075,11 +1077,13 @@ mCanvas.addEventListener('mousemove', (e) => {
   zCtx.drawImage(mCanvas, sx, sy, viewPx, viewPx, 0, 0, zCanvas.width, zCanvas.height);
   zCtx.restore();
   // Red highlight on the centre tile
-  const tileScreenSize = (TILE / viewPx) * zCanvas.width;
-  const centerPos = (zCanvas.width - tileScreenSize) / 2;
+  const tileScreenW = (TILE / viewPx) * zCanvas.width;
+  const tileScreenH = (TILE / viewPx) * zCanvas.height;
+  const tileCenterX = (zCanvas.width - tileScreenW) / 2;
+  const tileCenterY = (zCanvas.height - tileScreenH) / 2;
   zCtx.strokeStyle = '#f00';
   zCtx.lineWidth = 2;
-  zCtx.strokeRect(centerPos, centerPos, tileScreenSize, tileScreenSize);
+  zCtx.strokeRect(tileCenterX, tileCenterY, tileScreenW, tileScreenH);
 });
 
 // --- Map Renderer ---
@@ -1235,44 +1239,36 @@ function renderMap() {
 document.getElementById('gridW').addEventListener('change', updateDimensions);
 document.getElementById('gridH').addEventListener('change', updateDimensions);
 
-document.getElementById('saveBtn').addEventListener('click', async () => {
-  const name = document.getElementById('mapName').value.trim();
-  if (!name) {
-    alert('Enter a map name first.');
-    return;
+// --- Map dropdown helpers ---
+
+async function _loadMapList() {
+  try {
+    const resp = await fetch('/list-maps');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const sel = document.getElementById('mapSelect');
+    const current = sel.value;
+    sel.innerHTML = '';
+    for (const name of (data.maps || [])) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    }
+    // Restore selection if still present, else default to first
+    if (current && [...sel.options].some(o => o.value === current)) {
+      sel.value = current;
+    }
+  } catch (e) {
+    console.warn('Failed to load map list', e);
   }
+}
 
-  // Serialize collision tiles: array of {x, y, color}
-  const collisionPayload = Array.from(collisionTiles.entries()).map(([key, color]) => {
-    const [x, y] = key.split(',').map(Number);
-    return { x, y, color };
-  });
+function _currentMapName() {
+  return document.getElementById('mapSelect').value.trim();
+}
 
-  const resp = await fetch('/save-map', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name,
-      width: MAP_WIDTH,
-      height: MAP_HEIGHT,
-      tiles: placedTiles,
-      customSprites: customSpritesPayloadForSave(),
-      collisionTiles: collisionPayload,
-      mapItems: mapItemsPayload(),
-    }),
-  });
-
-  const res = await resp.json();
-  alert(res.message || 'Saved.');
-});
-
-document.getElementById('loadBtn').addEventListener('click', async () => {
-  const name = document.getElementById('mapName').value.trim();
-  if (!name) {
-    alert('Enter a map name first.');
-    return;
-  }
-
+async function _loadMapByName(name) {
   const resp = await fetch(`/load-map?name=${encodeURIComponent(name)}`);
   const res = await resp.json();
   if (!resp.ok) {
@@ -1305,7 +1301,6 @@ document.getElementById('loadBtn').addEventListener('click', async () => {
       layer: Number.isFinite(t.layer) ? t.layer : 0,
     }));
 
-  // Restore collision tiles
   collisionTiles.clear();
   if (Array.isArray(res.collisionTiles)) {
     for (const ct of res.collisionTiles) {
@@ -1315,11 +1310,9 @@ document.getElementById('loadBtn').addEventListener('click', async () => {
     }
   }
 
-  // Restore map items registry
   hydrateMapItems(res.mapItems || []);
 
   updateDimensions();
-  // Scroll to the first tile's position
   if (loadedTiles.length > 0) {
     const minX = loadedTiles.reduce((a, t) => Math.min(a, t.x || 0), Infinity);
     const minY = loadedTiles.reduce((a, t) => Math.min(a, t.y || 0), Infinity);
@@ -1329,7 +1322,106 @@ document.getElementById('loadBtn').addEventListener('click', async () => {
     mapContainer.scrollLeft = 0;
     mapContainer.scrollTop  = 0;
   }
-  alert(`Loaded "${name}"`);
+}
+
+// Auto-load selected map when dropdown changes
+document.getElementById('mapSelect').addEventListener('change', async () => {
+  const name = _currentMapName();
+  if (name) await _loadMapByName(name);
+});
+
+// Load map list on page load, then load default map
+_loadMapList().then(async () => {
+  const name = _currentMapName();
+  if (name) await _loadMapByName(name);
+});
+
+document.getElementById('newMapBtn').addEventListener('click', async () => {
+  const name = prompt('New map name (letters, numbers, _ and - only):');
+  if (!name || !name.trim()) return;
+  const safe = name.trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(safe)) {
+    alert('Invalid map name. Use only letters, numbers, _ and -.');
+    return;
+  }
+  // Save an empty map under that name to create it
+  const resp = await fetch('/save-map', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: safe,
+      width: MAP_WIDTH,
+      height: MAP_HEIGHT,
+      tiles: [],
+      customSprites: [],
+      collisionTiles: [],
+      mapItems: [],
+    }),
+  });
+  if (!resp.ok) {
+    const r = await resp.json();
+    alert(r.detail || 'Failed to create map.');
+    return;
+  }
+  // Clear editor
+  placedTiles = [];
+  collisionTiles.clear();
+  hydrateMapItems([]);
+  renderMap();
+  // Refresh list and select the new map
+  await _loadMapList();
+  document.getElementById('mapSelect').value = safe;
+});
+
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  const name = _currentMapName();
+  if (!name) {
+    alert('No map selected.');
+    return;
+  }
+
+  const collisionPayload = Array.from(collisionTiles.entries()).map(([key, color]) => {
+    const [x, y] = key.split(',').map(Number);
+    return { x, y, color };
+  });
+
+  const resp = await fetch('/save-map', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      width: MAP_WIDTH,
+      height: MAP_HEIGHT,
+      tiles: placedTiles,
+      customSprites: customSpritesPayloadForSave(),
+      collisionTiles: collisionPayload,
+      mapItems: mapItemsPayload(),
+    }),
+  });
+
+  const res = await resp.json();
+  alert(res.message || 'Saved.');
+});
+
+document.getElementById('wipeMapBtn').addEventListener('click', async () => {
+  const name = _currentMapName();
+  if (!name) {
+    alert('No map selected.');
+    return;
+  }
+  if (!confirm(`Wipe all in-game data for "${name}"?\n\nThis removes all placed buildings, ground items, and (for cave maps) mine progress. The tile layout is preserved.\n\nThis cannot be undone.`)) return;
+
+  const resp = await fetch('/wipe-map', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  const res = await resp.json();
+  if (!resp.ok) {
+    alert(res.detail || 'Wipe failed.');
+    return;
+  }
+  alert(`Map "${name}" wiped.`);
 });
 
 document.getElementById('clearBtn').addEventListener('click', () => {

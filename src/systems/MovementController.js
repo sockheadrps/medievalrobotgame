@@ -47,7 +47,7 @@ export default class MovementController {
         player.y += my * speed * dt;
         // Clamp to world bounds
         if (scene._currentMap === 'cave_01') {
-          const EXT = 15;
+          const EXT = 100;
           const minB = -EXT * TILE_SIZE;
           const maxW = (scene._mapCols + EXT) * TILE_SIZE;
           const maxH = (scene._mapRows + EXT) * TILE_SIZE;

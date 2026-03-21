@@ -329,7 +329,11 @@ async def websocket_endpoint(ws: WebSocket):
 
     # Load saved state or create fresh player
     saved = load_player(pid)
+    # Preserve any previously-synced NPC dashboard data (survives reconnect)
+    _prev_npc_sync = game.players.get(pid, {}).get("_npc_sync", {})
     player = game.add_player(pid)
+    if _prev_npc_sync:
+        player["_npc_sync"] = _prev_npc_sync
     player["chatColor"] = login_data.get("chatColor", "#cccccc")
 
     if saved:
@@ -388,7 +392,18 @@ async def websocket_endpoint(ws: WebSocket):
                 data = json.loads(raw)
                 msg_type = data.get("type")
                 # Track NPC IDs for persistence
-                if msg_type == "register_npc":
+                if msg_type == "npc_sync":
+                    npc_id = data.get("npc_id")
+                    if npc_id:
+                        recent = data.get("recent_events", [])
+                        logger.info("[npc_sync] pid=%s npc=%s task=%s recent_events=%s",
+                                    pid, npc_id, data.get("current_task"), recent)
+                        # Store in _npc_sync (not npcs) so it's never included in game-state broadcasts
+                        player.setdefault("_npc_sync", {})[npc_id] = {
+                            k: v for k, v in data.items()
+                            if k not in ("type", "npc_id")
+                        }
+                elif msg_type == "register_npc":
                     npc_id = data.get("npc_id")
                     if SPAWN_NPCS and npc_id and npc_id not in player.get("npc_ids", []):
                         player.setdefault("npc_ids", []).append(npc_id)
