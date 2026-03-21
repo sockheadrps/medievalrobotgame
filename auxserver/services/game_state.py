@@ -433,6 +433,9 @@ class GameState:
         from services.player_manager import PlayerManager
         self.player_manager = PlayerManager(self)
 
+        from services.portals import PortalService
+        self.portals = PortalService(self)
+
     def _init_trees(self):
         for i, (col, row) in enumerate(TREE_POSITIONS):
             x, y = tile_pos(col, row)

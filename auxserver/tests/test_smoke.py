@@ -49,3 +49,11 @@ def test_player_manager_imports():
     gs = GameState.__new__(GameState)  # bypass __init__ (avoids DB requirement)
     gs.player_manager = PlayerManager(gs)
     assert isinstance(gs.player_manager, PlayerManager)
+
+
+def test_portals_imports():
+    from services.game_state import GameState
+    from services.portals import PortalService
+    gs = GameState.__new__(GameState)  # bypass __init__ (avoids DB requirement)
+    gs.portals = PortalService(gs)
+    assert isinstance(gs.portals, PortalService)
