@@ -23,7 +23,6 @@ export function cleanResponse(content, modelName = '') {
     if (!content) console.warn(`[LLM] Model produced ${thinkLen} chars of <think> but no answer`);
   }
   content = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
-  console.log(`[LLM] (${modelName}) raw:`, content.slice(0, 200));
   return content;
 }
 

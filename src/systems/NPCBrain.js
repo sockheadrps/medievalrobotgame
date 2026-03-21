@@ -1172,7 +1172,6 @@ export class NPCBrain {
     }
 
     this._lastDecision = decision;
-    console.log(`[NPCBrain] ${npc.getName()}: ${intent} | ${decision.reason_summary}`);
   }
 
   _validate(raw) {

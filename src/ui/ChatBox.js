@@ -137,7 +137,6 @@ export class ChatBox {
 
   /** Add a line to the persistent chat log. */
   _addLog(text, color = '#cccccc') {
-    console.log(`[Chat] ${text}`);
     this._chatLog.push({ text, color });
     if (this._chatLog.length > MAX_LOG_LINES) this._chatLog.shift();
     this._refreshLog();

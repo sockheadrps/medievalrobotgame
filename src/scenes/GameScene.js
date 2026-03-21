@@ -833,7 +833,6 @@ export default class GameScene extends Phaser.Scene {
         map: npcMap,
         task: task,
       });
-      console.log(`[bg] Registered background NPC ${npc.id} on ${npcMap} with task ${task.task}`);
     }
   }
 
@@ -1389,7 +1388,6 @@ export default class GameScene extends Phaser.Scene {
           npc.setVisible(false);
           if (npc.body) npc.body.enable = false;
         }
-        console.log(`[load] Restored NPC ${npc.id} (${npc.getName()}) on ${npc._map}`);
       } catch (e) {
         console.warn(`[load] Failed to load NPC ${npcId}:`, e.message);
       }
