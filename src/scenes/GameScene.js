@@ -109,6 +109,9 @@ export default class GameScene extends Phaser.Scene {
       frameWidth: 32,
       frameHeight: 32,
     });
+    // Ore pack spritesheets (16×16 tiles, no spacing)
+    this.load.spritesheet('ore_orepack',    'assets/Reforged - ore pack/ore_orepack.png',    { frameWidth: 16, frameHeight: 16 });
+    this.load.spritesheet('ingots_orepack', 'assets/Reforged - ore pack/ingots_orepack.png', { frameWidth: 16, frameHeight: 16 });
   }
 
   init(data) {
@@ -664,12 +667,22 @@ export default class GameScene extends Phaser.Scene {
       const stResp = await fetch(`${API_BASE}/api/assets/crafting_stations`);
       this._craftingStationManifest = await stResp.json();
 
-      // Populate RESOURCE_FRAME from item definitions
+      // Populate RESOURCE_FRAME and ore overlay sprite map from item definitions
       const itemsResp = await fetch(`${API_BASE}/api/assets/items`);
       const itemsList = await itemsResp.json();
-      for (const item of (Array.isArray(itemsList) ? itemsList : Object.values(itemsList))) {
-        if (item.id && item.sprite?.tileCol != null) {
-          RESOURCE_FRAME[item.id] = item.sprite.tileCol + (item.sprite.tileRow ?? 0) * SHEET_COLS;
+      this._itemsList = Array.isArray(itemsList) ? itemsList : Object.values(itemsList);
+      this._oreOverlaySprites = {};
+      for (const item of this._itemsList) {
+        if (!item.id) continue;
+        const sp = item.sprite;
+        if (sp?.type === 'spritesheet' && sp.file) {
+          // Ore-pack spritesheet: build overlay data but don't touch RESOURCE_FRAME
+          // (RESOURCE_FRAME uses roguelike sheet indices; ore-pack frames aren't compatible)
+          const textureKey = sp.file.split('/').pop().replace('.png', '');
+          this._oreOverlaySprites[item.id] = { textureKey, frame: sp.frame ?? 0 };
+        } else if (sp?.tileCol != null) {
+          RESOURCE_FRAME[item.id] = sp.tileCol + (sp.tileRow ?? 0) * SHEET_COLS;
+          this._oreOverlaySprites[item.id] = { textureKey: SHEET_KEY, frame: RESOURCE_FRAME[item.id] };
         }
       }
     } catch (e) {
@@ -908,6 +921,10 @@ export default class GameScene extends Phaser.Scene {
 
     // Register NPC with server for persistence
     this._conn.send({ type: 'register_npc', npc_id: npc.id });
+
+    // Initial sync so /npc dashboard shows it immediately
+    const newBrain = this._npcBrains.get(npc.id);
+    if (newBrain) newBrain._syncToServer();
 
     // Open naming prompt
     this._openNamingPrompt(npc);
@@ -1389,7 +1406,10 @@ export default class GameScene extends Phaser.Scene {
         this.entities.npcs.push(npc);
         const runner = new NPCTaskRunner(this, npc);
         this._taskRunners.set(npc.id, runner);
-        this._npcBrains.set(npc.id, new NPCBrain(this, npc, runner));
+        const loadedBrain = new NPCBrain(this, npc, runner);
+        this._npcBrains.set(npc.id, loadedBrain);
+        // Sync immediately so /npc dashboard sees restored NPCs
+        loadedBrain._syncToServer();
         // Hide NPCs that are on a different map
         if (npc._map !== this._currentMap) {
           npc.setVisible(false);
@@ -1572,57 +1592,62 @@ export default class GameScene extends Phaser.Scene {
       fontSize: '18px', color: titleColor, fontStyle: 'bold',
     }).setOrigin(0.5, 0).setDepth(71));
 
-    // Label picker for crates — clickable Phaser text buttons (no DOM)
+    // Label picker for crates — DOM <select> populated from item registry
     if (target.setLabel) {
-      const LABEL_OPTIONS = [
-        '(none)', 'raw_copper', 'raw_tin', 'bronze_bar',
-        'logs', 'stones', 'copper', 'crystals',
-        'meat', 'feathers', 'vegetables', 'seeds',
-        'planks',
-      ];
       const labelRow = top + 36;
       add(this.add.text(left + 16, labelRow, 'Label:', {
         fontSize: '11px', color: '#889999',
       }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(71));
 
       const currentLabel = target.getLabel?.() || '';
-      // Show current label + click to cycle
-      const labelDisplay = add(this.add.text(left + 70, labelRow, currentLabel || '(none)', {
-        fontSize: '12px', color: '#ffdd66', fontStyle: 'bold',
-        backgroundColor: '#222244', padding: { x: 6, y: 2 },
-      }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(72));
 
-      // < > arrow buttons to cycle through options
-      const curIdx = LABEL_OPTIONS.indexOf(currentLabel || '(none)');
-      let selectedIdx = curIdx >= 0 ? curIdx : 0;
+      // Build DOM select positioned over the canvas
+      const canvas = this.game.canvas;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = rect.width / this.game.config.width;
+      const scaleY = rect.height / this.game.config.height;
 
-      const updateLabel = () => {
-        const val = LABEL_OPTIONS[selectedIdx];
-        const realVal = val === '(none)' ? '' : val;
-        labelDisplay.setText(val);
-        target.setLabel(realVal);
-        this._conn?.send({ type: 'update_building_label', building_id: target._serverId, label: realVal });
-      };
+      const sel = document.createElement('select');
+      sel.style.cssText = [
+        `position:fixed`,
+        `left:${rect.left + left * scaleX + 68}px`,
+        `top:${rect.top + (labelRow - 8) * scaleY}px`,
+        `width:${220 * scaleX}px`,
+        `height:${20 * scaleY}px`,
+        `font-size:12px`,
+        `background:#1a1a33`,
+        `color:#ffdd66`,
+        `border:1px solid #445588`,
+        `border-radius:3px`,
+        `z-index:9999`,
+        `cursor:pointer`,
+      ].join(';');
 
-      const prevBtn = add(this.add.text(left + 70 + 160, labelRow, '◀', {
-        fontSize: '14px', color: '#88aacc', backgroundColor: '#222244', padding: { x: 4, y: 1 },
-      }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(72).setInteractive({ useHandCursor: true }));
-      prevBtn.on('pointerdown', () => {
-        selectedIdx = (selectedIdx - 1 + LABEL_OPTIONS.length) % LABEL_OPTIONS.length;
-        updateLabel();
+      // Build options: (none) + all items
+      const noneOpt = document.createElement('option');
+      noneOpt.value = '';
+      noneOpt.textContent = '(none)';
+      sel.appendChild(noneOpt);
+
+      const items = this._itemsList || [];
+      for (const item of items) {
+        if (!item.id) continue;
+        const opt = document.createElement('option');
+        opt.value = item.id;
+        opt.textContent = item.label || item.id;
+        if (item.id === currentLabel) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      if (!currentLabel) noneOpt.selected = true;
+
+      sel.addEventListener('change', () => {
+        const val = sel.value;
+        target.setLabel(val);
+        this._conn?.send({ type: 'update_building_label', building_id: target._serverId, label: val });
       });
-      prevBtn.on('pointerover', () => prevBtn.setColor('#ffffff'));
-      prevBtn.on('pointerout', () => prevBtn.setColor('#88aacc'));
 
-      const nextBtn = add(this.add.text(left + 70 + 190, labelRow, '▶', {
-        fontSize: '14px', color: '#88aacc', backgroundColor: '#222244', padding: { x: 4, y: 1 },
-      }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth(72).setInteractive({ useHandCursor: true }));
-      nextBtn.on('pointerdown', () => {
-        selectedIdx = (selectedIdx + 1) % LABEL_OPTIONS.length;
-        updateLabel();
-      });
-      nextBtn.on('pointerover', () => nextBtn.setColor('#ffffff'));
-      nextBtn.on('pointerout', () => nextBtn.setColor('#88aacc'));
+      document.body.appendChild(sel);
+      this._storageLabelSelect = sel;
     }
 
     // Column headers
@@ -1654,6 +1679,7 @@ export default class GameScene extends Phaser.Scene {
     this._storageContentY = headY + 22;
     this._storageContentEls = [];
     this._storagePanelEls = els;
+    this._storageContentPage = 0;
     this._storageOpen = true;
 
     this._refreshStoragePanel();
@@ -1673,7 +1699,6 @@ export default class GameScene extends Phaser.Scene {
 
     const add = (obj) => { this.addHud(obj); this._storageContentEls.push(obj); return obj; };
     const left = this._storagePanelLeft;
-    let y = this._storageContentY;
     const stored = target.getStored();
     const inv = this.player?.inventory ?? {};
     const logs = this.player?.logs ?? 0;
@@ -1683,27 +1708,65 @@ export default class GameScene extends Phaser.Scene {
     let allKeys;
     if (crateLabel) {
       const labelKey = crateLabel === 'logs' ? 'Wood' : crateLabel;
-      allKeys = new Set([labelKey]);
+      allKeys = Array.from(new Set([labelKey]));
     } else {
-      allKeys = new Set([
+      const keySet = new Set([
         ...Object.keys(stored).filter(k => stored[k] > 0),
         ...Object.keys(inv).filter(k => inv[k] > 0),
       ]);
-      // Also show logs
-      if (logs > 0 || (stored['Wood'] ?? 0) > 0) allKeys.add('Wood');
+      if (logs > 0 || (stored['Wood'] ?? 0) > 0) keySet.add('Wood');
+      allKeys = Array.from(keySet);
     }
 
-    if (allKeys.size === 0) {
+    const ROWS_PER_PAGE = 8;
+    const totalPages = Math.max(1, Math.ceil(allKeys.length / ROWS_PER_PAGE));
+    if (!this._storageContentPage) this._storageContentPage = 0;
+    // clamp in case items were removed
+    if (this._storageContentPage >= totalPages) this._storageContentPage = totalPages - 1;
+
+    const page = this._storageContentPage;
+    const pageKeys = allKeys.slice(page * ROWS_PER_PAGE, (page + 1) * ROWS_PER_PAGE);
+
+    let y = this._storageContentY;
+
+    if (allKeys.length === 0) {
       add(this.add.text(left + 210, y + 8, 'Empty — deposit items from your inventory', {
         fontSize: '12px', color: '#556677',
       }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
     }
-    for (const key of allKeys) {
+
+    for (const key of pageKeys) {
       const isLogs = key === 'Wood';
       const displayName = isLogs ? 'Logs' : key;
       const pQty = isLogs ? logs : (inv[key] ?? 0);
       const sQty = stored[key] ?? 0;
       y = this._addStorageRow(add, left, y, displayName, key, pQty, sQty, true, true, isLogs);
+    }
+
+    // Pagination controls (only if more than one page)
+    if (totalPages > 1) {
+      const cx = left + 210;
+      const pageY = this._storageContentY + ROWS_PER_PAGE * 26 + 4;
+      add(this.add.text(cx, pageY, `Page ${page + 1} / ${totalPages}`, {
+        fontSize: '11px', color: '#667788',
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
+
+      if (page > 0) {
+        const prevP = add(this.add.text(left + 100, pageY, '◀ Prev', {
+          fontSize: '12px', color: '#88aacc', backgroundColor: '#1a1a33', padding: { x: 6, y: 2 },
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(73).setInteractive({ useHandCursor: true }));
+        prevP.on('pointerdown', () => { this._storageContentPage--; this._refreshStoragePanel(); });
+        prevP.on('pointerover', () => prevP.setColor('#ffffff'));
+        prevP.on('pointerout', () => prevP.setColor('#88aacc'));
+      }
+      if (page < totalPages - 1) {
+        const nextP = add(this.add.text(left + 320, pageY, 'Next ▶', {
+          fontSize: '12px', color: '#88aacc', backgroundColor: '#1a1a33', padding: { x: 6, y: 2 },
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(73).setInteractive({ useHandCursor: true }));
+        nextP.on('pointerdown', () => { this._storageContentPage++; this._refreshStoragePanel(); });
+        nextP.on('pointerover', () => nextP.setColor('#ffffff'));
+        nextP.on('pointerout', () => nextP.setColor('#88aacc'));
+      }
     }
   }
 
@@ -1876,6 +1939,11 @@ export default class GameScene extends Phaser.Scene {
       for (const el of this._storagePanelEls) { this.removeHud(el); el.destroy(); }
       this._storagePanelEls = null;
     }
+    if (this._storageLabelSelect) {
+      this._storageLabelSelect.remove();
+      this._storageLabelSelect = null;
+    }
+    this._storageContentPage = 0;
   }
 
   _logout() {
@@ -2302,5 +2370,40 @@ export default class GameScene extends Phaser.Scene {
     for (const el of this._charMenuEls) el.destroy();
     this._charMenuEls = [];
     this._charPanel?.close();
+  }
+
+  // ── Entity Query Helpers (used by NPCBrain reflex layer) ────────────────────
+
+  /** Returns the nearest non-depleted world-object sprite within range, or null. */
+  getNearestOre(npc, rangeTiles = 8) {
+    let best = null, bestDist = rangeTiles * TILE_SIZE;
+    for (const [, wo] of Object.entries(this._worldObjSprites || {})) {
+      if (!wo || wo._depleted) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, wo.x, wo.y);
+      if (dist < bestDist) { bestDist = dist; best = wo; }
+    }
+    return best;
+  }
+
+  /** Returns the nearest living training dummy within range, or null. */
+  getNearestDummy(npc, rangeTiles = 8) {
+    let best = null, bestDist = rangeTiles * TILE_SIZE;
+    for (const dummy of (this.dummies ?? [])) {
+      if (dummy.isDead?.()) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, dummy.x, dummy.y);
+      if (dist < bestDist) { bestDist = dist; best = dummy; }
+    }
+    return best;
+  }
+
+  /** Returns array of remote NPC sprite entries within rangePixels of npc. */
+  getNearbyRemoteNpcs(npc, rangePixels) {
+    const result = [];
+    for (const [, entry] of Object.entries(this._remoteNPCSprites || {})) {
+      if (!entry?.sprite) continue;
+      const dist = Phaser.Math.Distance.Between(npc.x, npc.y, entry.sprite.x, entry.sprite.y);
+      if (dist <= rangePixels) result.push(entry);
+    }
+    return result;
   }
 }
