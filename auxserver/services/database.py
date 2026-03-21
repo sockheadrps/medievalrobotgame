@@ -3,11 +3,14 @@
 
 import hashlib
 import json
+import logging
 import sqlite3
 import threading
 from pathlib import Path
 
 from core.config import BASE_DIR
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = BASE_DIR / "data" / "game.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -405,7 +408,7 @@ def save_npc(npc_id: str, name: str, x: float, y: float, stats: dict, soul: dict
                 stats=excluded.stats, soul=excluded.soul
         """, (npc_id, name, x, y, json.dumps(stats), json.dumps(soul)))
     conn.commit()
-    print(f"[db] Saved NPC {npc_id}")
+    logger.debug("Saved NPC %s", npc_id)
     return {"ok": True, "id": npc_id}
 
 
@@ -414,7 +417,7 @@ def delete_npc(npc_id: str):
     conn = _get_conn()
     conn.execute("DELETE FROM npcs WHERE id = ?", (npc_id,))
     conn.commit()
-    print(f"[db] Deleted NPC {npc_id}")
+    logger.debug("Deleted NPC %s", npc_id)
 
 
 def load_npc(npc_id: str) -> dict | None:
@@ -429,7 +432,7 @@ def load_npc(npc_id: str) -> dict | None:
         "stats": json.loads(row["stats"]),
         "soul": json.loads(row["soul"]),
     }
-    print(f"[db] Loaded NPC {npc_id}")
+    logger.debug("Loaded NPC %s", npc_id)
     return data
 
 
@@ -694,7 +697,7 @@ def reset_game():
             state_json = '{}'
     """)
     conn.commit()
-    print("[db] Game reset — all world state and player stats wiped")
+    logger.info("Game reset — all world state and player stats wiped")
 
 
 # ── Mine state persistence ────────────────────────────────────────────────────
@@ -725,7 +728,7 @@ def ensure_dev_accounts():
     for username in ("test1", "test2"):
         if not player_exists(username):
             register_player(username, "test")
-            print(f"[db] Created dev account: {username}")
+            logger.info("Created dev account: %s", username)
         else:
             # Ensure password is "test" (in case it was changed)
             pw_hash = _hash_password("test")
@@ -753,7 +756,7 @@ def migrate_json_files():
                     save_player(username, data)
                     imported += 1
             except Exception as e:
-                print(f"[migrate] Skipping {f.name}: {e}")
+                logger.warning("migrate: Skipping %s: %s", f.name, e)
 
     # NPCs
     npcs_dir = BASE_DIR / "data" / "npcs"
@@ -772,7 +775,7 @@ def migrate_json_files():
                     )
                     imported += 1
             except Exception as e:
-                print(f"[migrate] Skipping {f.name}: {e}")
+                logger.warning("migrate: Skipping %s: %s", f.name, e)
 
     if imported > 0:
-        print(f"[migrate] Imported {imported} records from JSON files")
+        logger.info("migrate: Imported %d records from JSON files", imported)
