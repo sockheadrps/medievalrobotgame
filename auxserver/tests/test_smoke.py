@@ -57,3 +57,19 @@ def test_portals_imports():
     gs = GameState.__new__(GameState)  # bypass __init__ (avoids DB requirement)
     gs.portals = PortalService(gs)
     assert isinstance(gs.portals, PortalService)
+
+
+def test_all_services_import():
+    from services.combat import CombatService
+    from services.resources import ResourceService
+    from services.building import BuildingService
+    from services.npc_manager import NPCManager
+    from services.player_manager import PlayerManager
+    from services.portals import PortalService
+    # all imported without error
+    assert True
+
+
+def test_world_data_imports():
+    from services.world_data import TILE_SIZE, PORTALS, WORLD_OBJECT_INSTANCES
+    assert TILE_SIZE == 48
