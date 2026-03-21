@@ -36,7 +36,7 @@ export async function fetchPrompt(name, params = {}) {
   const key = name + JSON.stringify(params);
   if (!_promptCache[key]) {
     const qs = new URLSearchParams(params).toString();
-    const res = await fetch(`/api/prompts/${name}?${qs}`);
+    const res = await fetch(`${API_BASE}/api/prompts/${name}?${qs}`);
     const { prompt } = await res.json();
     _promptCache[key] = prompt;
   }

@@ -39,6 +39,8 @@ async def llm_models():
 @router.post("/llm/chat/completions")
 async def llm_chat_completions(request: Request):
     payload = await request.json()
+    # Always use the server-configured model, ignore whatever the client sent
+    payload["model"] = MODEL
     headers = {"Content-Type": "application/json"}
     if LLM_API_KEY:
         headers["Authorization"] = f"Bearer {LLM_API_KEY}"

@@ -196,6 +196,8 @@ async def game_loop():
                 "label": b.get("label", ""),
                 "stored": b.get("stored", {}),
             }
+            if b.get("asset_id"):
+                cb["asset_id"] = b["asset_id"]
             if b.get("hp") is not None:
                 cb["hp"] = b["hp"]
                 cb["maxHp"] = b.get("maxHp", b["hp"])

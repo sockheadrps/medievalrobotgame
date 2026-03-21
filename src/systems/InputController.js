@@ -218,7 +218,7 @@ export default class InputController {
       scene._toggleEscMenu();
     });
 
-    // E key — interact with nearby crate / furnace
+    // E key — interact with nearby crate
     scene.input.keyboard.on('keydown-E', () => {
       if (scene.chatBox?.isOpen() || scene._namingNPC || scene._playerDead) return;
 
@@ -231,22 +231,6 @@ export default class InputController {
       for (const crate of scene._crates) {
         if (crate.updateProximity(px, py)) {
           scene._openCrateUI(crate);
-          return;
-        }
-      }
-
-      // Check furnaces
-      for (const furnace of scene._furnaces) {
-        if (furnace.updateProximity(px, py)) {
-          scene._openFurnaceUI(furnace);
-          return;
-        }
-      }
-
-      // Check log cutters
-      for (const lc of scene._logCutters) {
-        if (lc.updateProximity(px, py)) {
-          scene._openLogCutterUI(lc);
           return;
         }
       }

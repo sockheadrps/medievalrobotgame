@@ -1,0 +1,27 @@
+{
+  "id": "crushing_wheel",
+  "label": "crushing wheel",
+  "sprite": {
+    "type": "tilemap",
+    "tileCol": 46,
+    "tileRow": 0
+  },
+  "station_type": "crusher",
+  "speed_bonus": 1,
+  "required_metallurgy": 0,
+  "fuel_type": "none",
+  "recipes": [
+    {
+      "input_item": "raw_iron_ore",
+      "input_qty": 10,
+      "output_item": "iron_nugget",
+      "output_min": 1,
+      "output_max": 5,
+      "process_time": 5
+    }
+  ],
+  "build_recipe": {
+    "bronze_bar": 50,
+    "planks": 25
+  }
+}

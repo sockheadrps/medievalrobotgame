@@ -177,7 +177,7 @@ export default class GameScene extends Phaser.Scene {
         this._stationViewer?.open(obj, stationDef);
         return;
       }
-      if (type === 'conveyor' || type === 'crate' || type === 'furnace' || type === 'log_cutter' || type === 'track' || type === 'gate' || type === 'fence') {
+      if (type === 'conveyor' || type === 'crate' || type === 'track' || type === 'gate' || type === 'fence') {
         const bid = obj._serverId;
         if (!bid) return;
         ptr._fgHandled = true;
@@ -1535,7 +1535,7 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  // ── Crate / Furnace interaction panels ─────────────────────────────────────
+  // ── Crate interaction panel ─────────────────────────────────────────────────
 
   _openCrateUI(crate) {
     this._closeStorageUI();
@@ -1544,39 +1544,23 @@ export default class GameScene extends Phaser.Scene {
     this._buildStoragePanel();
   }
 
-  _openFurnaceUI(furnace) {
-    this._closeStorageUI();
-    this._storageTarget = furnace;
-    this._storageType = 'furnace';
-    this._buildStoragePanel();
-  }
-
-  _openLogCutterUI(station) {
-    this._closeStorageUI();
-    this._storageTarget = station;
-    this._storageType = 'log_cutter';
-    this._buildStoragePanel();
-  }
-
   _buildStoragePanel() {
     const target = this._storageTarget;
     if (!target) return;
-    const isFurnace = this._storageType === 'furnace';
-    const isLogCutter = this._storageType === 'log_cutter';
     const els = [];
     const add = (obj) => { this.addHud(obj); els.push(obj); return obj; };
 
     const W = this._screenWidth();
     const H = this._screenHeight();
     const panelW = 420;
-    const panelH = (isFurnace || isLogCutter) ? 300 : 320;
+    const panelH = 320;
     const cx = W / 2, cy = H / 2;
     const left = cx - panelW / 2;
     const top = cy - panelH / 2;
 
-    const borderColor = isFurnace ? 0xff9944 : isLogCutter ? 0xccaa44 : 0x5566aa;
-    const title = isFurnace ? 'FURNACE' : isLogCutter ? 'LOG CUTTER' : 'STORAGE';
-    const titleColor = isFurnace ? '#ff9944' : isLogCutter ? '#ccaa44' : '#88bbff';
+    const borderColor = 0x5566aa;
+    const title = 'STORAGE';
+    const titleColor = '#88bbff';
 
     add(this.add.rectangle(cx, cy, panelW, panelH, 0x111122, 0.96)
       .setStrokeStyle(2, borderColor).setDepth(70));
@@ -1585,7 +1569,7 @@ export default class GameScene extends Phaser.Scene {
     }).setOrigin(0.5, 0).setDepth(71));
 
     // Label picker for crates — clickable Phaser text buttons (no DOM)
-    if (!isFurnace && !isLogCutter && target.setLabel) {
+    if (target.setLabel) {
       const LABEL_OPTIONS = [
         '(none)', 'raw_copper', 'raw_tin', 'bronze_bar',
         'logs', 'stones', 'copper', 'crystals',
@@ -1638,7 +1622,7 @@ export default class GameScene extends Phaser.Scene {
     }
 
     // Column headers
-    const headY = (isFurnace || isLogCutter) ? (top + 40) : (top + 56);
+    const headY = top + 56;
     add(this.add.text(left + 16, headY, 'Item', {
       fontSize: '11px', color: '#667788',
     }).setOrigin(0, 0).setScrollFactor(0).setDepth(71));
@@ -1684,84 +1668,38 @@ export default class GameScene extends Phaser.Scene {
     this._storageContentEls = [];
 
     const add = (obj) => { this.addHud(obj); this._storageContentEls.push(obj); return obj; };
-    const isFurnace = this._storageType === 'furnace';
-    const isLogCutter = this._storageType === 'log_cutter';
     const left = this._storagePanelLeft;
     let y = this._storageContentY;
     const stored = target.getStored();
     const inv = this.player?.inventory ?? {};
     const logs = this.player?.logs ?? 0;
 
-    if (isLogCutter) {
-      y = this._addStorageRow(add, left, y, 'Logs (input)', 'Wood', logs, stored['Wood'] ?? 0, true, false, true);
-
-      // Status line
-      const statusY = y + 2;
-      if (target._cutting) {
-        add(this.add.text(left + 210, statusY, '\u2699\uFE0F Cutting...', {
-          fontSize: '13px', color: '#ddcc44',
-        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
-      } else {
-        add(this.add.text(left + 210, statusY, 'Idle', {
-          fontSize: '13px', color: '#666666',
-        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
-      }
-      y += 24;
-
-      // Output — planks (withdraw only)
-      y = this._addStorageRow(add, left, y, 'Planks (output)', 'planks', 0, stored['planks'] ?? 0, false, true, false);
-    } else if (isFurnace) {
-      y = this._addStorageRow(add, left, y, 'Raw Copper', 'raw_copper', inv['raw_copper'] ?? 0, stored['raw_copper'] ?? 0, true, true, false);
-      y = this._addStorageRow(add, left, y, 'Raw Tin', 'raw_tin', inv['raw_tin'] ?? 0, stored['raw_tin'] ?? 0, true, true, false);
-      y = this._addStorageRow(add, left, y, 'Planks (fuel)', 'planks', inv['planks'] ?? 0, stored['planks'] ?? 0, true, true, false);
-
-      // Status line
-      const statusY = y + 2;
-      if (target._smelting) {
-        add(this.add.text(left + 210, statusY, '\uD83D\uDD25 Smelting...', {
-          fontSize: '13px', color: '#ffdd44',
-        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
-      } else if (target._burning) {
-        add(this.add.text(left + 210, statusY, '\uD83D\uDD25 Fire burning', {
-          fontSize: '13px', color: '#ff8844',
-        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
-      } else {
-        add(this.add.text(left + 210, statusY, 'Idle', {
-          fontSize: '13px', color: '#666666',
-        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
-      }
-      y += 24;
-
-      // Output — bronze bars (withdraw only)
-      y = this._addStorageRow(add, left, y, 'Bronze Bar', 'bronze_bar', inv['bronze_bar'] ?? 0, stored['bronze_bar'] ?? 0, false, true, false);
+    // Crate — if labelled, only show that item type; otherwise show all
+    const crateLabel = target.getLabel?.() || '';
+    let allKeys;
+    if (crateLabel) {
+      const labelKey = crateLabel === 'logs' ? 'Wood' : crateLabel;
+      allKeys = new Set([labelKey]);
     } else {
-      // Crate — if labelled, only show that item type; otherwise show all
-      const crateLabel = target.getLabel?.() || '';
-      let allKeys;
-      if (crateLabel) {
-        const labelKey = crateLabel === 'logs' ? 'Wood' : crateLabel;
-        allKeys = new Set([labelKey]);
-      } else {
-        allKeys = new Set([
-          ...Object.keys(stored).filter(k => stored[k] > 0),
-          ...Object.keys(inv).filter(k => inv[k] > 0),
-        ]);
-        // Also show logs
-        if (logs > 0 || (stored['Wood'] ?? 0) > 0) allKeys.add('Wood');
-      }
+      allKeys = new Set([
+        ...Object.keys(stored).filter(k => stored[k] > 0),
+        ...Object.keys(inv).filter(k => inv[k] > 0),
+      ]);
+      // Also show logs
+      if (logs > 0 || (stored['Wood'] ?? 0) > 0) allKeys.add('Wood');
+    }
 
-      if (allKeys.size === 0) {
-        add(this.add.text(left + 210, y + 8, 'Empty — deposit items from your inventory', {
-          fontSize: '12px', color: '#556677',
-        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
-      }
-      for (const key of allKeys) {
-        const isLogs = key === 'Wood';
-        const displayName = isLogs ? 'Logs' : key;
-        const pQty = isLogs ? logs : (inv[key] ?? 0);
-        const sQty = stored[key] ?? 0;
-        y = this._addStorageRow(add, left, y, displayName, key, pQty, sQty, true, true, isLogs);
-      }
+    if (allKeys.size === 0) {
+      add(this.add.text(left + 210, y + 8, 'Empty — deposit items from your inventory', {
+        fontSize: '12px', color: '#556677',
+      }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(72));
+    }
+    for (const key of allKeys) {
+      const isLogs = key === 'Wood';
+      const displayName = isLogs ? 'Logs' : key;
+      const pQty = isLogs ? logs : (inv[key] ?? 0);
+      const sQty = stored[key] ?? 0;
+      y = this._addStorageRow(add, left, y, displayName, key, pQty, sQty, true, true, isLogs);
     }
   }
 
