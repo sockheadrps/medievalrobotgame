@@ -29,6 +29,7 @@ import { PlacementSystem } from '../systems/PlacementSystem.js';
 import { TaskRecorder } from '../systems/TaskRecorder.js';
 import MineRenderer from '../systems/MineRenderer.js';
 import EntityManager from '../systems/EntityManager.js';
+import InputController from '../systems/InputController.js';
 import { Crate } from '../entities/Crate.js';
 import { Furnace } from '../entities/Furnace.js';
 import {
@@ -245,17 +246,6 @@ export default class GameScene extends Phaser.Scene {
       }
     });
 
-    // Scroll-wheel zoom (current zoom=1 is the max-out; scroll to zoom in)
-    this._zoomLevel = 1;
-    this.input.mouse?.disableContextMenu();
-    this.input.on('wheel', (_pointer, _gos, _dx, dy) => {
-      if (this.chatBox?.isOpen()) return; // don't zoom while typing
-      const step = 0.1;
-      this._zoomLevel += dy < 0 ? step : -step;
-      this._zoomLevel = Phaser.Math.Clamp(this._zoomLevel, 1, 3);
-      this.cameras.main.setZoom(this._zoomLevel);
-    });
-
     // ── Player unit frame (top-left) ──────────────────────────────────────────
     this._topHudBand = this.addHud(
       this.add.rectangle(screenW / 2, TOP_HUD_MARGIN / 2, screenW, TOP_HUD_MARGIN, 0x0b1020, 0.96)
@@ -309,102 +299,6 @@ export default class GameScene extends Phaser.Scene {
       padding: { x: 8, y: 4 },
     }).setDepth(50).setOrigin(1, 0));
 
-    // NPC double-click selection
-    this.input.on('pointerdown', (ptr) => {
-      if (ptr._fgHandled) {
-        ptr._fgHandled = false;
-        return;
-      }
-      if (this._hotbarPickerSlot != null) this._closeHotbarPicker();
-      if (this._isPointerOverContextMenu(ptr)) return;
-      // Check if click is inside building context menu
-      if (this._buildingContextBounds) {
-        const b = this._buildingContextBounds;
-        if (ptr.x >= b.x && ptr.x <= b.x + b.width && ptr.y >= b.y && ptr.y <= b.y + b.height) return;
-        this._closeBuildingContextMenu();
-      }
-      if (!this._isPointerInWorldViewport(ptr)) {
-        if (ptr.rightButtonDown() || ptr.button === 2) this._closeContextMenu();
-        return;
-      }
-      const isRightClick = ptr.rightButtonDown() || ptr.button === 2;
-      const npc = this._findNpcAtPointer(ptr);
-      const remoteEntity = !npc ? this._findRemoteEntityAtPointer(ptr) : null;
-
-      if (npc) {
-        this._handleOwnNPCPointerDown(npc, ptr);
-        return;
-      }
-
-      if (remoteEntity && isRightClick) {
-        this._selectRemote(remoteEntity);
-        this._openContextMenu(remoteEntity, ptr);
-        return;
-      }
-
-      if (remoteEntity && this._armedAction === 'attack' && !isRightClick) {
-        ptr._fgHandled = true;
-        if (this._isAttackableEntity(remoteEntity)) this._executeAttack(remoteEntity);
-        // Stay in attack mode so player can keep clicking to attack
-        return;
-      }
-
-      if (this._armedAction === 'plant_seed' && !isRightClick) {
-        const worldX = ptr.worldX;
-        const worldY = ptr.worldY;
-        this._conn?.send({ type: 'plant_seed', x: worldX, y: worldY });
-        // Keep armed so player can keep clicking multiple soil tiles
-        return;
-      }
-
-      // Right-click on dummy or ki target — delete it
-      if (isRightClick) {
-        const worldX = ptr.worldX;
-        const worldY = ptr.worldY;
-        const clickRange = TILE_SIZE * 0.8;
-
-        // Check dummies
-        for (const dummy of (this.entities.dummies ?? [])) {
-          if (dummy.isDead?.()) continue;
-          const d = Phaser.Math.Distance.Between(worldX, worldY, dummy.x, dummy.y);
-          if (d < clickRange && dummy._serverId) {
-            this._conn?.send({ type: 'delete_dummy', dummy_id: dummy._serverId });
-            this._closeContextMenu();
-            return;
-          }
-        }
-
-        // Check ki targets
-        for (const [ktid, ktSprite] of Object.entries(this._kiTargetSprites || {})) {
-          const d = Phaser.Math.Distance.Between(worldX, worldY, ktSprite.x, ktSprite.y);
-          if (d < clickRange) {
-            this._conn?.send({ type: 'delete_ki_target', target_id: ktid });
-            this._closeContextMenu();
-            return;
-          }
-        }
-
-        this._closeContextMenu();
-        return;
-      }
-
-      // Mine tile click (left-click on cave_01 when not on an NPC/entity)
-      if (this._currentMap === 'cave_01' && this._mineRenderer.isActive && !isRightClick) {
-        const worldX = ptr.worldX;
-        const worldY = ptr.worldY;
-        const { col, row } = worldToTile(worldX, worldY);
-        if (this._mineRenderer.getTileKey(col, row)) {
-          this._conn?.send({ type: 'mine_tile', col, row });
-          return;
-        }
-      }
-
-      this._closeContextMenu();
-      if (this._armedAction) {
-        this._disarmActionMode();
-      }
-    });
-
     // Task runners + brains
     this._taskRunners = new Map();
     this._npcBrains   = new Map();
@@ -438,147 +332,20 @@ export default class GameScene extends Phaser.Scene {
       }
     });
 
-    // Enter key — open chat
-    this.input.keyboard.on('keydown', (event) => {
-      if (this._namingNPC || this._escMenuOpen || this._playerKnockedOut) return;
-      if (event.key === 'Enter' && !this.chatBox.isOpen()) {
-        if (this._getChatTarget()) this.chatBox.open();
-      }
-    });
-
-    // Tab key — cycle through nearby targets.
-    // Priority: own NPCs by distance, then remote players/NPCs by distance.
-    this.input.keyboard.on('keydown-TAB', (event) => {
-      event.preventDefault();
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._playerKnockedOut) return;
-      const cycle = this._buildTabCycleList();
-      if (cycle.length === 0) return;
-
-      const current = this._focusedRemote || this.selectedNPC || null;
-      const curIdx = current ? cycle.findIndex(entry => entry.entity === current) : -1;
-      const next = cycle[(curIdx + 1 + cycle.length) % cycle.length];
-      if (!next) return;
-
-      if (next.kind === 'own_npc') this._selectNPC(next.entity);
-      else this._selectRemote(next.entity);
-    });
-
-    // B key — build NPC (client-side, NPCs stay local)
-    this.input.keyboard.on('keydown-B', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._playerKnockedOut) return;
-      this._tryBuildNPC();
-    });
-
-    // T key — build training dummy (server-side)
-    this.input.keyboard.on('keydown-T', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._playerKnockedOut) return;
-      this._tryBuildDummy();
-    });
-
-    // G key — drop carried entity
-    this.input.keyboard.on('keydown-G', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC) return;
-      if (this.player?._carrying) {
-        this._conn?.send({ type: 'drop_carried' });
-      }
-    });
-
-    // Q key — admin menu
+    // Q key admin state
     this._adminOpen = false;
     this._adminPanel = null;
-    this.input.keyboard.on('keydown-Q', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen) return;
-      this._toggleAdmin();
-    });
-    this.input.keyboard.on('keydown-LEFT', () => {
-      if (!this._adminOpen) return;
-      this._adminPage = Math.max(1, (this._adminPage || 1) - 1);
-      this._renderAdminPanel();
-    });
-    this.input.keyboard.on('keydown-RIGHT', () => {
-      if (!this._adminOpen) return;
-      this._adminPage = Math.min(3, (this._adminPage || 1) + 1);
-      this._renderAdminPanel();
-    });
 
-    // Number keys — hotbar actions (1-6)
-    this.input.keyboard.on('keydown', (event) => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._inventoryOpen || this._playerKnockedOut) return;
-      const slot = parseInt(event.key, 10);
-      if (slot >= 1 && slot <= HOTBAR_SLOT_COUNT) {
-        this._useHotbarSlot(slot - 1);
-      }
-    });
-
-    // I key — toggle inventory
-    this.input.keyboard.on('keydown-I', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._playerKnockedOut) return;
-      this._toggleInventory();
-    });
-
-    // Space bar — fire ki blast
-    this.input.keyboard.on('keydown-SPACE', (event) => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._inventoryOpen || this._charMenuOpen || this._playerKnockedOut) return;
-      event.preventDefault();
-      this._fireKiBlast();
-    });
-
-    // C key — toggle character menu
+    // C key character menu state
     this._charMenuOpen = false;
     this._charMenuEls = [];
-    this.input.keyboard.on('keydown-C', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._escMenuOpen || this._inventoryOpen || this._playerKnockedOut) return;
-      this._toggleCharMenu();
-    });
 
-    // Escape key — toggle pause/menu
+    // Escape key menu state
     this._escMenuOpen = false;
     this._escMenuEls = null;
-    this.input.keyboard.on('keydown-ESC', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC) return;
-      if (this._storageOpen) { this._closeStorageUI(); return; }
-      if (this._charMenuOpen) { this._closeCharMenu(); return; }
-      if (this._inventoryOpen) { this._closeInventory(); return; }
-      if (this._contextMenuEls) { this._closeContextMenu(); return; }
-      if (this._buildingContextEls) { this._closeBuildingContextMenu(); return; }
-      if (this._armedAction) { this._disarmActionMode(); return; }
-      if (this.selectedNPC || this._focusedRemote) { this._clearSelection(); return; }
-      this._toggleEscMenu();
-    });
 
-    // E key — interact with nearby crate / furnace
-    this.input.keyboard.on('keydown-E', () => {
-      if (this.chatBox?.isOpen() || this._namingNPC || this._playerDead) return;
-
-      // If storage panel is open, close it
-      if (this._storageOpen) { this._closeStorageUI(); return; }
-
-      const px = this.player.x, py = this.player.y;
-
-      // Check crates
-      for (const crate of this._crates) {
-        if (crate.updateProximity(px, py)) {
-          this._openCrateUI(crate);
-          return;
-        }
-      }
-
-      // Check furnaces
-      for (const furnace of this._furnaces) {
-        if (furnace.updateProximity(px, py)) {
-          this._openFurnaceUI(furnace);
-          return;
-        }
-      }
-
-      // Check log cutters
-      for (const lc of this._logCutters) {
-        if (lc.updateProximity(px, py)) {
-          this._openLogCutterUI(lc);
-          return;
-        }
-      }
-    });
+    // Input controller — keyboard + pointer bindings
+    this._input = new InputController(this);
 
     // Auto-save NPCs
     this.time.addEvent({
@@ -686,6 +453,8 @@ export default class GameScene extends Phaser.Scene {
   }
 
   update(time, delta) {
+    this._input.update();
+
     // ── Send input to server + client-side prediction ─────────────────────────
     if (this._conn.connected && !this.chatBox?.isOpen() && !this.player._punching && !this._namingNPC && !this._playerDead && !this._playerKnockedOut && !this._escMenuOpen && !this._inventoryOpen && !this._charMenuOpen) {
       const keys = this.player._keys;
