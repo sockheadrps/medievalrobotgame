@@ -36,6 +36,27 @@ def _migrate_v1(conn):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
 
 
+def _migrate_v2(conn):
+    """Add indexes on frequently-queried columns."""
+    # players.username is already the PRIMARY KEY (auto-indexed); index on it
+    # is redundant but harmless — kept for explicitness.
+    # Note: players has no separate 'name' column; username is the identifier.
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_players_username
+        ON players(username)
+    """)
+    # npcs has no owner column — index buildings(kind) and buildings(owner)
+    # which are the hot columns in load_buildings / building lookups.
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_buildings_kind
+        ON buildings(kind)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_buildings_owner
+        ON buildings(owner)
+    """)
+
+
 def init_db():
     """Create tables if they don't exist."""
     conn = _get_conn()
@@ -53,6 +74,10 @@ def init_db():
     if current < 1:
         _migrate_v1(conn)
         conn.execute("INSERT OR REPLACE INTO schema_version VALUES (1)")
+        current = 1
+    if current < 2:
+        _migrate_v2(conn)
+        conn.execute("INSERT OR REPLACE INTO schema_version VALUES (2)")
     conn.commit()
 
     conn.executescript("""
