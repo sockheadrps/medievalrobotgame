@@ -1289,33 +1289,40 @@ function renderSTRecipes() {
     const r = recipes[i];
     const card = document.createElement('div');
     card.className = 'recipe-card';
+
+    const inputRows = Object.entries(r.inputs || {}).map(([res, qty], j) =>
+      `<div class="ing-row">
+        <input class="ing-res" value="${res}" oninput="updateSTRecipeDict(this, ${i}, 'inputs', ${j})" />
+        <input class="ing-amt" type="number" value="${qty}" min="1" oninput="updateSTRecipeDictQty(this, ${i}, 'inputs', ${j})" />
+        <button onclick="removeSTRecipeDictRow(${i}, 'inputs', '${res}')">x</button>
+      </div>`
+    ).join('');
+
+    const outputRows = Object.entries(r.outputs || {}).map(([res, qty], j) =>
+      `<div class="ing-row">
+        <input class="ing-res" value="${res}" oninput="updateSTRecipeDict(this, ${i}, 'outputs', ${j})" />
+        <input class="ing-amt" type="number" value="${qty}" min="1" oninput="updateSTRecipeDictQty(this, ${i}, 'outputs', ${j})" />
+        <button onclick="removeSTRecipeDictRow(${i}, 'outputs', '${res}')">x</button>
+      </div>`
+    ).join('');
+
     card.innerHTML = `
       <div class="recipe-card-header">
         <span>Recipe ${i + 1}</span>
         <button onclick="removeSTRecipe(${i})">x</button>
       </div>
+      <div class="section-label">Inputs</div>
+      <div id="stRecipeInputs_${i}">${inputRows}</div>
+      <button class="btn-add-row" onclick="addSTRecipeDictRow(${i}, 'inputs')">+ Input</button>
+      <div class="section-label">Outputs</div>
+      <div id="stRecipeOutputs_${i}">${outputRows}</div>
+      <button class="btn-add-row" onclick="addSTRecipeDictRow(${i}, 'outputs')">+ Output</button>
       <div class="form-row">
-        <div class="form-group"><label>Input Item</label>
-          <select data-i="${i}" data-f="input_item" onchange="updateSTRecipeField(this)">${_itemOptions(r.input_item)}</select>
+        <div class="form-group"><label>Fuel Cost</label>
+          <input type="number" value="${r.fuel_cost ?? 0}" min="0" data-i="${i}" data-f="fuel_cost" onchange="updateSTRecipeScalar(this)" />
         </div>
-        <div class="form-group"><label>Input Qty</label>
-          <input type="number" value="${r.input_qty ?? 1}" min="1" data-i="${i}" data-f="input_qty" onchange="updateSTRecipeField(this)" />
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Output Item</label>
-          <select data-i="${i}" data-f="output_item" onchange="updateSTRecipeField(this)">${_itemOptions(r.output_item)}</select>
-        </div>
-        <div class="form-group"><label>Output Min</label>
-          <input type="number" value="${r.output_min ?? 1}" min="1" data-i="${i}" data-f="output_min" onchange="updateSTRecipeField(this)" />
-        </div>
-        <div class="form-group"><label>Output Max</label>
-          <input type="number" value="${r.output_max ?? 1}" min="1" data-i="${i}" data-f="output_max" onchange="updateSTRecipeField(this)" />
-        </div>
-      </div>
-      <div class="form-row">
         <div class="form-group"><label>Process Time (s)</label>
-          <input type="number" value="${r.process_time ?? 5}" min="0.5" step="0.5" data-i="${i}" data-f="process_time" onchange="updateSTRecipeField(this)" />
+          <input type="number" value="${r.process_time ?? 5}" min="0.5" step="0.5" data-i="${i}" data-f="process_time" onchange="updateSTRecipeScalar(this)" />
         </div>
       </div>
     `;
@@ -1325,10 +1332,10 @@ function renderSTRecipes() {
 
 function addSTRecipe() {
   selectedST.recipes = selectedST.recipes || [];
-  const defaultItem = items.length > 0 ? items[0].id : '';
   selectedST.recipes.push({
-    input_item: defaultItem, input_qty: 10,
-    output_item: defaultItem, output_min: 2, output_max: 5,
+    inputs: {},
+    outputs: {},
+    fuel_cost: 0,
     process_time: 5.0,
   });
   renderSTRecipes();
@@ -1339,13 +1346,39 @@ function removeSTRecipe(i) {
   renderSTRecipes();
 }
 
-function updateSTRecipeField(el) {
+function updateSTRecipeScalar(el) {
   const i = Number(el.dataset.i);
   const f = el.dataset.f;
-  if (f === 'input_item' || f === 'output_item') {
-    selectedST.recipes[i][f] = el.value;
-  } else {
-    selectedST.recipes[i][f] = Number(el.value);
+  selectedST.recipes[i][f] = Number(el.value);
+}
+
+function addSTRecipeDictRow(i, side) {
+  if (!selectedST.recipes[i][side]) selectedST.recipes[i][side] = {};
+  selectedST.recipes[i][side][''] = 1;
+  renderSTRecipes();
+}
+
+function removeSTRecipeDictRow(i, side, res) {
+  delete selectedST.recipes[i][side][res];
+  renderSTRecipes();
+}
+
+function updateSTRecipeDict(el, i, side, j) {
+  const dict = selectedST.recipes[i][side];
+  const keys = Object.keys(dict);
+  if (keys[j] !== undefined) {
+    const oldKey = keys[j];
+    const val = dict[oldKey];
+    delete dict[oldKey];
+    dict[el.value] = val;
+  }
+}
+
+function updateSTRecipeDictQty(el, i, side, j) {
+  const dict = selectedST.recipes[i][side];
+  const keys = Object.keys(dict);
+  if (keys[j] !== undefined) {
+    dict[keys[j]] = Number(el.value);
   }
 }
 
