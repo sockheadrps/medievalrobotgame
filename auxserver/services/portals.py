@@ -1,10 +1,9 @@
 """Portal & map transition: detection, spawn resolution, map init."""
 
 import json
-import re
 from pathlib import Path
 
-from services.game_state import PORTALS, MINECART_PORTALS, TILE_SIZE, tile_pos
+from services.game_state import PORTALS, TILE_SIZE
 
 
 class PortalService:
@@ -20,32 +19,6 @@ class PortalService:
             if portal["from_map"] == actor_map and portal["tile_col"] == col and portal["tile_row"] == row:
                 return portal
         return None
-
-    def handle_minecart_portal(self, pid, data):
-        """Cart reached a minecart_exit tile — route it to the entrance on another map."""
-        p = self.gs.players.get(pid)
-        if not p:
-            return
-        player_map = p.get("map", "level_01")
-        col = data.get("col")
-        row = data.get("row")
-        resource = data.get("resource", "planks")
-        amount = int(data.get("amount", 1))
-        if col is None or row is None:
-            return
-
-        for portal in MINECART_PORTALS:
-            if (portal["from_map"] == player_map
-                    and portal["tile_col"] == col
-                    and portal["tile_row"] == row):
-                self.gs.pending_carts.append({
-                    "map": portal["to_map"],
-                    "col": portal["entrance_col"],
-                    "row": portal["entrance_row"],
-                    "resource": resource,
-                    "amount": amount,
-                })
-                return
 
     def get_spawn_point_for_map(self, map_name: str):
         """Return (col, row) spawn point for a given map name from portal definitions, or None."""

@@ -321,16 +321,6 @@ def init_world_objects():
     WORLD_OBJECT_INSTANCES.update(_load_world_objects())
 
 
-def _check_portal(actor: dict):
-    """Return matching portal if actor is standing on one, else None."""
-    col = int(actor["x"] // TILE_SIZE)
-    row = int(actor["y"] // TILE_SIZE)
-    actor_map = actor.get("map", "level_01")
-    for portal in PORTALS:
-        if portal["from_map"] == actor_map and portal["tile_col"] == col and portal["tile_row"] == row:
-            return portal
-    return None
-
 
 def _is_collision_tile(x: float, y: float) -> bool:
     """Return True if pixel position (x,y) falls inside a collision tile."""
@@ -1223,6 +1213,11 @@ class GameState:
     def _npc_ki_blast_ki_target(self, owner_pid, npc_id, target_id):
         return self.combat._npc_ki_blast_ki_target(owner_pid, npc_id, target_id)
 
+    # ── Portal helpers ─────────────────────────────────────────────────────────
+
+    def get_spawn_point_for_map(self, map_name):
+        return self.portals.get_spawn_point_for_map(map_name)
+
     # ── Minecart Portal ────────────────────────────────────────────────────────
 
     def _handle_minecart_portal(self, pid, data):
@@ -1493,7 +1488,7 @@ class GameState:
                 p["x"] = new_x
                 p["y"] = new_y
                 # Portal check
-                portal = _check_portal(p)
+                portal = self.portals.check_portal(p)
                 if portal:
                     tx, ty = tile_pos(portal["spawn_col"], portal["spawn_row"])
                     p["x"] = tx
@@ -1538,7 +1533,7 @@ class GameState:
                     npc["x"] = new_nx
                     npc["y"] = new_ny
                 npc.setdefault("map", "level_01")
-                portal = _check_portal(npc)
+                portal = self.portals.check_portal(npc)
                 if portal:
                     tx2, ty2 = tile_pos(portal["spawn_col"], portal["spawn_row"])
                     npc["x"] = tx2
