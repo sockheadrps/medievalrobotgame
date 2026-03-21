@@ -1,5 +1,4 @@
 import Phaser from 'phaser';
-import { buildTilemap, buildTilemapFromData } from '../systems/TilemapBuilder.js';
 import { Player }       from '../entities/Player.js';
 import { RemotePlayer } from '../entities/RemotePlayer.js';
 import { Tree }         from '../entities/Tree.js';
@@ -31,6 +30,7 @@ import MineRenderer from '../systems/MineRenderer.js';
 import EntityManager from '../systems/EntityManager.js';
 import InputController from '../systems/InputController.js';
 import MovementController from '../systems/MovementController.js';
+import MapManager from '../systems/MapManager.js';
 import { Crate } from '../entities/Crate.js';
 import { Furnace } from '../entities/Furnace.js';
 import {
@@ -176,6 +176,9 @@ export default class GameScene extends Phaser.Scene {
     this._placement = new PlacementSystem(this, this.grid, this._conveyors);
     this._taskRecorder = new TaskRecorder(this);
 
+    // Map manager — handles map loading, bounds, tile images, collision group
+    this._mapManager = new MapManager(this);
+
     // Right-click on buildings → context menu to remove
     this.events.on('object-right-clicked', ({ type, obj, ptr }) => {
       if (type === 'conveyor' || type === 'crate' || type === 'furnace' || type === 'log_cutter' || type === 'track' || type === 'gate' || type === 'fence') {
@@ -185,7 +188,7 @@ export default class GameScene extends Phaser.Scene {
         this._openBuildingContextMenu(bid, type, ptr, obj);
       }
     });
-    this._loadMap();
+    this._mapManager.loadMap().catch(err => console.error('[map] Initial load failed:', err));
 
     // Player — will be repositioned by server
     const sp = tilePos(10, 10);
@@ -647,21 +650,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _applyMapBounds(mapName, cols, rows) {
-    if (mapName === 'cave_01') {
-      // Expand bounds for mineable area (-15..55 tiles beyond base 40x40)
-      const EXT = 15;
-      const minX = -EXT * TILE_SIZE;
-      const minY = -EXT * TILE_SIZE;
-      const totalW = (cols + EXT * 2) * TILE_SIZE;
-      const totalH = (rows + EXT * 2) * TILE_SIZE;
-      this.physics.world.setBounds(minX, minY, totalW, totalH);
-      this.cameras.main.setBounds(minX, minY, totalW, totalH);
-    } else {
-      const worldW = cols * TILE_SIZE;
-      const worldH = rows * TILE_SIZE;
-      this.physics.world.setBounds(0, 0, worldW, worldH);
-      this.cameras.main.setBounds(0, 0, worldW, worldH);
-    }
+    this._mapManager.applyMapBounds(mapName, cols, rows);
   }
 
   _syncBuildingStored() {
@@ -830,166 +819,20 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // ── Map loading ────────────────────────────────────────────────────────────────
+  // Logic lives in MapManager; these thin wrappers preserve the existing call sites.
 
   async _loadMap() {
-    try {
-      const res = await fetch(`${API_BASE}/load-map?name=level_01`);
-      if (!res.ok) throw new Error(`Map load failed: ${res.status}`);
-      const mapData = await res.json();
-
-      const { treePositions, rockSpawnTiles, collisionRects, tileImages, width, height } = buildTilemapFromData(this, mapData);
-      this._currentMap = mapData.name || 'level_01';
-      this._tileImages = tileImages;
-
-      // Update world bounds to match map
-      this._mapCols = width;
-      this._mapRows = height;
-      this._applyMapBounds(this._currentMap, width, height);
-
-      // Parse minecart exit tiles from map items
-      this._minecartExitTiles = (mapData.mapItems || [])
-        .filter(it => (it.label || '').startsWith('minecart_exit:'))
-        .map(it => ({ col: it.tileCol, row: it.tileRow, target: it.label.split(':')[1] }));
-
-      // Parse + shade minecart entrance tiles
-      this._clearMinecartMarkers();
-      (mapData.mapItems || [])
-        .filter(it => (it.label || '') === 'minecart_entrance')
-        .forEach(it => this._addMinecartMarker(it.tileCol, it.tileRow, 0x3366ff));
-      (mapData.mapItems || [])
-        .filter(it => (it.label || '').startsWith('minecart_exit:'))
-        .forEach(it => this._addMinecartMarker(it.tileCol, it.tileRow, 0xff6633));
-
-      // Spawn trees at positions found in the map
-      this._spawnTreesAt(treePositions);
-
-      // Create static physics bodies for collision tiles
-      if (!this._collisionGroup) {
-        this._collisionGroup = this.physics.add.staticGroup();
-      }
-      for (const { x, y, w, h } of collisionRects) {
-        const body = this.add.rectangle(x + w / 2, y + h / 2, w, h);
-        this.physics.add.existing(body, true);
-        this._collisionGroup.add(body);
-      }
-      if (this.player) {
-        this._movement.addCollisionGroup(this._collisionGroup);
-      }
-
-      console.log(`[map] Loaded level_01: ${width}x${height}, ${treePositions.length} trees, ${rockSpawnTiles.length} rock spawn tiles, ${collisionRects.length} collision tiles`);
-    } catch (e) {
-      console.warn('[map] Failed to load level1, using fallback:', e.message);
-      buildTilemap(this, this._mapCols, this._mapRows);
-      this._spawnTreesFallback();
-    }
+    return this._mapManager.loadMap();
   }
 
   async _changeMap(newMap) {
     if (this._changingMap) return;
     this._changingMap = true;
-
-    // Register background NPCs — NPCs staying on the old map with active tasks
-    this._registerBackgroundNPCs(this._currentMap, newMap);
-
-    // Determine which NPCs stay on old map vs come to new map
-    for (const npc of this.entities.npcs) {
-      if (!npc._map) npc._map = this._currentMap;
-      const runner = this._taskRunners.get(npc.id);
-      const status = runner?.getStatus();
-      const task = status?.tasks?.[0];
-      const staysOnOldMap = npc._map === this._currentMap
-        && task && ['custom_task', 'mine_ore', 'gather'].includes(task.task);
-      if (staysOnOldMap) {
-        // NPC stays behind — hide it
-        npc.setVisible(false);
-        if (npc.body) npc.body.enable = false;
-      } else {
-        // NPC comes with player — update its map
-        npc._map = newMap;
-      }
-    }
-
-    // Fade out
-    this.cameras.main.fadeOut(300, 0, 0, 0);
-    await new Promise(r => setTimeout(r, 320));
-
-    // Destroy old tile images
-    for (const img of (this._tileImages || [])) img?.destroy();
-    this._tileImages = [];
-
-    // Destroy old trees
-    for (const tree of (this.entities.trees || [])) tree?.destroy?.();
-    this.entities.trees = [];
-
-    // Destroy old collision group
-    if (this._collisionGroup) {
-      this._collisionGroup.clear(true, true);
-      this._collisionGroup = null;
-    }
-
-    // Load new map
     try {
-      const res = await fetch(`${API_BASE}/load-map?name=${newMap}`);
-      if (!res.ok) throw new Error(`Map load failed: ${res.status}`);
-      const mapData = await res.json();
-      const { treePositions, rockSpawnTiles, collisionRects, tileImages, width, height } = buildTilemapFromData(this, mapData);
-      this._currentMap = newMap;
-      this._tileImages = tileImages;
-      this._mapCols = width;
-      this._mapRows = height;
-      this._applyMapBounds(newMap, width, height);
-
-      // Parse minecart exit tiles from map items
-      this._minecartExitTiles = (mapData.mapItems || [])
-        .filter(it => (it.label || '').startsWith('minecart_exit:'))
-        .map(it => ({ col: it.tileCol, row: it.tileRow, target: it.label.split(':')[1] }));
-
-      // Shade minecart entrance/exit markers
-      this._clearMinecartMarkers();
-      (mapData.mapItems || [])
-        .filter(it => (it.label || '') === 'minecart_entrance')
-        .forEach(it => this._addMinecartMarker(it.tileCol, it.tileRow, 0x3366ff));
-      (mapData.mapItems || [])
-        .filter(it => (it.label || '').startsWith('minecart_exit:'))
-        .forEach(it => this._addMinecartMarker(it.tileCol, it.tileRow, 0xff6633));
-
-      this._spawnTreesAt(treePositions);
-
-      // Collision group
-      this._collisionGroup = this.physics.add.staticGroup();
-      for (const { x, y, w, h } of collisionRects) {
-        const body = this.add.rectangle(x + w / 2, y + h / 2, w, h);
-        this.physics.add.existing(body, true);
-        this._collisionGroup.add(body);
-      }
-      if (this.player) {
-        this._movement.addCollisionGroup(this._collisionGroup);
-      }
-
-      // Mine renderer: request tiles when entering cave, destroy when leaving
-      if (newMap === 'cave_01') {
-        this._conn?.send({ type: 'request_mine_tiles' });
-      } else {
-        this._mineRenderer.destroy();
-      }
-    } catch (e) {
-      console.warn('[map] Failed to change map:', e.message);
+      await this._mapManager.changeMap(newMap);
+    } finally {
+      this._changingMap = false;
     }
-
-    // Unregister background NPCs that are on the NEW map (player just arrived)
-    this._unregisterBackgroundNPCs(newMap);
-
-    // Show NPCs that are on the new map, keep hiding others
-    for (const npc of this.entities.npcs) {
-      if (npc._map === newMap || !npc._map) {
-        npc.setVisible(true);
-        if (npc.body) npc.body.enable = true;
-      }
-    }
-
-    // Fade back in
-    this.cameras.main.fadeIn(300, 0, 0, 0);
-    this._changingMap = false;
   }
 
   /** Register NPCs with active tasks as background workers when leaving their map. */
