@@ -1,5 +1,9 @@
 """Building system: fences, anvils, dummies, ki targets, conveyors, carts, tracks."""
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from services.game_state import (
     TILE_SIZE,
     ANVIL_STONE_COST,
@@ -78,7 +82,7 @@ class BuildingService:
             "_ki_target_maxHp": KI_TARGET_HP,
             "_ki_target_owner": pid,
         })
-        print(f"[building] {pid} built ki target {item_id} at ({x:.0f}, {y:.0f})")
+        logger.debug("%s built ki target %s at (%.0f, %.0f)", pid, item_id, x, y)
         return item_id
 
     # ── Minecart Portal ────────────────────────────────────────────────────────
@@ -115,7 +119,7 @@ class BuildingService:
         """Place a building (conveyor, crate, furnace, log_cutter, track, gate, fence) at a grid tile."""
         kind = data.get("kind")
         if kind not in ("conveyor", "crate", "furnace", "log_cutter", "etrainer", "track", "gate", "fence"):
-            print(f"[building] _place_building rejected unknown kind={kind}")
+            logger.warning("_place_building rejected unknown kind=%s", kind)
             return
         col = data.get("col")
         row = data.get("row")
@@ -168,7 +172,7 @@ class BuildingService:
                 "map": player_map,
             }
         self.gs.buildings[bid] = bld
-        print(f"[building] {pid} placed {kind} at ({col},{row}) -> {bid}")
+        logger.debug("%s placed %s at (%d,%d) -> %s", pid, kind, col, row, bid)
 
     # ── Barrier Tiles ──────────────────────────────────────────────────────────
 
@@ -213,7 +217,7 @@ class BuildingService:
             "map": p.get("map", "level_01"),
             "dead": False,
         }
-        print(f"[building] {pid} built anvil {aid} at ({x:.0f}, {y:.0f})")
+        logger.debug("%s built anvil %s at (%.0f, %.0f)", pid, aid, x, y)
 
     # ── Building Grid Helpers ──────────────────────────────────────────────────
 
@@ -285,7 +289,7 @@ class BuildingService:
                             found = True
                             break
                     if not found and not b.get("_conv_no_out_logged"):
-                        print(f"[conv] {bid} at ({b['col']},{b['row']}) dir={in_dir}: no output neighbor in any direction")
+                        logger.debug("conv %s at (%d,%d) dir=%s: no output neighbor in any direction", bid, b['col'], b['row'], in_dir)
                         b["_conv_no_out_logged"] = True
 
                 dc, dr = self._DIR_DELTA.get(out_dir, (1, 0))
@@ -301,7 +305,7 @@ class BuildingService:
                     nb_bid, nb = self._building_at(out_col, out_row, bmap)
 
                     if not nb and not b.get("_conv_no_out_logged"):
-                        print(f"[conv] {bid} at ({b['col']},{b['row']}) dir={in_dir} out_dir={out_dir} → ({out_col},{out_row}) NO NEIGHBOR, ejecting {held['resource']}")
+                        logger.debug("conv %s at (%d,%d) dir=%s out_dir=%s -> (%d,%d) NO NEIGHBOR, ejecting %s", bid, b['col'], b['row'], in_dir, out_dir, out_col, out_row, held['resource'])
                         b["_conv_no_out_logged"] = True
 
                     # Push to next empty conveyor
