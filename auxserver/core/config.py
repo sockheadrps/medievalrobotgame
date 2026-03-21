@@ -35,7 +35,7 @@ ASSETS_DIR = BASE_DIR.parent / "assets"
 WORLD_OBJECTS_DIR = ASSETS_DIR / "world_objects"
 EQUIPMENT_DIR = ASSETS_DIR / "equipment"
 ITEMS_DIR = ASSETS_DIR / "items"
-STATIONS_DIR = ASSETS_DIR / "stations"
+STATIONS_DIR = ASSETS_DIR / "crafting_stations"
 
 PROMPTS_DIR = BASE_DIR / "prompts"
 MAPS_DIR = BASE_DIR / "maps"

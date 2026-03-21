@@ -119,8 +119,6 @@ async def del_station(station_id: str):
 
 @router.get("/crafting_stations")
 async def get_crafting_stations_manifest():
-    """Returns live-loaded crafting station definitions from the asset registry."""
-    return {
-        sid: st.model_dump()
-        for sid, st in asset_registry.crafting_stations.items()
-    }
+    """Returns crafting station definitions read live from disk."""
+    stations = list_stations()
+    return {st["id"]: st for st in stations if st.get("id")}
