@@ -262,6 +262,7 @@ export class GatherTaskHandler {
     }
     npc.stones = (npc.stones || 0) + amount;
     npc.showBubble(`Picked up ${amount} stone!`, 2000, { silent: true });
+    // Intentional: don't shift task — loop to gather remaining stones; the no-stone branch above will shift.
   }
 
   // ── Gather All ───────────────────────────────────────────────────────────────
@@ -400,12 +401,6 @@ export class GatherTaskHandler {
     npc.stones = (npc.stones || 0) + amount;
     npc.showBubble(`Picked up ${amount} stone!`, 2000);
     runner._tasks.shift();
-  }
-
-  // ── Refine Stone (delegates to runner._refine) ───────────────────────────────
-
-  doRefineStone(_delta) {
-    this._runner._refine.doRefineStone(_delta);
   }
 
   // ── Give Materials ────────────────────────────────────────────────────────────
