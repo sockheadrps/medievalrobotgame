@@ -5,24 +5,7 @@
 // interaction, novel events, and command resistance.
 
 import { TILE_SIZE } from '../constants.js';
-
-// ── Drive growth rates (per second, 0–1 scale) ──────────────────────────────
-// Higher = this drive fills faster for this personality type.
-const DRIVE_GROWTH_RATES = {
-  Guardian:   { aggression:0.05, attachment:0.09, curiosity:0.04, greed:0.03, social:0.07, survival:0.08, ambition:0.06 },
-  Berserker:  { aggression:0.18, attachment:0.04, curiosity:0.06, greed:0.05, social:0.03, survival:0.06, ambition:0.10 },
-  Scout:      { aggression:0.04, attachment:0.05, curiosity:0.15, greed:0.06, social:0.08, survival:0.07, ambition:0.07 },
-  Caretaker:  { aggression:0.02, attachment:0.12, curiosity:0.05, greed:0.02, social:0.14, survival:0.05, ambition:0.05 },
-  Paranoid:   { aggression:0.06, attachment:0.06, curiosity:0.03, greed:0.04, social:0.04, survival:0.16, ambition:0.05 },
-  Pragmatist: { aggression:0.05, attachment:0.05, curiosity:0.07, greed:0.10, social:0.07, survival:0.07, ambition:0.10 },
-};
-
-// Emotion → drive growth multipliers. Applied when emotion exceeds 0.1.
-const EMOTION_DRIVE_MULTS = {
-  fear:  { survival: 3.0, curiosity: 0.2 },
-  anger: { aggression: 2.5, social: 0.3 },
-  trust: { attachment: 0.5, curiosity: 1.5 },
-};
+import { DRIVE_GROWTH_RATES, EMOTION_DRIVE_MULTS, COMMIT_DURATION } from './NPCPersonality.js';
 
 // Priority bands (higher index = higher priority)
 // Within a band, the highest drive wins. Higher bands always beat lower bands.
@@ -76,16 +59,6 @@ const TASK_DECAY_RATE = 0.06; // drive drops ~6% per second while task runs
 // Conflict threshold — two drives this close and both above this value → LLM needed
 const CONFLICT_THRESHOLD    = 0.05;
 const CONFLICT_MIN_VALUE    = 0.50;
-
-// Action commitment timing by personality type (ms)
-const COMMIT_DURATION = {
-  Guardian:   11000,
-  Berserker:   6000,
-  Scout:       8000,
-  Caretaker:  12000,
-  Paranoid:    9000,
-  Pragmatist:  8000,
-};
 
 // Max delta-time per tick to prevent huge spikes after tab-hide/unhide
 const MAX_DT_SEC = 0.5;
