@@ -59,7 +59,7 @@ Metallurgy skill (gating stations by player level) is **out of scope** — separ
     {
       "inputs": { "Wood": 1 },
       "fuel_cost": 0,
-      "outputs": { "planks": 2 },
+      "outputs": { "planks": 3 },
       "process_time": 2.0
     }
   ]
@@ -73,9 +73,23 @@ Metallurgy skill (gating stations by player level) is **out of scope** — separ
 - In `load_all()`, scan `assets/crafting_stations/*/station.json` and parse each as `CraftingStationDef`
 - Add `GET /api/assets/crafting_stations` endpoint returning the full manifest (id, label, build_recipe, sprite per station)
 
-### `CraftingStationDef` schema update
+### `StationRecipe` schema migration (required)
 
-The existing schema already has `recipes: list[StationRecipe]` and `build_recipe: dict[str, int]`. Confirm `StationRecipe` has per-recipe `process_time` (currently it's a station-level field — move it to `StationRecipe` if needed, defaulting to station-level `process_time` if absent on the recipe).
+The existing `StationRecipe` in `schemas/assets.py` uses single-item fields:
+```python
+input_item: str; input_qty: int; output_item: str; output_min: int; output_max: int
+```
+
+This must be migrated to support multi-input, multi-output recipes:
+```python
+class StationRecipe(BaseModel):
+    inputs: dict[str, int] = {}      # item_id → quantity required
+    outputs: dict[str, int] = {}     # item_id → quantity produced
+    fuel_cost: int = 0               # units of station fuel_type consumed
+    process_time: float = 5.0        # seconds per cycle
+```
+
+The asset editor's crafting stations tab must be updated to save/load this new shape. Any existing station JSON files using the old shape must be migrated.
 
 ---
 
@@ -85,7 +99,7 @@ The existing schema already has `recipes: list[StationRecipe]` and `build_recipe
 
 - Add `"crafting_station"` to the allowlist
 - After placing, read the station def's `build_recipe`; for each ingredient, check player inventory has enough and deduct it. If inventory is short, reject with a chat hint. Stations with empty `build_recipe` are free.
-- Remove `"furnace"` and `"log_cutter"` from the allowlist (they are now station asset IDs, not building kinds)
+- Remove `"furnace"` and `"log_cutter"` from the allowlist (they are now station asset IDs, not building kinds). **Note:** the client-side hotbar replacement must be deployed in the same commit as the server allowlist change so no client sends the old kind names.
 
 ### Building tick (`building.py` — `_tick_buildings`)
 
@@ -124,7 +138,7 @@ elif kind == "crafting_station":
 ### Conveyor integration (`building.py` — conveyor push/pull)
 
 - Push destination check: `("crate", "furnace", "log_cutter")` → `("crate", "crafting_station")`
-- Push logic: for `crafting_station`, accept resource if it appears as an input in any recipe, OR if it matches `fuel_type` — cap at 5 per slot
+- Push logic: for `crafting_station`, accept resource if it appears as an input in any recipe (cap at 5 per resource), OR if it matches `fuel_type` (cap at 10 for fuel, matching existing furnace behavior)
 - Pull logic: for `crafting_station`, pull any resource that appears as an output in any recipe (replaces hardcoded `["bronze_bar"]` / `["planks"]`)
 
 ### Save migration (`database.py` — `load_buildings`)
@@ -168,7 +182,8 @@ elif b.get("kind") == "log_cutter":
 
 **Modify:**
 - `auxserver/services/asset_registry.py` — load crafting stations, add `get_crafting_station()`
-- `auxserver/schemas/assets.py` — confirm/fix `StationRecipe.process_time` field
+- `auxserver/schemas/assets.py` — migrate `StationRecipe` to `inputs/outputs/fuel_cost` dict shape
+- `auxserver/static/asseteditor.js` — update crafting stations tab to save/load new recipe shape
 - `auxserver/api/assets.py` (or equivalent) — add `/api/assets/crafting_stations` endpoint
 - `auxserver/services/building.py` — generic station tick, updated placement + conveyor logic
 - `auxserver/services/database.py` — save migration in `load_buildings`
