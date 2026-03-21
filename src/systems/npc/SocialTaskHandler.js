@@ -207,42 +207,56 @@ export class SocialTaskHandler {
       return; // still approaching, called again next frame
     }
 
+    // At this point NPC is within range — if async greeting already in-flight, don't start a new one
+    if (this._runner._greeting) return;
+
     npc.stopMoving?.();
 
-    // Generate greeting line — cheap prompt (personality + relationship only)
-    const relKey = `npc:${entry.npcId}`;
-    const relLabel = npc.soul?.relationships?.[relKey]?.label ?? 'stranger';
-    const pType = npc.soul?.personality?.type ?? 'Pragmatist';
-    let line = 'Hey there!'; // fallback
+    this._runner._greeting = true;
     try {
-      const { generateDecision } = await import('../../net/LLMClient.js');
-      const resp = await Promise.race([
-        generateDecision({
-          type: 'greet_npc',
-          personality: pType,
-          relationship: relLabel,
-          target_name: entry.npcId,
-        }),
-        new Promise(r => setTimeout(() => r(null), 3000)),
-      ]);
-      if (resp?.line) line = resp.line;
-    } catch { /* use fallback */ }
+      // Generate greeting line — cheap prompt (personality + relationship only)
+      const relKey = `npc:${entry.npcId}`;
+      const relLabel = npc.soul?.relationships?.[relKey]?.label ?? 'stranger';
+      const pType = npc.soul?.personality?.type ?? 'Pragmatist';
+      let line = 'Hey there!'; // fallback
+      try {
+        const { generateDecision } = await import('../../net/LLMClient.js');
+        const resp = await Promise.race([
+          generateDecision({
+            type: 'greet_npc',
+            personality: pType,
+            relationship: relLabel,
+            target_name: entry.npcId,
+          }),
+          new Promise(r => setTimeout(() => r(null), 3000)),
+        ]);
+        if (resp?.line) line = resp.line;
+      } catch { /* use fallback */ }
 
-    // Show speech bubbles
-    npc.showBubble?.(line, 3000);
-    targetSprite.showBubble?.('...', 2000);
+      // Show speech bubbles
+      npc.showBubble?.(line, 3000);
+      targetSprite.showBubble?.('...', 2000);
 
-    // Apply trust delta
-    const rel = npc.soul?.relationships ?? {};
-    if (!rel[relKey]) rel[relKey] = { label: 'stranger', trust: 0.5, cooperation: 0.5 };
-    const coop = rel[relKey].cooperation ?? 0.5;
-    rel[relKey].trust = Math.min(1, Math.max(0, (rel[relKey].trust ?? 0.5) + (coop > 0.5 ? 0.05 : 0)));
-    npc.soul.relationships = rel;
+      // Guard against missing soul before writing relationships
+      if (!npc.soul) {
+        this._runner._tasks.shift();
+        return;
+      }
 
-    // Add memory
-    npc.addMemory?.(`greeted ${entry.npcId}`, 'social', relKey);
+      // Apply trust delta
+      const rel = npc.soul?.relationships ?? {};
+      if (!rel[relKey]) rel[relKey] = { label: 'stranger', trust: 0.5, cooperation: 0.5 };
+      const coop = rel[relKey].cooperation ?? 0.5;
+      rel[relKey].trust = Math.min(1, Math.max(0, (rel[relKey].trust ?? 0.5) + (coop > 0.5 ? 0.05 : 0)));
+      npc.soul.relationships = rel;
 
-    this._runner._tasks.shift(); // task complete
+      // Add memory
+      npc.addMemory?.(`greeted ${entry.npcId}`, 'social', relKey);
+
+      this._runner._tasks.shift(); // task complete
+    } finally {
+      this._runner._greeting = false;
+    }
   }
 
   // ── Custom Task (mine specified ores → deposit to specified crates, repeat) ────
