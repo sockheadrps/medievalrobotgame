@@ -8,12 +8,15 @@ Workflow for adding a new animal species:
 """
 
 import json
+import logging
 import math
 import random
 import time
 from pathlib import Path
 
 from core.constants import TILE_SIZE
+
+logger = logging.getLogger(__name__)
 ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
 MAPS_DIR   = Path(__file__).resolve().parent.parent / "maps"
 
@@ -50,7 +53,7 @@ def _load_species_defs() -> dict:
                 "loot":           entity.get("loot", []),
             }
         except Exception as e:
-            print(f"[animals] Could not parse {path.name}: {e}")
+            logger.warning("Could not parse %s: %s", path.name, e)
     return defs
 
 
@@ -81,7 +84,7 @@ def _load_spawn_points(map_name: str) -> list[dict]:
             })
         return spawns
     except Exception as e:
-        print(f"[animals] Failed to load spawn points from {map_name}: {e}")
+        logger.warning("Failed to load spawn points from %s: %s", map_name, e)
         return []
 
 
@@ -95,8 +98,7 @@ class AnimalManager:
         self._next_id = 0
         self._respawn_queue: list[dict] = []  # {species, col, row, at}
 
-        print(f"[animals] Loaded {len(self._species_defs)} species, "
-              f"{len(self._spawn_points)} spawn points")
+        logger.info("Loaded %d species, %d spawn points", len(self._species_defs), len(self._spawn_points))
         self._initial_spawn()
 
     # ── Public API ───────────────────────────────────────────────────────────
@@ -210,8 +212,8 @@ class AnimalManager:
             "at":      time.time() + animal["respawn_delay"],
         })
 
-        print(f"[animals] {animal['id']} ({animal['species']}) killed by {killer_pid}, "
-              f"drops: {drops}, respawn in {animal['respawn_delay']}s")
+        logger.debug("%s (%s) killed by %s, drops: %s, respawn in %ss",
+                     animal['id'], animal['species'], killer_pid, drops, animal['respawn_delay'])
         return {"animal_id": animal["id"], "killer": killer_pid, "drops": drops}
 
 
