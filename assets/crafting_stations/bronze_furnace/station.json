@@ -1,0 +1,17 @@
+{
+  "id": "bronze_furnace",
+  "label": "Bronze Furnace",
+  "station_type": "smelter",
+  "speed_bonus": 1.0,
+  "required_metallurgy": 0,
+  "fuel_type": "planks",
+  "build_recipe": {},
+  "recipes": [
+    {
+      "inputs": { "raw_copper": 2, "raw_tin": 1 },
+      "fuel_cost": 1,
+      "outputs": { "bronze_bar": 1 },
+      "process_time": 5.0
+    }
+  ]
+}

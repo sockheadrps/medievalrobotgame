@@ -96,12 +96,10 @@ class EquipmentDef(BaseModel):
 # ── Crafting Stations ────────────────────────────────────────────────────────
 
 class StationRecipe(BaseModel):
-    input_item: str = ""                 # item id consumed
-    input_qty: int = 1
-    output_item: str = ""                # item id produced
-    output_min: int = 1
-    output_max: int = 1
-    process_time: float = 5.0           # seconds per operation
+    inputs: dict[str, int] = {}          # item_id → quantity required
+    outputs: dict[str, int] = {}         # item_id → quantity produced
+    fuel_cost: int = 0                   # units of station fuel_type consumed
+    process_time: float = 5.0            # seconds per cycle
 
 
 class CraftingStationDef(BaseModel):

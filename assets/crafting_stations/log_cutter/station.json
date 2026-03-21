@@ -1,0 +1,17 @@
+{
+  "id": "log_cutter",
+  "label": "Log Cutter",
+  "station_type": "workbench",
+  "speed_bonus": 1.0,
+  "required_metallurgy": 0,
+  "fuel_type": "none",
+  "build_recipe": {},
+  "recipes": [
+    {
+      "inputs": { "Wood": 1 },
+      "fuel_cost": 0,
+      "outputs": { "planks": 3 },
+      "process_time": 2.0
+    }
+  ]
+}
