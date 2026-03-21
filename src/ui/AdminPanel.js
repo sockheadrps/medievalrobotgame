@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 
-export class PlayerDetailPanel {
+export class AdminPanel {
   constructor(scene) {
     this._scene = scene;
     this._el = null;

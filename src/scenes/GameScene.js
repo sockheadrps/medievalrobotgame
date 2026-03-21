@@ -13,7 +13,7 @@ import { WorldSyncController } from '../systems/WorldSyncController.js';
 import { DialogueController } from '../systems/DialogueController.js';
 import { Connection }   from '../net/Connection.js';
 import { NPCDetailPanel } from '../ui/NPCDetailPanel.js';
-import { PlayerDetailPanel } from '../ui/PlayerDetailPanel.js';
+import { AdminPanel } from '../ui/AdminPanel.js';
 import { HudController } from '../ui/HudController.js';
 import { AdminPanelController } from '../ui/AdminPanelController.js';
 import { InventoryController } from '../ui/InventoryController.js';
@@ -303,7 +303,7 @@ export default class GameScene extends Phaser.Scene {
 
     // Detail panel overlay
     this._npcDetailPanel = new NPCDetailPanel(this);
-    this._playerDetailPanel = new PlayerDetailPanel(this);
+    this._adminPanel = new AdminPanel(this);
     this._inspectPanel = new InspectPanel(this);
 
     // Player ID — set by server on connect
@@ -2238,21 +2238,21 @@ export default class GameScene extends Phaser.Scene {
   // ── Inventory ───────────────────────────────────────────────────────────────
 
   _toggleInventory() {
-    if (this._charMenuOpen && this._playerDetailPanel?.isOpen()) {
+    if (this._charMenuOpen && this._adminPanel?.isOpen()) {
       this._closeCharMenu();
     } else {
       if (this._charMenuOpen) this._closeCharMenu();
       this._charMenuOpen = true;
-      this._playerDetailPanel?.open('inventory');
+      this._adminPanel?.open('inventory');
     }
   }
 
   _openInventory() {
     if (!this._charMenuOpen) {
       this._charMenuOpen = true;
-      this._playerDetailPanel?.open('inventory');
+      this._adminPanel?.open('inventory');
     } else {
-      this._playerDetailPanel?.switchTab('inventory');
+      this._adminPanel?.switchTab('inventory');
     }
   }
 
@@ -2333,13 +2333,13 @@ export default class GameScene extends Phaser.Scene {
 
   _openCharMenu() {
     this._charMenuOpen = true;
-    this._playerDetailPanel?.open();
+    this._adminPanel?.open();
   }
 
   _closeCharMenu() {
     this._charMenuOpen = false;
     for (const el of this._charMenuEls) el.destroy();
     this._charMenuEls = [];
-    this._playerDetailPanel?.close();
+    this._adminPanel?.close();
   }
 }
