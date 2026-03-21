@@ -35,8 +35,7 @@ class AssetRegistry:
         self._scan_world_objects(assets_dir / "world_objects")
         self._scan_equipment(assets_dir / "equipment")
         self._loaded = True
-        print(f"[asset_registry] Loaded {len(self.world_objects)} world objects, "
-              f"{len(self.equipment)} equipment items")
+        logger.info("Loaded %d world objects, %d equipment items", len(self.world_objects), len(self.equipment))
 
     def get_world_object(self, obj_id: str) -> Optional[WorldObjectDef]:
         return self.world_objects.get(obj_id)
@@ -65,7 +64,7 @@ class AssetRegistry:
         """Flatten baseplayer.json animations into {name: frame_index}."""
         bp_path = assets_dir / "baseplayer.json"
         if not bp_path.exists():
-            print("[asset_registry] WARNING: baseplayer.json not found")
+            logger.warning("baseplayer.json not found")
             return
         data = json.loads(bp_path.read_text(encoding="utf-8-sig"))
         self._base_anims = {}
@@ -153,8 +152,7 @@ class AssetRegistry:
                     remap[base_frame] = armor_name_to_frame[stripped]
 
         self.frame_remap[eq.id] = remap
-        print(f"[asset_registry] Frame remap for '{eq.id}': "
-              f"{len(remap)}/{len(self._base_anims)} frames mapped")
+        logger.debug("Frame remap for '%s': %d/%d frames mapped", eq.id, len(remap), len(self._base_anims))
 
 
 # Singleton
