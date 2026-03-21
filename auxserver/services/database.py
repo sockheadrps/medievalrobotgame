@@ -75,9 +75,6 @@ def init_db():
         _migrate_v1(conn)
         conn.execute("INSERT OR REPLACE INTO schema_version VALUES (1)")
         current = 1
-    if current < 2:
-        _migrate_v2(conn)
-        conn.execute("INSERT OR REPLACE INTO schema_version VALUES (2)")
     conn.commit()
 
     conn.executescript("""
@@ -188,6 +185,12 @@ def init_db():
         );
     """)
     conn.commit()
+
+    # Create indexes after tables exist (v2 migration)
+    if current < 2:
+        _migrate_v2(conn)
+        conn.execute("INSERT OR REPLACE INTO schema_version VALUES (2)")
+        conn.commit()
 
     # Migrate: add columns if missing (for existing databases)
     try:
@@ -428,12 +431,6 @@ def load_npc(npc_id: str) -> dict | None:
     }
     print(f"[db] Loaded NPC {npc_id}")
     return data
-
-
-def delete_npc(npc_id: str):
-    conn = _get_conn()
-    conn.execute("DELETE FROM npcs WHERE id = ?", (npc_id,))
-    conn.commit()
 
 
 def list_npcs() -> list[str]:
