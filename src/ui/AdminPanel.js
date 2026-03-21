@@ -5,6 +5,8 @@ export class AdminPanel {
     this._scene = scene;
     this._el = null;
     this._timer = null;
+    this._assetRegistry = null;
+    this._giveItemsContainer = null;
   }
 
   isOpen() { return !!this._el; }
@@ -18,6 +20,16 @@ export class AdminPanel {
     this._refresh();
     if (tab) this.switchTab(tab);
     this._timer = setInterval(() => this._refresh(), 400);
+    // Load asset registry for dynamic Give Items UI (fire-and-forget)
+    if (!this._assetRegistry) {
+      fetch('/api/assets/items')
+        .then(r => r.json())
+        .then(items => {
+          this._assetRegistry = items;
+          this._buildGiveItemsUI();
+        })
+        .catch(e => console.warn('AdminPanel: failed to load asset registry', e));
+    }
   }
 
   switchTab(tab) {
@@ -159,6 +171,7 @@ export class AdminPanel {
     `;
     document.body.appendChild(el);
     this._el = el;
+    this._giveItemsContainer = el.querySelector('.pdp-give');
     this._injectStyles();
 
     el.querySelector('.pdp-close').addEventListener('click', () => this.close());
@@ -326,7 +339,7 @@ export class AdminPanel {
       });
     }
 
-    // Give items — rebuild only once
+    // Give items — rebuild only once (static resources; dynamic items appended by _buildGiveItemsUI)
     const give = this._el.querySelector('.pdp-give');
     if (!give._built) {
       give._built = true;
@@ -339,13 +352,10 @@ export class AdminPanel {
         ${this._adjRow('Feathers', 'feathers', 10, '#ffffaa')}
         ${this._adjRow('Veg', 'vegetables', 10, '#88ff66')}
         ${this._adjRow('Seeds', 'seeds', 10, '#ccff88')}
-        ${this._adjRow('Raw Copper', 'inv:raw_copper', 10, '#cc8844')}
-        ${this._adjRow('Raw Tin', 'inv:raw_tin', 10, '#bbbbcc')}
-        ${this._adjRow('Bronze Bar', 'inv:bronze_bar', 10, '#ddaa55')}
-        ${this._adjRow('Bronze Pick', 'inv:bronze_pickaxe', 1, '#ddaa55')}
-        ${this._adjRow('Iron Pick', 'inv:iron_pickaxe', 1, '#99aacc')}
       `;
       this._bindAdjButtons(give);
+      // Append dynamic asset items if already loaded; otherwise _buildGiveItemsUI will append them later
+      if (this._assetRegistry) this._buildGiveItemsUI();
     }
 
     // Crafting
@@ -472,6 +482,54 @@ export class AdminPanel {
       `;
       this._bindAdjButtons(kiAdj);
     }
+  }
+
+  // Dynamically populate the Give Items container with items from the asset registry
+  _buildGiveItemsUI() {
+    const container = this._giveItemsContainer;
+    if (!container || !this._assetRegistry) return;
+    // Remove any previously appended dynamic section
+    const prev = container.querySelector('.pdp-give-dynamic');
+    if (prev) prev.remove();
+
+    const items = Array.isArray(this._assetRegistry) ? this._assetRegistry : Object.values(this._assetRegistry);
+    if (!items.length) return;
+
+    // Group by category
+    const categories = {};
+    for (const item of items) {
+      const cat = item.category ?? 'misc';
+      if (!categories[cat]) categories[cat] = [];
+      categories[cat].push(item);
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'pdp-give-dynamic';
+
+    for (const [cat, catItems] of Object.entries(categories)) {
+      const heading = document.createElement('h4');
+      heading.textContent = cat;
+      heading.style.cssText = 'margin:6px 0 2px;color:#99bbcc;font-size:11px;text-transform:uppercase;';
+      wrapper.appendChild(heading);
+
+      const adjHtml = catItems.map(item => {
+        const field = `inv:${item.id}`;
+        const label = item.label ?? item.name ?? item.id;
+        const step = item.stackable === false ? 1 : 1;
+        return this._adjRow(label, field, step, '#aaccee');
+      }).join('');
+
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = adjHtml;
+      while (tempDiv.firstChild) wrapper.appendChild(tempDiv.firstChild);
+    }
+
+    container.appendChild(wrapper);
+    this._bindAdjButtons(wrapper);
+  }
+
+  _onGiveItem(itemId) {
+    this._send(`inv:${itemId}`, 1);
   }
 
   // Build an adjustment row with +/- buttons or a single action button
