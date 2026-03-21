@@ -358,7 +358,11 @@ class BuildingService:
                                 is_input = any(resource in r.inputs for r in nb_def.recipes)
                                 is_fuel = (nb_def.fuel_type != "none" and resource == nb_def.fuel_type)
                                 if is_input:
-                                    cap = 5
+                                    max_needed = max(
+                                        (r.inputs.get(resource, 0) for r in nb_def.recipes if resource in r.inputs),
+                                        default=1,
+                                    )
+                                    cap = max_needed * 2
                                     cur = nb_stored.get(resource, 0)
                                     if cur < cap:
                                         nb_stored[resource] = min(cap, cur + amount)
