@@ -87,6 +87,7 @@ export class PlacementSystem {
     this._phase = PHASE_START;
     const labels = {
       crate: 'crate', furnace: 'furnace', log_cutter: 'log cutter',
+      crafting_station: 'crafting station',
       etrainer: 'etrainer', gate: 'gate', fence: 'fence',
     };
     const singlePlace = labels[type];
@@ -113,9 +114,9 @@ export class PlacementSystem {
     this._statusText.setText(msg).setVisible(true);
   }
 
-  _sendPlaceBuilding(kind, col, row, direction = '') {
+  _sendPlaceBuilding(kind, col, row, direction = '', extraData = {}) {
     this._scene._conn?.send({
-      type: 'place_building', kind, col, row, direction,
+      type: 'place_building', kind, col, row, direction, ...extraData,
     });
   }
 
@@ -178,10 +179,13 @@ export class PlacementSystem {
   _handleClick(wx, wy) {
     const { col, row } = worldToTile(wx, wy);
 
-    // Single-click placement for crate / furnace / log_cutter — send to server
-    if ((this._buildType === 'crate' || this._buildType === 'furnace' || this._buildType === 'log_cutter' || this._buildType === 'etrainer' || this._buildType === 'gate' || this._buildType === 'fence') && this._phase === PHASE_START) {
+    // Single-click placement for crate / furnace / log_cutter / crafting_station — send to server
+    if ((this._buildType === 'crate' || this._buildType === 'furnace' || this._buildType === 'log_cutter' || this._buildType === 'crafting_station' || this._buildType === 'etrainer' || this._buildType === 'gate' || this._buildType === 'fence') && this._phase === PHASE_START) {
       if (!this._grid.isFree(col, row)) return;
-      this._sendPlaceBuilding(this._buildType, col, row);
+      const extra = this._buildType === 'crafting_station'
+        ? { asset_id: this._scene._inventoryController?._selectedStationAssetId || '' }
+        : {};
+      this._sendPlaceBuilding(this._buildType, col, row, '', extra);
       return;
     }
 

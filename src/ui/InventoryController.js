@@ -31,8 +31,7 @@ const HOTBAR_ACTIONS = {
   plant_seed: { id: 'plant_seed', label: 'Veg Seed', frame: FRAME_SEED },
   place_conveyor: { id: 'place_conveyor', label: 'Conveyor', frame: FRAME_CONV_H },
   place_crate: { id: 'place_crate', label: 'Crate', frame: FRAME_CHEST },
-  place_furnace: { id: 'place_furnace', label: 'Furnace', frame: FRAME_FURNACE },
-  place_log_cutter: { id: 'place_log_cutter', label: 'Log Cutter', frame: FRAME_LOG_CUTTER },
+  place_crafting_station: { id: 'place_crafting_station', label: 'Station', frame: FRAME_FURNACE },
   place_etrainer: { id: 'place_etrainer', label: 'Etrainer', frame: FRAME_ETRAINER },
   place_track: { id: 'place_track', label: 'Track', frame: FRAME_TRACK_H },
   place_gate: { id: 'place_gate', label: 'Gate', frame: FRAME_GATE },
@@ -145,8 +144,7 @@ export class InventoryController {
       HOTBAR_ACTIONS.plant_seed,
       HOTBAR_ACTIONS.place_conveyor,
       HOTBAR_ACTIONS.place_crate,
-      HOTBAR_ACTIONS.place_furnace,
-      HOTBAR_ACTIONS.place_log_cutter,
+      HOTBAR_ACTIONS.place_crafting_station,
       HOTBAR_ACTIONS.place_etrainer,
       HOTBAR_ACTIONS.place_track,
       HOTBAR_ACTIONS.place_gate,
@@ -226,8 +224,7 @@ export class InventoryController {
     else if (item.id === 'plant_seed') this.armPlantSeed();
     else if (item.id === 'place_conveyor') this.toggleConveyorPlacement();
     else if (item.id === 'place_crate') this.toggleCratePlacement();
-    else if (item.id === 'place_furnace') this.toggleFurnacePlacement();
-    else if (item.id === 'place_log_cutter') this.toggleLogCutterPlacement();
+    else if (item.id === 'place_crafting_station') this.toggleCraftingStationPicker();
     else if (item.id === 'place_etrainer') this.toggleEtrainerPlacement();
     else if (item.id === 'place_track') this.toggleTrackPlacement();
     else if (item.id === 'place_gate') this.toggleGatePlacement();
@@ -254,24 +251,57 @@ export class InventoryController {
     }
   }
 
-  toggleFurnacePlacement() {
+  async toggleCraftingStationPicker() {
     const scene = this.scene;
     if (!scene._placement) return;
     if (scene._placement.isActive()) {
       scene._placement.cancel();
-    } else {
-      scene._placement.startPlacing('furnace');
+      return;
     }
+    await this._showStationPicker();
   }
 
-  toggleLogCutterPlacement() {
+  async _showStationPicker() {
     const scene = this.scene;
-    if (!scene._placement) return;
-    if (scene._placement.isActive()) {
-      scene._placement.cancel();
-    } else {
-      scene._placement.startPlacing('log_cutter');
+    if (!this._stationManifest) {
+      try {
+        const resp = await fetch('/api/assets/crafting_stations');
+        this._stationManifest = await resp.json();
+      } catch (e) {
+        console.warn('Failed to fetch crafting stations:', e);
+        return;
+      }
     }
+    const stations = Object.values(this._stationManifest);
+    if (stations.length === 0) return;
+
+    document.getElementById('_stationPickerPanel')?.remove();
+
+    const panel = document.createElement('div');
+    panel.id = '_stationPickerPanel';
+    panel.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#222;border:1px solid #555;border-radius:6px;padding:12px;z-index:9999;min-width:200px;';
+    panel.innerHTML = '<div style="color:#eee;font-size:13px;margin-bottom:8px;">Select Station</div>';
+
+    for (const st of stations) {
+      const btn = document.createElement('button');
+      btn.style.cssText = 'display:block;width:100%;margin-bottom:4px;padding:6px 10px;background:#333;color:#eee;border:1px solid #666;border-radius:4px;cursor:pointer;text-align:left;';
+      const cost = Object.entries(st.build_recipe || {}).map(([k, v]) => `${v}x ${k}`).join(', ');
+      btn.innerHTML = `<b>${st.label}</b>${cost ? `<span style="color:#aaa;font-size:11px;margin-left:6px;">(${cost})</span>` : ''}`;
+      btn.onclick = () => {
+        panel.remove();
+        this._selectedStationAssetId = st.id;
+        scene._placement.startPlacing('crafting_station');
+      };
+      panel.appendChild(btn);
+    }
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'display:block;width:100%;padding:6px;background:#444;color:#aaa;border:1px solid #555;border-radius:4px;cursor:pointer;margin-top:4px;';
+    cancelBtn.onclick = () => panel.remove();
+    panel.appendChild(cancelBtn);
+
+    document.body.appendChild(panel);
   }
 
   toggleEtrainerPlacement() {
