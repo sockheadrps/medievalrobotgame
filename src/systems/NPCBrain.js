@@ -34,6 +34,12 @@ const OWNER_STICKY_TASKS = new Set([
   'give_logs', 'give_materials',
 ]);
 
+// Tasks that should not be interrupted by reflexes or drive-based switching
+const BLOCKING_TASKS = new Set([
+  'give_logs', 'socialize_npc', 'steal_logs', 'practice_ki',
+  'refine_stone', 'deposit_to_crate', 'custom_task',
+]);
+
 // Maps LLM intents to TaskRunner tasks
 const INTENT_TO_TASK = {
   follow:           { task: 'follow' },
@@ -223,7 +229,13 @@ export class NPCBrain {
       DriveSystem.applyTaskDecay(this._npc, status.tasks[0].task, delta);
     }
 
-    // ── Environmental reflex (throttled 2s) ──
+    // ── Survival reflex — runs every frame, bypasses all locks ──
+    if (this._npc.maxHp > 0 && (this._npc.hp / this._npc.maxHp) < 0.25) {
+      this._runner.setTasks([{ task: 'follow' }]);
+      return;
+    }
+
+    // ── Environmental reflex (throttled 2s) — ore/dummy/social checks ──
     if (now - this._lastReflexCheck > 2000) {
       this._lastReflexCheck = now;
       if (this._reflexCheck(status, now)) return;
@@ -255,9 +267,7 @@ export class NPCBrain {
         const taskDef = DriveSystem.driveToTask(dominantDrive, this._npc, this._scene);
         if (taskDef) {
           // Don't interrupt blocking tasks
-          const isBusyBlocking = status.tasks.some(t =>
-            ['give_logs', 'socialize_npc', 'steal_logs', 'practice_ki', 'refine_stone', 'deposit_to_crate', 'custom_task'].includes(t.task)
-          );
+          const isBusyBlocking = status.tasks.some(t => BLOCKING_TASKS.has(t.task));
           if (!isBusyBlocking) {
             this._runner.setTasks([taskDef]);
             this._lastDriveIntent = dominantDrive;
@@ -402,21 +412,13 @@ export class NPCBrain {
     const npc = this._npc;
     const drives = npc.soul?.drives || {};
 
-    // Survival override — bypasses ALL locks including manual
-    if ((npc.hp / npc.maxHp) < 0.25) {
-      this._runner.setTasks([{ task: 'follow' }]);
-      return true;
-    }
-
     // Below this line: respect manual lock and commit lock
     const isManualLocked = npc._manualCommandUntil && now < npc._manualCommandUntil;
     const isCommitLocked = (drives._commitUntil ?? 0) > now;
     if (isManualLocked || isCommitLocked) return false;
 
     // Don't interrupt blocking tasks
-    const blockingTasks = ['give_logs','socialize_npc','steal_logs','practice_ki',
-                           'refine_stone','deposit_to_crate','custom_task','greet_npc'];
-    if (status.tasks.some(t => blockingTasks.includes(t.task))) return false;
+    if (status.tasks.some(t => BLOCKING_TASKS.has(t.task) || t.task === 'greet_npc')) return false;
 
     // Ore nearby + high greed
     if ((drives.greed ?? 0) > 0.45) {
