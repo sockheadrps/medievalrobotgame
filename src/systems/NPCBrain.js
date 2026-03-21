@@ -325,10 +325,6 @@ export class NPCBrain {
     return this._dataHelper.buildStatePacket();
   }
 
-  _getAllowedActions() {
-    return this._dataHelper.getAllowedActions();
-  }
-
   // ── Request decision from local Ollama ──────────────────────────────────────
 
   async _requestDecision() {
@@ -481,8 +477,10 @@ export class NPCBrain {
     }
 
     // Process memory candidates — store under target NPC key if relevant
-    const memoryBucket = (['steal_logs', 'socialize_npc', 'attack_npc', 'absorb_npc'].includes(intent) && decision.target_id)
-      ? `npc:${this._commandHandler._extractNpcId(decision.target_id)}`
+    const rawTargetId = decision.target_id ?? '';
+    const npcIdMatch = rawTargetId.match(/(npc_\d+)$/);
+    const memoryBucket = (['steal_logs', 'socialize_npc', 'attack_npc', 'absorb_npc'].includes(intent) && rawTargetId)
+      ? `npc:${npcIdMatch ? npcIdMatch[1] : rawTargetId}`
       : playerId;
 
     if (decision.memory_candidates?.length > 0) {

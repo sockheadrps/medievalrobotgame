@@ -262,7 +262,10 @@ export class NPCBrainData {
   }
 }
 
-/** Summarize memories array into a compact object for LLM context. */
+/**
+ * Summarize memories into a compact object for LLM context.
+ * @param {string[]} memories — pre-processed array of memory text strings (e.g. soul.memories[bucket])
+ */
 export function summarizeMemories(memories) {
   if (!memories || memories.length === 0) {
     return { self: 'I am a robot companion built by the player.', player: 'The player is my creator.' };
