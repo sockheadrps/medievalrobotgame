@@ -43,6 +43,17 @@ export class InspectPanel {
     this._target = null;
   }
 
+  hide() {
+    if (this._el) this._el.style.display = 'none';
+  }
+
+  destroy() {
+    if (this._el && this._el.parentNode) {
+      this._el.parentNode.removeChild(this._el);
+    }
+    this._el = null;
+  }
+
   _build() {
     const el = document.createElement('div');
     el.id = 'inspect-panel';

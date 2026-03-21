@@ -34,6 +34,17 @@ export class PlayerDetailPanel {
     if (this._el) { this._el.remove(); this._el = null; }
   }
 
+  hide() {
+    if (this._el) this._el.style.display = 'none';
+  }
+
+  destroy() {
+    if (this._el && this._el.parentNode) {
+      this._el.parentNode.removeChild(this._el);
+    }
+    this._el = null;
+  }
+
   _send(field, value = 0, extra = {}) {
     this._scene._conn?.send({ type: 'admin', field, value, target_npc_id: null, ...extra });
   }
