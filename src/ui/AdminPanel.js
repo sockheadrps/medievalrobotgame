@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { API_BASE } from '../config.js';
 
 export class AdminPanel {
   constructor(scene) {
@@ -22,7 +23,7 @@ export class AdminPanel {
     this._timer = setInterval(() => this._refresh(), 400);
     // Load asset registry for dynamic Give Items UI (fire-and-forget)
     if (!this._assetRegistry) {
-      fetch('/api/assets/items')
+      fetch(`${API_BASE}/api/assets/items`)
         .then(r => r.json())
         .then(items => {
           this._assetRegistry = items;
