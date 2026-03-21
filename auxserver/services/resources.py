@@ -1,7 +1,10 @@
 """Resource gathering: trees, rocks, ores, ground items, farming, cave mining."""
 
+import logging
 import random
 import time
+
+logger = logging.getLogger(__name__)
 
 from services.game_state import (
     TILE_SIZE,
@@ -226,7 +229,7 @@ class ResourceService:
             wo["depleted"] = True
             respawn_secs = random.uniform(wo_def.respawn_min, wo_def.respawn_max)
             wo["respawn_at"] = time.time() + respawn_secs
-        print(f"[resources] NPC {npc_id} mined world object {wo_id}, inv={npc_inv}")
+        logger.debug("NPC %s mined world object %s, inv=%s", npc_id, wo_id, npc_inv)
 
     # ── Cave Mining ───────────────────────────────────────────────────────
 
@@ -361,7 +364,7 @@ class ResourceService:
                 npc_inv.pop(resource, None)
         stored = building.setdefault("stored", {})
         stored[resource] = stored.get(resource, 0) + transfer
-        print(f"[resources] NPC {npc_id} deposited {transfer}x {resource} into {building_id}")
+        logger.debug("NPC %s deposited %dx %s into %s", npc_id, transfer, resource, building_id)
 
     # ── Anvil / Refining ───────────────────────────────────────────────────────
 
@@ -402,7 +405,7 @@ class ResourceService:
             "who": who,
             "results": results,
         }
-        print(f"[resources] {who} refined rock at {anvil_id}: {results or 'nothing'}")
+        logger.debug("%s refined rock at %s: %s", who, anvil_id, results or 'nothing')
 
     def _npc_refine_rock(self, pid, npc_id, anvil_id):
         """NPC refines 1 stone at an anvil."""
@@ -427,7 +430,7 @@ class ResourceService:
                 amount = item.get("amount", 1)
                 npc_state["stones"] = npc_state.get("stones", 0) + amount
                 self.gs.ground_items.remove(item)
-                print(f"[resources] NPC {npc_id} picked up {amount} stone")
+                logger.debug("NPC %s picked up %d stone", npc_id, amount)
                 return
 
     def _npc_mine_rock(self, pid, npc_id, rock_id):
@@ -455,7 +458,7 @@ class ResourceService:
         npc_state["stones"] = int(npc_state.get("stones", 0) or 0) + 1
         if rock["hits_left"] <= 0:
             rock["mined"] = True
-        print(f"[resources] NPC {npc_id} mined rock {rock_id}, stones={npc_state['stones']}")
+        logger.debug("NPC %s mined rock %s, stones=%s", npc_id, rock_id, npc_state['stones'])
 
     def _npc_pickup_stone_tile(self, pid, npc_id, x, y):
         """NPC picks up all placed stone items from the targeted tile."""
@@ -483,7 +486,7 @@ class ResourceService:
 
         npc_state["stones"] = npc_state.get("stones", 0) + total
         self.gs.ground_items = remaining
-        print(f"[resources] NPC {npc_id} picked up {total} stone from tile {tile}")
+        logger.debug("NPC %s picked up %d stone from tile %s", npc_id, total, tile)
 
     def _npc_give_materials(self, pid, npc_id):
         """NPC transfers all refined materials to the player."""
