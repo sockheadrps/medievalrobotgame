@@ -164,6 +164,7 @@ export default class GameScene extends Phaser.Scene {
     this._buildingSprites = {};
     this._placement = new PlacementSystem(this, this.grid, this._conveyors);
     this._taskRecorder = new TaskRecorder(this);
+    this._craftingStationManifest = {};
     this._stationViewer = new StationViewerPanel(this);
 
     // Map manager — handles map loading, bounds, tile images, collision group

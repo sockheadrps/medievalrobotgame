@@ -54,8 +54,8 @@ export class StationViewerPanel {
 
   deposit(item, qty, bid) {
     const scene = this._scene;
-    const inv = scene._playerInventory || {};
-    if ((inv[item] || 0) < qty) return;
+    const inv = scene.player?.inventory;
+    if (!inv || (inv[item] || 0) < qty) return;
     inv[item] = (inv[item] || 0) - qty;
     if (inv[item] <= 0) delete inv[item];
     const stored = this._building.getStored ? this._building.getStored() : {};
@@ -72,7 +72,8 @@ export class StationViewerPanel {
     stored[item] = (stored[item] || 0) - qty;
     if (stored[item] <= 0) delete stored[item];
     if (this._building.setStored) this._building.setStored(stored);
-    const inv = scene._playerInventory || {};
+    const inv = scene.player?.inventory;
+    if (!inv) return;
     inv[item] = (inv[item] || 0) + qty;
     scene._conn?.send({ type: 'update_building_stored', building_id: bid, stored });
     this.open(this._building, this._stationDef);
