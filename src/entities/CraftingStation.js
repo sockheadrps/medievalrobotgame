@@ -1,11 +1,14 @@
 import Phaser from 'phaser';
-import { SHEET_KEY, SHEET_TILE, TILE_SIZE, FRAME_FURNACE, INTERACT_DIST } from '../constants.js';
+import { SHEET_KEY, SHEET_TILE, TILE_SIZE, FRAME_FURNACE, SHEET_COLS, INTERACT_DIST } from '../constants.js';
 
 const SCALE = TILE_SIZE / SHEET_TILE;
 
 export class CraftingStation extends Phaser.GameObjects.Image {
-  constructor(scene, x, y, assetId, label, initialStored = {}) {
-    super(scene, x, y, SHEET_KEY, FRAME_FURNACE);
+  constructor(scene, x, y, assetId, label, initialStored = {}, spriteDef = null) {
+    const frame = spriteDef?.tileCol != null
+      ? spriteDef.tileCol + (spriteDef.tileRow ?? 0) * SHEET_COLS
+      : FRAME_FURNACE;
+    super(scene, x, y, SHEET_KEY, frame);
     scene.add.existing(this);
     this.setDepth(1).setScale(SCALE);
     this.col = Math.round((x - TILE_SIZE / 2) / TILE_SIZE);

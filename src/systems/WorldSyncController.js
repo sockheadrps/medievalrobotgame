@@ -364,7 +364,8 @@ export class WorldSyncController {
             y,
             sb.asset_id || '',
             stDef?.label || sb.asset_id,
-            sb.stored || {}
+            sb.stored || {},
+            stDef?.sprite || null
           );
           entity.setGrid(scene.grid);
           scene.grid.place(sb.col, sb.row, entity);
