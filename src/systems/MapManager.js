@@ -79,8 +79,8 @@ export default class MapManager {
   async changeMap(newMap) {
     const scene = this.scene;
 
-    // Register background NPCs — NPCs staying on the old map with active tasks
-    await scene._registerBackgroundNPCs(scene._currentMap, newMap);
+    // Register background NPCs — fire and forget, must not block the map transition
+    scene._registerBackgroundNPCs(scene._currentMap, newMap).catch(console.error);
 
     // Determine which NPCs stay on old map vs come to new map
     for (const npc of scene.entities.npcs) {
