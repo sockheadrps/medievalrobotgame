@@ -10,7 +10,7 @@
 import Phaser from 'phaser';
 import { TILE_SIZE } from '../constants.js';
 import { generateDecision, checkConnection } from '../net/LLMClient.js';
-import { DriveSystem, DRIVE_TASK_SATISFACTION } from './DriveSystem.js';
+import { DriveSystem } from './DriveSystem.js';
 import { PlayerCommandHandler, _makeFallbackResponse } from './npc/PlayerCommandHandler.js';
 import { NPCBrainData } from './npc/NPCBrainData.js';
 
