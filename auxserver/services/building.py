@@ -4,6 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from services.asset_registry import asset_registry
 from services.game_state import (
     TILE_SIZE,
     ANVIL_STONE_COST,
@@ -116,9 +117,9 @@ class BuildingService:
     # ── Place Building ─────────────────────────────────────────────────────────
 
     def _place_building(self, pid, data):
-        """Place a building (conveyor, crate, furnace, log_cutter, track, gate, fence) at a grid tile."""
+        """Place a building (conveyor, crate, crafting_station, track, gate, fence) at a grid tile."""
         kind = data.get("kind")
-        if kind not in ("conveyor", "crate", "furnace", "log_cutter", "etrainer", "track", "gate", "fence"):
+        if kind not in ("conveyor", "crate", "crafting_station", "etrainer", "track", "gate", "fence"):
             logger.warning("_place_building rejected unknown kind=%s", kind)
             return
         col = data.get("col")
@@ -141,6 +142,26 @@ class BuildingService:
 
         player_map = p.get("map", "level_01")
 
+        # Crafting station: read asset_id from placement data
+        asset_id = ""
+        if kind == "crafting_station":
+            asset_id = data.get("asset_id", "")
+            if not asset_id:
+                logger.warning("_place_building: crafting_station missing asset_id")
+                return
+            station_def = asset_registry.get_crafting_station(asset_id)
+            if station_def:
+                inv = p.setdefault("inventory", {})
+                for item_id, qty in station_def.build_recipe.items():
+                    if inv.get(item_id, 0) < qty:
+                        self.gs.fx_events.append({"type": "chat_hint", "pid": pid,
+                                                   "text": f"Need {qty}x {item_id} to build this."})
+                        return
+                for item_id, qty in station_def.build_recipe.items():
+                    inv[item_id] = inv.get(item_id, 0) - qty
+                    if inv[item_id] <= 0:
+                        del inv[item_id]
+
         bid = _gen_building_id()
         bld = {
             "id": bid,
@@ -153,6 +174,8 @@ class BuildingService:
             "label": "",
             "stored": {},
         }
+        if asset_id:
+            bld["asset_id"] = asset_id
         # Fences have HP
         if kind == "fence":
             bld["hp"] = FENCE_BASE_HP
@@ -316,8 +339,8 @@ class BuildingService:
                             _received_this_tick.add(nb_bid)
                         continue
 
-                    # Push into storage building (crate, furnace, log_cutter)
-                    if nb and nb["kind"] in ("crate", "furnace", "log_cutter"):
+                    # Push into storage building (crate, crafting_station)
+                    if nb and nb["kind"] in ("crate", "crafting_station"):
                         nb_stored = nb.setdefault("stored", {})
                         resource = held["resource"]
                         amount = held["amount"]
@@ -329,28 +352,23 @@ class BuildingService:
                             if not crate_label or resource == label_key:
                                 nb_stored[resource] = nb_stored.get(resource, 0) + amount
                                 accepted = True
-                        elif nb["kind"] == "log_cutter":
-                            if resource in ("Wood", "logs"):
-                                cur = nb_stored.get("Wood", 0)
-                                if cur < 5:
-                                    nb_stored["Wood"] = min(5, cur + amount)
-                                    accepted = True
-                        elif nb["kind"] == "furnace":
-                            if resource == "raw_copper":
-                                cur = nb_stored.get("raw_copper", 0)
-                                if cur < 5:
-                                    nb_stored["raw_copper"] = min(5, cur + amount)
-                                    accepted = True
-                            elif resource == "raw_tin":
-                                cur = nb_stored.get("raw_tin", 0)
-                                if cur < 5:
-                                    nb_stored["raw_tin"] = min(5, cur + amount)
-                                    accepted = True
-                            elif resource == "planks":
-                                cur = nb_stored.get("planks", 0)
-                                if cur < 10:
-                                    nb_stored["planks"] = min(10, cur + amount)
-                                    accepted = True
+                        elif nb["kind"] == "crafting_station":
+                            nb_asset_id = nb.get("asset_id", "")
+                            nb_def = asset_registry.get_crafting_station(nb_asset_id)
+                            if nb_def:
+                                is_input = any(resource in r.inputs for r in nb_def.recipes)
+                                is_fuel = (nb_def.fuel_type != "none" and resource == nb_def.fuel_type)
+                                if is_input:
+                                    cap = 5
+                                    cur = nb_stored.get(resource, 0)
+                                    if cur < cap:
+                                        nb_stored[resource] = min(cap, cur + amount)
+                                        accepted = True
+                                elif is_fuel:
+                                    cur = nb_stored.get(resource, 0)
+                                    if cur < 10:
+                                        nb_stored[resource] = min(10, cur + amount)
+                                        accepted = True
 
                         if accepted:
                             b["_held"] = None
@@ -372,14 +390,16 @@ class BuildingService:
                 else:
                     # Pull from input-side storage (not from other conveyors)
                     _, nb = self._building_at(in_col, in_row, bmap)
-                    if nb and nb["kind"] in ("crate", "furnace", "log_cutter"):
+                    if nb and nb["kind"] in ("crate", "crafting_station"):
                         nb_stored = nb.get("stored", {})
-                        # Furnaces: only pull output (bronze_bar)
-                        if nb["kind"] == "furnace":
-                            pull_keys = ["bronze_bar"]
-                        # Log cutters: only pull output (planks)
-                        elif nb["kind"] == "log_cutter":
-                            pull_keys = ["planks"]
+                        if nb["kind"] == "crafting_station":
+                            nb_asset_id = nb.get("asset_id", "")
+                            nb_def = asset_registry.get_crafting_station(nb_asset_id)
+                            if nb_def:
+                                output_keys = {k for r in nb_def.recipes for k in r.outputs}
+                                pull_keys = [k for k in nb_stored if k in output_keys]
+                            else:
+                                pull_keys = []
                         else:
                             pull_keys = list(nb_stored.keys())
 
@@ -393,79 +413,34 @@ class BuildingService:
                                 break
                 continue
 
-            # ── Log Cutter ────────────────────────────────────────────
-            elif kind == "log_cutter":
-                accum = b.get("_cut_accum", 0.0) + dt
-                logs_in = stored.get("Wood", 0)
-                planks_out = stored.get("planks", 0)
-
-                # Process: 1 log → 3 planks every 2s
-                if logs_in >= 1 and planks_out <= (MAX_PLANKS - 3):
-                    if accum >= LOG_CUTTER_INTERVAL:
-                        accum -= LOG_CUTTER_INTERVAL
-                        stored["Wood"] = logs_in - 1
-                        stored["planks"] = planks_out + 3
-                        if stored["Wood"] <= 0:
-                            del stored["Wood"]
-                else:
-                    accum = 0.0  # reset when idle
-                b["_cut_accum"] = accum
-
-                # Push planks onto adjacent track
-                planks_out = stored.get("planks", 0)
-                if planks_out >= 3:
-                    for dc, dr in self._DIR_DELTA.values():
-                        _, nb = self._building_at(b["col"] + dc, b["row"] + dr, bmap)
-                        if nb and nb["kind"] == "track" and not nb.get("_cart"):
-                            nb["_cart"] = {"resource": "planks", "amount": 3}
-                            stored["planks"] = planks_out - 3
-                            if stored["planks"] <= 0:
-                                del stored["planks"]
-                            break
-
-            # ── Furnace (server-side smelting) ─────────────────────────
-            elif kind == "furnace":
-                copper = stored.get("raw_copper", 0)
-                tin = stored.get("raw_tin", 0)
-                fuel = stored.get("planks", 0)
-                bars = stored.get("bronze_bar", 0)
-
-                # Smelting: 1 copper + 1 tin → 1 bronze_bar (needs fuel burning)
-                if copper >= 1 and tin >= 1 and bars < 20:
-                    if fuel > 0 or b.get("_burning"):
-                        # Start/continue burning
-                        if not b.get("_burning") and fuel > 0:
-                            b["_burning"] = True
-                            b["_burn_accum"] = 0.0
-                            stored["planks"] = fuel - 1
-
-                        if b.get("_burning"):
-                            b["_burn_accum"] = b.get("_burn_accum", 0.0) + dt
-
-                        # Smelting takes 5 seconds
-                        smelt_accum = b.get("_smelt_accum", 0.0) + dt
-                        if smelt_accum >= 5.0:
-                            smelt_accum -= 5.0
-                            stored["raw_copper"] = copper - 1
-                            stored["raw_tin"] = tin - 1
-                            stored["bronze_bar"] = bars + 1
-                            if stored["raw_copper"] <= 0:
-                                del stored["raw_copper"]
-                            if stored["raw_tin"] <= 0:
-                                del stored["raw_tin"]
-                        b["_smelt_accum"] = smelt_accum
-
-                        # Burn expires after 8 seconds
-                        if b.get("_burn_accum", 0) >= 8.0:
-                            b["_burning"] = False
-                            b["_burn_accum"] = 0.0
-                            # Try to burn next plank
-                            fuel = stored.get("planks", 0)
-                            if fuel > 0:
-                                b["_burning"] = True
-                                stored["planks"] = fuel - 1
-                else:
-                    b["_smelt_accum"] = 0.0
+            # ── Generic Crafting Station ───────────────────────────────────────
+            elif kind == "crafting_station":
+                asset_id = b.get("asset_id", "")
+                station_def = asset_registry.get_crafting_station(asset_id)
+                if not station_def:
+                    continue
+                for recipe in station_def.recipes:
+                    if not all(stored.get(r, 0) >= qty for r, qty in recipe.inputs.items()):
+                        continue
+                    if station_def.fuel_type != "none" and stored.get(station_def.fuel_type, 0) < recipe.fuel_cost:
+                        continue
+                    accum = b.get("_accum", 0.0) + dt
+                    process_time = recipe.process_time / station_def.speed_bonus
+                    if accum < process_time:
+                        b["_accum"] = accum
+                        break
+                    b["_accum"] = 0.0
+                    for r, qty in recipe.inputs.items():
+                        stored[r] = stored.get(r, 0) - qty
+                        if stored[r] <= 0:
+                            del stored[r]
+                    if station_def.fuel_type != "none":
+                        stored[station_def.fuel_type] = stored.get(station_def.fuel_type, 0) - recipe.fuel_cost
+                        if stored.get(station_def.fuel_type, 0) <= 0:
+                            stored.pop(station_def.fuel_type, None)
+                    for r, qty in recipe.outputs.items():
+                        stored[r] = stored.get(r, 0) + qty
+                    break
 
             # ── Minecart Track ────────────────────────────────────────
             elif kind == "track" and b.get("_cart"):
