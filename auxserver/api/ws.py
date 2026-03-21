@@ -15,7 +15,7 @@ from services.animal_service import animal_manager
 from services.crop_service import crop_manager
 from services.accounts import save_player, load_player
 from services.ai_player import ai_player, PID as AI_PID
-from core.config import SPAWN_AI_PLAYER
+from core.config import SPAWN_AI_PLAYER, SPAWN_NPCS
 from services.database import save_npc as db_save_npc, load_npc as db_load_npc, delete_npc as db_delete_npc
 
 router = APIRouter()
@@ -374,7 +374,7 @@ async def websocket_endpoint(ws: WebSocket):
         "ground_items": snap["ground_items"],
         "dummies": snap["dummies"],
         "anvils": snap.get("anvils", {}),
-        "npc_ids": player.get("npc_ids", []),
+        "npc_ids": player.get("npc_ids", []) if SPAWN_NPCS else [],
         "animals": animal_manager.get_all(),
         "crops": crop_manager.get_all(),
     }
@@ -390,7 +390,7 @@ async def websocket_endpoint(ws: WebSocket):
                 # Track NPC IDs for persistence
                 if msg_type == "register_npc":
                     npc_id = data.get("npc_id")
-                    if npc_id and npc_id not in player.get("npc_ids", []):
+                    if SPAWN_NPCS and npc_id and npc_id not in player.get("npc_ids", []):
                         player.setdefault("npc_ids", []).append(npc_id)
                 elif msg_type == "unregister_npc":
                     npc_id = data.get("npc_id")

@@ -30,6 +30,7 @@ OLLAMA_URL = LLM_CHAT_URL
 
 DEV_MODE = os.environ.get("DEV_MODE", "1") == "1"
 SPAWN_AI_PLAYER = os.environ.get("SPAWN_AI_PLAYER", "1") == "1"
+SPAWN_NPCS = os.environ.get("SPAWN_NPCS", "1") == "1"
 NUM_CTX = int(os.environ.get("NUM_CTX", "16384"))
 ASSETS_DIR = BASE_DIR.parent / "assets"
 WORLD_OBJECTS_DIR = ASSETS_DIR / "world_objects"
