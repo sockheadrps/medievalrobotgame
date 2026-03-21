@@ -102,7 +102,7 @@ export class StateSyncController {
     const myData = players[scene.playerId];
     if (myData?.npcs) {
       if (!scene._lastServerNPCLogs) scene._lastServerNPCLogs = {};
-      for (const npc of scene.npcs) {
+      for (const npc of scene.entities.npcs) {
         const serverNPC = myData.npcs[npc.id];
         if (!serverNPC) continue;
         const wasKnocked = npc.isKnockedOut?.() || false;

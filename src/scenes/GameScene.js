@@ -28,6 +28,7 @@ import { DriveIndicator } from '../ui/DriveIndicator.js';
 import { PlacementSystem } from '../systems/PlacementSystem.js';
 import { TaskRecorder } from '../systems/TaskRecorder.js';
 import MineRenderer from '../systems/MineRenderer.js';
+import EntityManager from '../systems/EntityManager.js';
 import { Crate } from '../entities/Crate.js';
 import { Furnace } from '../entities/Furnace.js';
 import {
@@ -118,11 +119,8 @@ export default class GameScene extends Phaser.Scene {
   }
 
   create() {
-    // Entity arrays (init early so map loading can populate trees)
-    this.trees       = [];
-    this.groundItems = [];
-    this.npcs        = [];
-    this.dummies     = [];
+    // Entity arrays (managed by EntityManager — init early so map loading can populate trees)
+    this.entities = new EntityManager(this);
     this._rockSprites   = {}; // rock_id -> Rock entity
     this._animalSprites = {}; // animal_id -> AnimalSprite
     this.selectedNPC = null;
@@ -360,7 +358,7 @@ export default class GameScene extends Phaser.Scene {
         const clickRange = TILE_SIZE * 0.8;
 
         // Check dummies
-        for (const dummy of (this.dummies ?? [])) {
+        for (const dummy of (this.entities.dummies ?? [])) {
           if (dummy.isDead?.()) continue;
           const d = Phaser.Math.Distance.Between(worldX, worldY, dummy.x, dummy.y);
           if (d < clickRange && dummy._serverId) {
@@ -728,7 +726,7 @@ export default class GameScene extends Phaser.Scene {
     this.player.update(delta);
 
     // Update NPCs + task runners + brains (client-side)
-    for (const npc of this.npcs) {
+    for (const npc of this.entities.npcs) {
       // Skip NPCs on a different map (they're running as background workers)
       if (npc._map && npc._map !== this._currentMap) continue;
       npc.update(delta);
@@ -743,7 +741,7 @@ export default class GameScene extends Phaser.Scene {
     this._driveIndicator?.update();
 
     // Check emotion-driven reactions for each NPC
-    for (const npc of this.npcs) {
+    for (const npc of this.entities.npcs) {
       const reaction = npc._emotionReactTarget;
       if (!reaction) continue;
       npc._emotionReactTarget = null; // consume it
@@ -991,11 +989,11 @@ export default class GameScene extends Phaser.Scene {
       victimName = 'our owner';
     } else {
       // own_npc
-      const deadNpc = this.npcs.find(n => n.id === victimNpcId);
+      const deadNpc = this.entities.npcs.find(n => n.id === victimNpcId);
       victimName = deadNpc?.getName?.() || victimNpcId;
     }
 
-    for (const npc of this.npcs) {
+    for (const npc of this.entities.npcs) {
       if (npc.isDead()) continue;
       if (victimType === 'own_npc' && npc.id === victimNpcId) continue; // skip the dead one itself
 
@@ -1154,7 +1152,7 @@ export default class GameScene extends Phaser.Scene {
     this._registerBackgroundNPCs(this._currentMap, newMap);
 
     // Determine which NPCs stay on old map vs come to new map
-    for (const npc of this.npcs) {
+    for (const npc of this.entities.npcs) {
       if (!npc._map) npc._map = this._currentMap;
       const runner = this._taskRunners.get(npc.id);
       const status = runner?.getStatus();
@@ -1180,8 +1178,8 @@ export default class GameScene extends Phaser.Scene {
     this._tileImages = [];
 
     // Destroy old trees
-    for (const tree of (this.trees || [])) tree?.destroy?.();
-    this.trees = [];
+    for (const tree of (this.entities.trees || [])) tree?.destroy?.();
+    this.entities.trees = [];
 
     // Destroy old collision group
     if (this._collisionGroup) {
@@ -1242,7 +1240,7 @@ export default class GameScene extends Phaser.Scene {
     this._unregisterBackgroundNPCs(newMap);
 
     // Show NPCs that are on the new map, keep hiding others
-    for (const npc of this.npcs) {
+    for (const npc of this.entities.npcs) {
       if (npc._map === newMap || !npc._map) {
         npc.setVisible(true);
         if (npc.body) npc.body.enable = true;
@@ -1258,7 +1256,7 @@ export default class GameScene extends Phaser.Scene {
   _registerBackgroundNPCs(oldMap, newMap) {
     const conn = this._conn;
     if (!conn?.connected) return;
-    for (const npc of this.npcs) {
+    for (const npc of this.entities.npcs) {
       const npcMap = npc._map || oldMap;
       if (npcMap === newMap) continue; // NPC is coming with us
       const runner = this._taskRunners.get(npc.id);
@@ -1293,7 +1291,7 @@ export default class GameScene extends Phaser.Scene {
       const pos = tilePos(col, row);
       const tree = new Tree(this, pos.x, pos.y);
       tree.treeIndex = i;
-      this.trees.push(tree);
+      this.entities.trees.push(tree);
     }
   }
 
@@ -1311,7 +1309,7 @@ export default class GameScene extends Phaser.Scene {
       const pos = tilePos(col, row);
       const tree = new Tree(this, pos.x, pos.y);
       tree.treeIndex = i;
-      this.trees.push(tree);
+      this.entities.trees.push(tree);
     }
   }
 
@@ -1319,7 +1317,7 @@ export default class GameScene extends Phaser.Scene {
 
   /** Cost to build the next NPC: 10, 100, 1000, 10000, ... */
   _npcBuildCost() {
-    return 10 * Math.pow(10, this.npcs.length);
+    return 10 * Math.pow(10, this.entities.npcs.length);
   }
 
   _tryBuildNPC() {
@@ -1334,7 +1332,7 @@ export default class GameScene extends Phaser.Scene {
     );
     const npc = new NPC(this, pos.x, pos.y, undefined, this.playerId);
     npc._map = this._currentMap;
-    this.npcs.push(npc);
+    this.entities.npcs.push(npc);
     const runner = new NPCTaskRunner(this, npc);
     this._taskRunners.set(npc.id, runner);
     this._npcBrains.set(npc.id, new NPCBrain(this, npc, runner));
@@ -1747,7 +1745,7 @@ export default class GameScene extends Phaser.Scene {
     const actions = [];
     // Ground equipment item: show NPC pickup options
     if (entity?._isEquipment && entity?._serverId) {
-      for (const npc of (this.npcs || [])) {
+      for (const npc of (this.entities.npcs || [])) {
         if (npc._dead || npc._knockedOut) continue;
         actions.push({ label: `${npc.getName()} Equip`, action: () => {
           this._conn?.send({ type: 'npc_pickup_equipment', npc_id: npc.id, item_id: entity._serverId });
@@ -1802,7 +1800,7 @@ export default class GameScene extends Phaser.Scene {
         const npc = new NPC(this, data.x || 480, data.y || 480);
         npc.loadFrom(data);
         if (!npc._map) npc._map = this._currentMap;
-        this.npcs.push(npc);
+        this.entities.npcs.push(npc);
         const runner = new NPCTaskRunner(this, npc);
         this._taskRunners.set(npc.id, runner);
         this._npcBrains.set(npc.id, new NPCBrain(this, npc, runner));
@@ -1849,7 +1847,7 @@ export default class GameScene extends Phaser.Scene {
     const worldY = ptr.worldY;
     let best = null;
     let bestDist = Infinity;
-    for (const npc of this.npcs) {
+    for (const npc of this.entities.npcs) {
       if (npc.isDead()) continue;
       const dist = Phaser.Math.Distance.Between(worldX, worldY, npc.x, npc.y);
       const radius = this._entityClickRadius(npc);
@@ -2447,7 +2445,7 @@ export default class GameScene extends Phaser.Scene {
   _syncNPCsToServer() {
     if (!this._conn?.connected || this.playerId === 'default') return;
     const npcs = {};
-    for (const npc of this.npcs) {
+    for (const npc of this.entities.npcs) {
       // Include soul/relationship data so other players can see what NPCs think of them
       const soulData = {};
       if (npc.soul?.relationships) {
@@ -2510,7 +2508,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _saveAllNPCs() {
-    for (const npc of this.npcs) {
+    for (const npc of this.entities.npcs) {
       if (!npc.isDead()) this._saveNPC(npc);
     }
   }
@@ -2521,7 +2519,7 @@ export default class GameScene extends Phaser.Scene {
   async _handleIncomingChat(data) {
     const { from, from_color, target_npc_id, text, meta } = data;
     // Find our local NPC by ID
-    const npc = this.npcs.find(n => n.id === target_npc_id);
+    const npc = this.entities.npcs.find(n => n.id === target_npc_id);
     if (!npc || npc.isDead()) return;
 
     // Show the incoming message as a bubble on the NPC

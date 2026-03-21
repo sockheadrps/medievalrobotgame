@@ -20,7 +20,7 @@ export class WorldSyncController {
   syncTrees(serverTrees) {
     if (!serverTrees) return;
     for (const st of serverTrees) {
-      const tree = this.scene.trees[st.id];
+      const tree = this.scene.entities.trees[st.id];
       if (!tree) continue;
       tree.setChopped(st.chopped);
     }
@@ -76,8 +76,8 @@ export class WorldSyncController {
     }
     for (const [id, gi] of Object.entries(scene._groundItemSprites)) {
       if (!seenIds.has(id)) {
-        const idx = scene.groundItems.indexOf(gi);
-        if (idx >= 0) scene.groundItems.splice(idx, 1);
+        const idx = scene.entities.groundItems.indexOf(gi);
+        if (idx >= 0) scene.entities.groundItems.splice(idx, 1);
         gi.destroy();
         delete scene._groundItemSprites[id];
       }
@@ -104,7 +104,7 @@ export class WorldSyncController {
         }
         dummy._serverId = did;
         scene._dummySprites[did] = dummy;
-        scene.dummies.push(dummy);
+        scene.entities.dummies.push(dummy);
       }
       if (!sd.etrainer) {
         dummy.hp = sd.hp;
@@ -114,8 +114,8 @@ export class WorldSyncController {
     }
     for (const [did, dummy] of Object.entries(scene._dummySprites)) {
       if (!seenIds.has(did)) {
-        const idx = scene.dummies.indexOf(dummy);
-        if (idx >= 0) scene.dummies.splice(idx, 1);
+        const idx = scene.entities.dummies.indexOf(dummy);
+        if (idx >= 0) scene.entities.dummies.splice(idx, 1);
         dummy.destroy();
         delete scene._dummySprites[did];
       }
@@ -536,7 +536,7 @@ export class WorldSyncController {
     const isNPC = who && who !== scene.playerId;
     let npcName = who;
     if (isNPC) {
-      const npc = scene.npcs.find((n) => n.id === who);
+      const npc = scene.entities.npcs.find((n) => n.id === who);
       if (npc) npcName = npc.getName();
     }
     if (results && results.length > 0) {
@@ -552,7 +552,7 @@ export class WorldSyncController {
     const scene = this.scene;
     const { who, consumed, upgraded, stat } = result;
     const isNPC = who && who !== scene.playerId;
-    const name = isNPC ? (scene.npcs.find(n => n.id === who)?.getName() || who) : 'You';
+    const name = isNPC ? (scene.entities.npcs.find(n => n.id === who)?.getName() || who) : 'You';
     if (!consumed) {
       scene.chatBox?._addLog(`${name} could not use a crystal.`, '#ff8888');
       return;
@@ -560,7 +560,7 @@ export class WorldSyncController {
     if (upgraded && stat) {
       const label = String(stat).replace('blast_', '').replace('barrier_', 'barrier ');
       const actor = isNPC
-        ? scene.npcs.find((n) => n.id === who)
+        ? scene.entities.npcs.find((n) => n.id === who)
         : scene.player;
       const value = Number(actor?.kiBlastBonuses?.[stat] || 0);
       scene.chatBox?._addLog(`${name} absorbed the crystal! +1% ${label}${value > 0 ? ` (now ${value}%)` : ''}`, '#44eeff');
