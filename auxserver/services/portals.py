@@ -1,9 +1,12 @@
 """Portal & map transition: detection, spawn resolution, map init."""
 
 import json
+import logging
 from pathlib import Path
 
 from services.game_state import PORTALS, TILE_SIZE
+
+logger = logging.getLogger(__name__)
 
 
 class PortalService:
@@ -32,5 +35,5 @@ class PortalService:
                 if item.get("label", "").strip().lower() == "spawn":
                     return (int(item["tileCol"]), int(item["tileRow"]))
         except Exception as e:
-            print(f"[portals] Failed to read spawn point for {map_name}: {e}")
+            logger.warning("Failed to read spawn point for %s: %s", map_name, e)
         return None

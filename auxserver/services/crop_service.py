@@ -9,10 +9,13 @@ Players and NPCs within HARVEST_DIST can harvest a ready crop to receive a veget
 """
 
 import json
+import logging
 import time
 from pathlib import Path
 
 from core.constants import TILE_SIZE
+
+logger = logging.getLogger(__name__)
 MAPS_DIR      = Path(__file__).resolve().parent.parent / "maps"
 
 GROW_TIME     = 300.0   # 5 minutes to go from planted → ready to sprout
@@ -39,7 +42,7 @@ def _load_fertile_tiles(map_name: str) -> set[tuple[int, int]]:
                 fertile.add((int(t["x"]), int(t["y"])))
         return fertile
     except Exception as e:
-        print(f"[crops] Failed to load fertile tiles: {e}")
+        logger.warning("Failed to load fertile tiles: %s", e)
         return set()
 
 
@@ -48,7 +51,7 @@ class CropManager:
         self._fertile: set[tuple[int, int]] = _load_fertile_tiles(map_name)
         self._crops: dict[str, dict] = {}
         self._next_id = 0
-        print(f"[crops] Loaded {len(self._fertile)} fertile soil tiles")
+        logger.info("Loaded %d fertile soil tiles", len(self._fertile))
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -71,7 +74,7 @@ class CropManager:
             if crop["col"] == col and crop["row"] == row and crop["stage"] != "harvested":
                 return "occupied"
         self._plant(col, row)
-        print(f"[crops] {planter_id} planted seed at ({col},{row})")
+        logger.debug("%s planted seed at (%d,%d)", planter_id, col, row)
         return "planted"
 
     def try_harvest(self, crop_id: str, harvester_id: str) -> str | None:
@@ -84,7 +87,7 @@ class CropManager:
             return None
         crop["stage"]       = "harvested"
         crop["harvested_at"] = time.time()
-        print(f"[crops] {crop_id} harvested by {harvester_id}")
+        logger.debug("%s harvested by %s", crop_id, harvester_id)
         return "vegetable"
 
     def tick(self, dt: float):

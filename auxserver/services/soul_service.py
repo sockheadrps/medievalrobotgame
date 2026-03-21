@@ -1,6 +1,9 @@
 import json
+import logging
 
 from schemas.soul import DialogueRequest, NPCSaveRequest, SoulContext
+
+logger = logging.getLogger(__name__)
 from services.prompt_loader import load_prompt, render_prompt
 from services import database as db
 from services import personality_types as ptypes
@@ -165,7 +168,7 @@ async def generate_dialogue(request: DialogueRequest) -> dict:
         max_tokens=300,
         timeout=60.0,
     )
-    print(f"[dialogue:{request.npc_id}] raw -> {raw!r}")
+    logger.debug("dialogue[%s] raw -> %r", request.npc_id, raw)
     result = extract_soul_json(raw)
     dialogue = result.get("dialogue", "...")
     deltas = clamp_deltas(result.get("emotion_deltas", {}))

@@ -1,6 +1,9 @@
 from __future__ import annotations
+import logging
 
 from core.config import PROMPTS_DIR
+
+logger = logging.getLogger(__name__)
 from services.template_renderer import render, TemplateError
 
 
@@ -37,7 +40,7 @@ def render_prompt(
     try:
         return render(template, context, allowed_prefixes=allowed_prefixes)
     except TemplateError as e:
-        print(f"[TemplateError:{category}] {e}")
+        logger.warning("TemplateError[%s]: %s", category, e)
         # Fall back to raw template on render failure
         return template
 
