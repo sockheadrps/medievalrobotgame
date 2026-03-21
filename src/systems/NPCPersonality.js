@@ -6,12 +6,12 @@
 // ── Drive growth rates (per second, 0–1 scale) ──────────────────────────────
 // Higher = this drive fills faster for this personality type.
 export const DRIVE_GROWTH_RATES = {
-  Guardian:   { aggression:0.05, attachment:0.09, curiosity:0.04, greed:0.03, social:0.07, survival:0.08, ambition:0.06 },
-  Berserker:  { aggression:0.18, attachment:0.04, curiosity:0.06, greed:0.05, social:0.03, survival:0.06, ambition:0.10 },
-  Scout:      { aggression:0.04, attachment:0.05, curiosity:0.15, greed:0.06, social:0.08, survival:0.07, ambition:0.07 },
-  Caretaker:  { aggression:0.02, attachment:0.12, curiosity:0.05, greed:0.02, social:0.14, survival:0.05, ambition:0.05 },
-  Paranoid:   { aggression:0.06, attachment:0.06, curiosity:0.03, greed:0.04, social:0.04, survival:0.16, ambition:0.05 },
-  Pragmatist: { aggression:0.05, attachment:0.05, curiosity:0.07, greed:0.10, social:0.07, survival:0.07, ambition:0.10 },
+  Guardian:   { aggression:0.005, attachment:0.009, curiosity:0.004, greed:0.003, social:0.007, survival:0.008, ambition:0.006 },
+  Berserker:  { aggression:0.018, attachment:0.004, curiosity:0.006, greed:0.005, social:0.003, survival:0.006, ambition:0.010 },
+  Scout:      { aggression:0.004, attachment:0.005, curiosity:0.015, greed:0.006, social:0.008, survival:0.007, ambition:0.007 },
+  Caretaker:  { aggression:0.002, attachment:0.012, curiosity:0.005, greed:0.002, social:0.014, survival:0.005, ambition:0.005 },
+  Paranoid:   { aggression:0.006, attachment:0.006, curiosity:0.003, greed:0.004, social:0.004, survival:0.016, ambition:0.005 },
+  Pragmatist: { aggression:0.005, attachment:0.005, curiosity:0.007, greed:0.010, social:0.007, survival:0.007, ambition:0.010 },
 };
 
 // Emotion → drive growth multipliers. Applied when emotion exceeds 0.1.
