@@ -20,5 +20,8 @@ def test_combat_imports():
 
 
 def test_resources_imports():
+    from services.game_state import GameState
     from services.resources import ResourceService
-    assert ResourceService is not None
+    gs = GameState.__new__(GameState)  # bypass __init__ (avoids DB requirement)
+    gs.resources = ResourceService(gs)
+    assert isinstance(gs.resources, ResourceService)
