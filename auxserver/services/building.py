@@ -259,9 +259,8 @@ class BuildingService:
     # ── Building Tick ──────────────────────────────────────────────────────────
 
     def _tick_buildings(self, dt, now):
-        """Server-side processing for conveyors, log cutters and minecart tracks."""
+        """Server-side processing for conveyors, crafting stations and minecart tracks."""
         CONVEYOR_INTERVAL = 1.0     # seconds per conveyor tick
-        LOG_CUTTER_INTERVAL = 2.0   # seconds per cut cycle
         TRACK_INTERVAL = 0.8        # seconds per track tick
         MAX_PLANKS = 9
 
