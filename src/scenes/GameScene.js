@@ -192,7 +192,7 @@ export default class GameScene extends Phaser.Scene {
     this.player = new Player(this, sp.x, sp.y);
 
     // Movement controller — handles client-side prediction, collision, barrier resolution
-    this._movement = new MovementController(this, this.player, this.entities);
+    this._movement = new MovementController(this, this.player);
 
     // Track ground item visuals by server ID
     this._groundItemSprites = {};

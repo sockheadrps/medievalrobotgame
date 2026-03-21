@@ -254,10 +254,10 @@ export default class InputController {
   }
 
   update() {
-    // Movement input polling is handled inline in GameScene.update()
-    // because it depends on many scene-level state flags and does
-    // client-side prediction that must run at the exact right point
-    // in the update loop. Nothing additional needed here.
+    // Movement input polling is handled by MovementController.update(),
+    // which GameScene calls each frame. InputController only wires up
+    // discrete event listeners (keyboard/pointer); it has no per-frame
+    // polling work of its own.
   }
 
   destroy() {

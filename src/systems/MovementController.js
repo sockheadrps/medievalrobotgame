@@ -6,10 +6,9 @@ import { TILE_SIZE } from '../constants.js';
  * GameScene calls this._movement.update(delta) each frame.
  */
 export default class MovementController {
-  constructor(scene, player, entities) {
+  constructor(scene, player) {
     this.scene = scene;
     this.player = player;
-    this.entities = entities;
   }
 
   /**
