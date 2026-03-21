@@ -25,6 +25,7 @@ class AssetRegistry:
         self._base_anims: dict[str, int] = {}   # flattened baseplayer name→frame
         self.crafting_stations: dict[str, CraftingStationDef] = {}
         self._loaded: bool = False
+        self._assets_dir: Optional[Path] = None
 
     # ── public API ────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ class AssetRegistry:
         """Scan assets/ tree and populate registries."""
         if self._loaded:
             return  # already scanned at startup
+        self._assets_dir = assets_dir
         self._load_base_animations(assets_dir)
         self._scan_world_objects(assets_dir / "world_objects")
         self._scan_equipment(assets_dir / "equipment")
@@ -49,7 +51,20 @@ class AssetRegistry:
         return self.equipment.get(eq_id)
 
     def get_crafting_station(self, station_id: str) -> Optional[CraftingStationDef]:
-        return self.crafting_stations.get(station_id)
+        if station_id in self.crafting_stations:
+            return self.crafting_stations[station_id]
+        # Fallback: try loading from disk (handles stations created after startup)
+        if self._assets_dir:
+            cfg_path = self._assets_dir / "crafting_stations" / station_id / "station.json"
+            if cfg_path.exists():
+                try:
+                    data = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+                    st = CraftingStationDef(**data)
+                    self.crafting_stations[station_id] = st
+                    return st
+                except Exception as e:
+                    logger.warning("get_crafting_station: failed to load %s: %s", station_id, e)
+        return None
 
     def get_manifest(self) -> dict:
         """Return JSON-serialisable manifest for the client."""
