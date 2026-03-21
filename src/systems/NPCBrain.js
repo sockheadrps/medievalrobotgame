@@ -10,7 +10,7 @@
 import Phaser from 'phaser';
 import { TILE_SIZE } from '../constants.js';
 import { generateDecision, checkConnection } from '../net/LLMClient.js';
-import { DriveSystem, TASK_DRIVE_AFFINITY } from './DriveSystem.js';
+import { DriveSystem, DRIVE_TASK_SATISFACTION } from './DriveSystem.js';
 import { PlayerCommandHandler, _makeFallbackResponse } from './npc/PlayerCommandHandler.js';
 import { NPCBrainData } from './npc/NPCBrainData.js';
 
@@ -88,6 +88,7 @@ export class NPCBrain {
 
     this._commandHandler = new PlayerCommandHandler(scene, npc, this);
     this._dataHelper = new NPCBrainData(scene, npc, this);
+    this._lastSyncTime = 0;
   }
 
   // ── Personality-scaled decision timings ─────────────────────────────────────
@@ -129,7 +130,8 @@ export class NPCBrain {
   onPlayerCommand() {
     const now = Date.now();
     this._lastDecisionTime = now;
-    this._npc._manualCommandUntil = now + 12000;
+    // Don't shrink an already-longer lock (PlayerCommandHandler may have set 2min/1hr)
+    this._npc._manualCommandUntil = Math.max(this._npc._manualCommandUntil || 0, now + 12000);
     this._npc._emotionReactTarget = null;
     this._lastDriveIntent = null; // allow drive re-evaluation after manual command window expires
     // Damp the dominant drive — player's attention distracts the NPC
@@ -155,11 +157,59 @@ export class NPCBrain {
     return this._commandHandler.handlePlayerCommand(text, ctx);
   }
 
+  /** Push live NPC state to the server for the /npc dashboard. */
+  _syncToServer() {
+    const conn = this._scene?._conn;
+    console.log(`[NPCBrain] _syncToServer ${this._npc.id}: conn=`, !!conn, 'connected=', conn?.connected);
+    if (!conn?.connected) return;
+    const npc = this._npc;
+    const soul = npc.soul || {};
+    const status = this._runner.getStatus();
+    const drives = soul.drives ? Object.fromEntries(
+      Object.entries(soul.drives).filter(([k]) => !k.startsWith('_'))
+    ) : {};
+    conn.send({
+      type: 'npc_sync',
+      npc_id: npc.id,
+      name: npc.getName?.() || npc.id,
+      hp: npc.hp, maxHp: npc.maxHp,
+      ki: npc.ki, maxKi: npc.maxKi,
+      str: npc.str, def: npc.def,
+      level: npc.level, xp: npc.xp,
+      x: Math.round(npc.x), y: Math.round(npc.y),
+      map: npc._map || this._scene._currentMap || 'level_01',
+      dead: npc.isDead?.() || false,
+      current_task: status.tasks[0]?.task || null,
+      task_running: status.running || false,
+      manual_locked: !!(npc._manualCommandUntil && Date.now() < npc._manualCommandUntil),
+      last_decision: this._lastDecision ? {
+        intent: this._lastDecision.primary_intent,
+        reason: this._lastDecision.reason_summary,
+        speech: this._lastDecision.speech,
+        confidence: this._lastDecision.decision_confidence,
+      } : null,
+      recent_events: this._recentEvents.slice(-5).map(e => e.text || e.type),
+      drives,
+      relationships: soul.relationships || {},
+      personality: soul.personality || {},
+      memories: soul.memories || {},
+      diary: soul.diary || [],
+    });
+  }
+
   /** Called every frame from GameScene. */
   update(delta) {
-    if (!this._enabled || this._npc.isDead() || this._pending) return;
+    if (!this._enabled || this._npc.isDead()) return;
 
     const now = Date.now();
+
+    // Periodic server sync for /npc dashboard — runs even while LLM is pending
+    if (now - this._lastSyncTime > 4000) {
+      this._syncToServer();
+      this._lastSyncTime = now;
+    }
+
+    if (this._pending) return;
 
     // ── Drive tick (runs every frame, before all decision logic) ──
     DriveSystem.tick(this._npc, this._scene, delta);
@@ -499,6 +549,7 @@ export class NPCBrain {
     }
 
     this._lastDecision = decision;
+    this._syncToServer();
   }
 
   _validate(raw) {

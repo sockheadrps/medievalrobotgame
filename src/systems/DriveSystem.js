@@ -27,30 +27,28 @@ const DRIVE_TO_INTENTS = {
   ambition:   ['train', 'practice_ki'],
 };
 
-// Task → drive affinity (which drive does this task satisfy / is associated with)
-export const TASK_DRIVE_AFFINITY = {
-  gather:               'greed',
-  gather_wood:          'greed',
-  gather_stone:         'greed',
-  gather_all:           'greed',
-  give_logs:            'greed',
-  give_materials:       'greed',
-  train:                'ambition',
-  practice_ki:          'ambition',
-  follow:               'attachment',
-  stay_near_player:     'attachment',
-  defend_player:        'attachment',
-  attack_nearest_enemy: 'aggression',
-  attack_player:        'aggression',
-  attack_npc:           'aggression',
-  retreat:              'survival',
-  flee_player:          'survival',
-  socialize_npc:        'social',
-  wander_explore:       'curiosity',
-  idle:                 null,
-  steal_logs:           'greed',
-  mine_ore:             'greed',
-  deposit_to_crate:     'greed',
+// Task → drives satisfied (which drives does this task satisfy / is associated with)
+export const DRIVE_TASK_SATISFACTION = {
+  gather:               ['greed'],
+  gather_wood:          ['greed'],
+  gather_stone:         ['greed'],
+  gather_all:           ['greed'],
+  mine_ore:             ['greed'],
+  deposit_to_crate:     ['greed'],
+  give_logs:            ['attachment'],
+  give_materials:       ['attachment'],
+  train:                ['ambition'],
+  practice_ki:          ['ambition'],
+  wander_explore:       ['curiosity'],
+  follow:               ['attachment', 'survival'],
+  stay_near_player:     ['attachment'],
+  socialize_npc:        ['social'],
+  greet_npc:            ['social'],
+  attack_nearest_enemy: ['aggression'],
+  attack_npc:           ['aggression'],
+  defend_player:        ['aggression', 'attachment'],
+  hold_position:        [],
+  observe:              ['curiosity'],
 };
 
 // Decay applied to a drive per second while its task is executing
@@ -253,12 +251,12 @@ export class DriveSystem {
   static applyTaskDecay(npc, taskName, deltaMs) {
     const drives = npc.soul?.drives;
     if (!drives) return;
-
-    const affinity = TASK_DRIVE_AFFINITY[taskName];
-    if (!affinity) return;
-
+    const satisfied = DRIVE_TASK_SATISFACTION[taskName];
+    if (!satisfied?.length) return;
     const dt = Math.min(deltaMs / 1000, MAX_DT_SEC);
-    drives[affinity] = Math.max(0, (drives[affinity] ?? 0) - TASK_DECAY_RATE * dt);
+    for (const drive of satisfied) {
+      drives[drive] = Math.max(0, (drives[drive] ?? 0) - TASK_DECAY_RATE * dt);
+    }
   }
 
   /**
@@ -269,7 +267,7 @@ export class DriveSystem {
     const drives = npc.soul?.drives;
     if (!drives) return { level: 'willing', speechHint: 'normal' };
 
-    const commandDrive = TASK_DRIVE_AFFINITY[commandTask];
+    const commandDrive = DRIVE_TASK_SATISFACTION[commandTask]?.[0] ?? null;
 
     // Find dominant drive name and value
     let dominantDrive = 'attachment', dominantVal = 0;
