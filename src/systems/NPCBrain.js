@@ -327,13 +327,12 @@ export class NPCBrain {
     const scene = this._scene;
 
     // ── Vocabulary learning — all local NPCs overhear the owner's speech ──
-    const isRemote = false; // this method is only called for local NPCs
     const knownNames = new Set();
     for (const n of (scene?.npcs || [])) {
       const name = n.getName?.() || n.name;
       if (name) knownNames.add(name.toLowerCase());
     }
-    for (const rp of (scene?.remotePlayers?.values?.() || [])) {
+    for (const rp of Object.values(scene?._remotePlayers || {})) {
       if (rp.name) knownNames.add(rp.name.toLowerCase());
     }
     for (const rn of (scene?.remoteNPCs?.values?.() || [])) {
@@ -1123,10 +1122,11 @@ export class NPCBrain {
       this._npc._manualCommandUntil = Date.now() + 8000;
       this._npc._emotionReactTarget = null;
     }
+    const prevIntent = this._lastIntent;
     this._lastIntent = intent;
 
     // Apply speech — but only if something actually changed (don't spam repeated lines)
-    if (decision.speech && intent !== this._lastIntent) {
+    if (decision.speech && intent !== prevIntent) {
       npc.showBubble(decision.speech, 4000);
     }
 

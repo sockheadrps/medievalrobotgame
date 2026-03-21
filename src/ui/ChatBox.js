@@ -232,7 +232,7 @@ export class ChatBox {
   }
 
   async _submit() {
-    const text = this._input.trim();
+    let text = this._input.trim();
     if (!text) { this._closeAndDeselect(); return; }
 
     // Save to history (avoid consecutive duplicates)
