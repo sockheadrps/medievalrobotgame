@@ -671,7 +671,7 @@ export class NPCBrain {
           stepIndex: 0,
           repeat: !!decision.goal.repeat,
           startedAt: Date.now(),
-          maxMs: decision.goal.maxMs ?? 120000,
+          maxMs: Math.min(decision.goal.maxMs ?? 120000, 300000),
         };
       }
     } else if (decision.goal === null) {
@@ -717,6 +717,25 @@ export class NPCBrain {
     }
 
     if (typeof raw.reason_summary === 'string') out.reason_summary = raw.reason_summary.slice(0, 200);
+
+    // Pass through goal if present and valid
+    if (raw.goal === null) {
+      out.goal = null; // explicit clear signal
+    } else if (raw.goal && typeof raw.goal === 'object') {
+      const steps = Array.isArray(raw.goal.steps)
+        ? raw.goal.steps.filter(s => typeof s === 'string')
+        : [];
+      if (steps.length > 0) {
+        out.goal = {
+          intent: typeof raw.goal.intent === 'string' ? raw.goal.intent.slice(0, 100) : 'pursue goal',
+          steps,
+          repeat: !!raw.goal.repeat,
+          maxMs: Math.min(typeof raw.goal.maxMs === 'number' ? raw.goal.maxMs : 120000, 300000),
+        };
+      }
+      // if steps is empty, don't set out.goal — treat as absent
+    }
+    // if raw.goal is absent/undefined, don't set out.goal — leave existing goal unchanged
 
     if (typeof raw.decision_confidence === 'number') {
       out.decision_confidence = Math.max(0, Math.min(1, raw.decision_confidence));
