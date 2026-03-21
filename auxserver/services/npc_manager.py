@@ -289,18 +289,18 @@ class NPCManager:
                         amount = random.randint(drop.min, drop.max)
                         npc_inv[drop.resource] = npc_inv.get(drop.resource, 0) + amount
                         bg.setdefault("_gathered", {})[drop.resource] = bg["_gathered"].get(drop.resource, 0) + amount
-                        bg["_tick_count"] = bg.get("_tick_count", 0) + 1
                     if wo["hp"] <= 0:
                         wo["depleted"] = True
                         respawn_secs = random.uniform(wo_def.respawn_min, wo_def.respawn_max)
                         wo["respawn_at"] = now + respawn_secs
                     mined = True
+                    bg["_tick_count"] = bg.get("_tick_count", 0) + 1
                     break
                 # If nothing to mine, just wait (ores will respawn)
 
             elif task_type == "train":
                 npc_stats = npc_state.setdefault("stats", {})
-                xp_gain = npc_stats.get("level", 1) * 2
+                xp_gain = npc_state.get("level", 1) * 2
                 npc_stats["xp"] = npc_stats.get("xp", 0) + xp_gain
                 bg["_xp_gained"] = bg.get("_xp_gained", 0) + xp_gain
                 bg["_tick_count"] = bg.get("_tick_count", 0) + 1
