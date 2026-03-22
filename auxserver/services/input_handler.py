@@ -9,6 +9,7 @@ import math
 import time
 
 from core.constants import PLAYER_SPEED, PLAYER_RUN_SPEED
+from services.database import get_setting as _db_get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,17 @@ class InputHandler:
         if (p.get("dead") or p.get("knocked_out")) and msg_type not in ("sync_npcs", "admin"):
             return
 
+        # Ki silence gate — block ki actions while silenced
+        _KI_MSG_TYPES = {
+            "ki_blast_player", "ki_blast_npc", "ki_blast_dummy",
+            "ki_blast_ground_item", "ki_blast_ki_target", "ki_blast_miss",
+            "absorb_npc", "npc_absorb_npc",
+            "npc_ki_blast_player", "npc_ki_blast_npc", "npc_ki_blast_ki_target",
+            "activate_barrier",
+        }
+        if msg_type in _KI_MSG_TYPES and p.get("ki_silenced_until", 0) > time.time():
+            return  # silenced — no ki actions allowed
+
         if msg_type == "stop":
             p["vx"] = 0
             p["vy"] = 0
@@ -44,6 +56,14 @@ class InputHandler:
             dy = data.get("dy", 0)
             running = data.get("running", False)
             speed = PLAYER_RUN_SPEED if running else PLAYER_SPEED
+            if p.get("flying"):
+                speed *= 1.5
+            try:
+                _sm = float(_db_get_setting("admin_speed_multiplier", "1") or "1")
+                if _sm > 0:
+                    speed *= _sm
+            except (ValueError, TypeError):
+                pass
 
             # Normalize diagonal
             if dx != 0 and dy != 0:
@@ -93,7 +113,8 @@ class InputHandler:
             gs.combat._try_attack_dummy(pid, data.get("dummy_id"))
 
         elif msg_type == "build_dummy":
-            gs.building._try_build_dummy(pid, data.get("logs", 10))
+            gs.building._try_build_dummy(pid, data.get("logs", 10),
+                                         col=data.get("col"), row=data.get("row"))
 
         elif msg_type == "delete_dummy":
             dummy_id = data.get("dummy_id")
@@ -294,6 +315,40 @@ class InputHandler:
 
         elif msg_type == "activate_barrier":
             gs.combat._activate_barrier(pid, data.get("npc_id"))
+
+        elif msg_type == "set_active_blast":
+            blast_id = data.get("blast_id")
+            learned = p.get("learned_blasts", [])
+            if blast_id in learned:
+                p["active_blast_id"] = blast_id
+            # Silently reject if not known
+
+        elif msg_type == "use_blast_crystal":
+            inv = p.setdefault("inventory", {})
+            if inv.get("blast_crystal", 0) < 1:
+                return
+            from services.combat_ki import BLAST_DEFS
+            learned = p.setdefault("learned_blasts", [])
+            unknown = [bid for bid in BLAST_DEFS if bid not in learned]
+            if not unknown:
+                # All blasts known — award ki XP instead
+                gs.player_manager._grant_ki_skill_xp(p, 50)
+                gs.fx_events.append({
+                    "type": "chat_hint", "pid": pid,
+                    "text": "You already know all blast techniques! You absorb the crystal's energy. (+50 Ki XP)"
+                })
+            else:
+                import random as _random
+                new_blast = _random.choice(unknown)
+                learned.append(new_blast)
+                blast_name = BLAST_DEFS[new_blast].get("displayName", new_blast)
+                gs.fx_events.append({
+                    "type": "chat_hint", "pid": pid,
+                    "text": f"The crystal resonates with your ki! You learned: {blast_name}!"
+                })
+            inv["blast_crystal"] = inv.get("blast_crystal", 0) - 1
+            if inv["blast_crystal"] <= 0:
+                del inv["blast_crystal"]
 
         elif msg_type == "chat":
             text = data.get("text", "")
