@@ -231,9 +231,26 @@ function buildEffectsUI() {
   }
 }
 
+function ensureDefExists() {
+  if (!currentSprite) return null;
+  let def = getDefBySprite(currentSprite);
+  if (!def) {
+    def = {
+      id: slugify(document.getElementById('f-id').value || currentSprite.replace(/^\d+_/, '')),
+      displayName: document.getElementById('f-displayName').value || currentSprite.replace(/^\d+_/, '').replace(/_/g, ' '),
+      sprite: currentSprite,
+      kiCost: parseInt(document.getElementById('f-kiCost').value) || 8,
+      effects: { ...EFFECT_DEFAULTS },
+    };
+    blastDefs.push(def);
+    refreshThumb(currentSprite);
+    document.getElementById('delete-btn').style.display = 'inline-block';
+  }
+  return def;
+}
+
 function commitEffectValue(key, value) {
-  if (!currentSprite) return;
-  const def = getDefBySprite(currentSprite);
+  const def = ensureDefExists();
   if (!def) return;
   def.effects[key] = value;
   markDirty();
@@ -262,28 +279,32 @@ function selectSprite(sprite) {
   document.getElementById('editor').style.display = 'block';
   document.getElementById('sprite-name').textContent = sprite;
 
-  let def = getDefBySprite(sprite);
-  if (!def) {
-    def = {
-      id: slugify(sprite.replace(/^\d+_/, '')),
-      displayName: sprite.replace(/^\d+_/, '').replace(/_/g, ' '),
-      sprite,
-      kiCost: 8,
-      effects: { ...EFFECT_DEFAULTS },
-    };
-    blastDefs.push(def);
-    markDirty();
-    refreshThumb(sprite);
-  }
+  const existing = getDefBySprite(sprite);
+  const def = existing || {
+    id: slugify(sprite.replace(/^\d+_/, '')),
+    displayName: sprite.replace(/^\d+_/, '').replace(/_/g, ' '),
+    sprite,
+    kiCost: 8,
+    effects: { ...EFFECT_DEFAULTS },
+  };
+  // Only show Remove button for sprites that already have a saved definition
+  document.getElementById('delete-btn').style.display = existing ? 'inline-block' : 'none';
 
   loadDefIntoForm(def);
   startPreview(sprite);
 }
 
+function deleteCurrentBlast() {
+  if (!currentSprite) return;
+  blastDefs = blastDefs.filter(d => d.sprite !== currentSprite);
+  refreshThumb(currentSprite);
+  document.getElementById('delete-btn').style.display = 'none';
+  markDirty();
+}
+
 function wireIdentityInputs() {
   document.getElementById('f-displayName').addEventListener('input', e => {
-    if (!currentSprite) return;
-    const def = getDefBySprite(currentSprite);
+    const def = ensureDefExists();
     if (!def) return;
     def.displayName = e.target.value;
     const idField = document.getElementById('f-id');
@@ -292,20 +313,19 @@ function wireIdentityInputs() {
     markDirty();
   });
   document.getElementById('f-id').addEventListener('input', e => {
-    if (!currentSprite) return;
-    const def = getDefBySprite(currentSprite);
+    const def = ensureDefExists();
     if (!def) return;
     def.id = e.target.value;
     markDirty();
   });
   document.getElementById('f-kiCost').addEventListener('input', e => {
-    if (!currentSprite) return;
-    const def = getDefBySprite(currentSprite);
+    const def = ensureDefExists();
     if (!def) return;
     def.kiCost = parseInt(e.target.value) || 8;
     markDirty();
   });
   document.getElementById('save-btn').addEventListener('click', saveDefs);
+  document.getElementById('delete-btn').addEventListener('click', deleteCurrentBlast);
 }
 
 async function init() {
