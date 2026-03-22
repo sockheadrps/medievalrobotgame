@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Blast Editor</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { display: flex; flex-direction: column; height: 100vh; background: #1a1a2e; color: #eee; font-family: sans-serif; font-size: 13px; }
+    #header { padding: 8px 16px; background: #16213e; font-size: 16px; font-weight: bold; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 16px; }
+    #main { display: flex; flex: 1; overflow: hidden; }
+    #sidebar { width: 200px; overflow-y: auto; background: #12121e; border-right: 1px solid #333; padding: 8px; display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; }
+    .sprite-thumb { width: 56px; height: 56px; cursor: pointer; border: 2px solid #333; border-radius: 4px; background: #1a1a2e; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
+    .sprite-thumb:hover { border-color: #4fd6ff; }
+    .sprite-thumb.selected { border-color: #ffd700; }
+    .sprite-thumb.configured::after { content: '✓'; position: absolute; top: 2px; right: 4px; font-size: 10px; color: #4dff88; }
+    .sprite-thumb.dimmed { opacity: 0.4; }
+    .sprite-thumb canvas { image-rendering: pixelated; }
+    #panel { flex: 1; overflow-y: auto; padding: 16px; }
+    #empty-state { text-align: center; margin-top: 80px; color: #666; }
+    #editor { display: none; }
+    .section { margin-bottom: 20px; }
+    .section h3 { color: #4fd6ff; margin-bottom: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+    .preview-wrap { display: flex; justify-content: center; margin-bottom: 12px; }
+    #preview-canvas { border: 1px solid #333; background: #111; image-rendering: pixelated; }
+    .row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .row label { width: 180px; flex-shrink: 0; color: #aaa; }
+    .row input[type=text], .row input[type=number] { width: 100px; background: #222; border: 1px solid #444; color: #eee; padding: 3px 6px; border-radius: 3px; }
+    .row input[type=range] { width: 120px; }
+    .group-label { background: #1e1e3a; padding: 4px 8px; border-radius: 3px; color: #888; font-size: 11px; margin: 8px 0 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    #save-bar { padding: 10px 16px; background: #16213e; border-top: 1px solid #333; display: flex; align-items: center; gap: 12px; }
+    #save-btn { background: #4fd6ff; color: #000; border: none; padding: 6px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    #save-btn:hover { background: #7fe8ff; }
+    #dirty-indicator { color: #ffa040; display: none; }
+    #status-msg { color: #4dff88; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    🔥 Blast Editor
+    <span style="color:#666;font-size:12px">Click a sprite in the sidebar to configure it as a blast move</span>
+  </div>
+  <div id="main">
+    <div id="sidebar" title="Click to select a blast sprite"></div>
+    <div id="panel">
+      <div id="empty-state">Select a blast sprite from the sidebar to begin.</div>
+      <div id="editor">
+        <div class="section">
+          <div class="preview-wrap"><canvas id="preview-canvas" width="96" height="96"></canvas></div>
+          <div class="row"><label>Sprite</label><span id="sprite-name" style="color:#ffd700"></span></div>
+        </div>
+        <div class="section">
+          <h3>Identity</h3>
+          <div class="row"><label>Display Name</label><input type="text" id="f-displayName" placeholder="My Blast"></div>
+          <div class="row"><label>ID (slug)</label><input type="text" id="f-id" placeholder="my_blast"></div>
+          <div class="row"><label>Ki Cost</label><input type="number" id="f-kiCost" min="1" max="50" value="8" style="width:70px"></div>
+        </div>
+        <div class="section">
+          <h3>Effects</h3>
+          <div id="effects-container"></div>
+        </div>
+        <div style="height:40px"></div>
+      </div>
+    </div>
+  </div>
+  <div id="save-bar">
+    <button id="save-btn">Save All</button>
+    <span id="dirty-indicator">● Unsaved changes</span>
+    <span id="status-msg"></span>
+  </div>
+  <script src="/static/blastedit.js"></script>
+</body>
+</html>
