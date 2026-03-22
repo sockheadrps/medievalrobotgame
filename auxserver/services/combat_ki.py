@@ -22,6 +22,31 @@ from services.game_state import (
 
 from services.combat_utils import CombatUtilsMixin
 
+import json as _json
+from pathlib import Path as _Path
+
+_BLAST_MOVES_PATH = _Path(__file__).resolve().parent.parent / "data" / "blast_moves.json"
+BLAST_DEFS: dict = {}
+
+
+def _load_blast_defs():
+    global BLAST_DEFS
+    try:
+        raw = _json.loads(_BLAST_MOVES_PATH.read_text(encoding="utf-8"))
+        BLAST_DEFS = {b["id"]: b for b in raw if "id" in b}
+        logger.info("Loaded %d blast definitions", len(BLAST_DEFS))
+    except Exception as e:
+        logger.warning("Failed to load blast_moves.json: %s", e)
+        BLAST_DEFS = {}
+
+
+def reload_blast_defs():
+    """Called by admin API after saving blast_moves.json."""
+    _load_blast_defs()
+
+
+_load_blast_defs()
+
 
 class CombatKiService(CombatUtilsMixin):
     """Ki blast, absorb, and ki-target combat."""
