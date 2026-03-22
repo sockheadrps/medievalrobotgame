@@ -18,6 +18,7 @@ from services.game_state import (
     dist,
     _gen_item_id,
 )
+from services.database import get_player_npc_limit
 
 
 class NPCManager:
@@ -35,6 +36,9 @@ class NPCManager:
         if not p or p.get("dead"):
             return
         if p.get("logs", 0) < 10:
+            return
+        limit = get_player_npc_limit()
+        if limit is not None and len(p.get("npc_ids", [])) >= limit:
             return
         p["logs"] -= 10
 
@@ -58,6 +62,7 @@ class NPCManager:
             "crystals": 0,
             "ki_blast_bonuses": {s: 0 for s in CRYSTAL_UPGRADE_STATS},
             "ki_moves": list(DEFAULT_KI_MOVES),
+            "has_ki_blast": True,
             "blastLevel": 0,
             "kiSkillLevel": 1,
             "kiSkillXp": 0,
@@ -69,6 +74,9 @@ class NPCManager:
             "inf_ki": False,
             "map": p.get("map", "level_01"),
         }
+        npc_state["learned_blasts"] = []
+        npc_state["active_blast_id"] = None
+        npc_state["last_blast_observe_at"] = 0.0
         self.gs.player_manager._ensure_default_ki_moves(npc_state)
         p.setdefault("npcs", {})[npc_id] = npc_state
         p.setdefault("npc_ids", []).append(npc_id)
@@ -94,7 +102,7 @@ class NPCManager:
                 for field in ("maxHp", "str", "def", "level", "xp", "maxLogs", "ki", "maxKi", "blastLevel",
                              "stones", "crystals", "ki_blast_bonuses", "ki_moves", "inf_ki",
                              "kiSkillLevel", "kiSkillXp", "barrier_proc_until", "barrier_proc_facing",
-                             "inventory", "equipment"):
+                             "inventory", "equipment", "learned_blasts", "active_blast_id"):
                     if field in existing:
                         npc_data[field] = existing[field]
                 if existing.get("has_ki_blast"):

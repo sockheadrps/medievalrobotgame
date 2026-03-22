@@ -74,6 +74,9 @@ class PlayerManager:
                 "barrier_cooldown": 0,
             },
             "ki_moves": list(DEFAULT_KI_MOVES),
+            "active_blast_id": None,
+            "learned_blasts": [],
+            "last_blast_observe_at": 0.0,
             "dead": False,
             "knocked_out": False,
             "knocked_until": None,
@@ -159,6 +162,8 @@ class PlayerManager:
                 else:
                     moves.append(move_id)
                 actor["ki_moves"] = moves
+        elif field == "has_ki_blast_toggle":
+            actor["has_ki_blast"] = not actor.get("has_ki_blast", False)
         elif field == "feathers":
             actor["feathers"] = actor.get("feathers", 0) + int(value)
         elif field == "blastLevel":

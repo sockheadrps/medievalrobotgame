@@ -287,6 +287,8 @@ def save_player(username: str, data: dict):
         "seeds": data.get("seeds", 0),
         "ki_blast_bonuses": data.get("ki_blast_bonuses", {}),
         "ki_moves": data.get("ki_moves", []),
+        "active_blast_id": data.get("active_blast_id"),
+        "learned_blasts": data.get("learned_blasts", []),
         "map": data.get("map", "level_01"),
         "equipment": data.get("equipment", {}),
         "inventory": data.get("inventory", {}),
@@ -344,10 +346,13 @@ def load_player(username: str) -> dict | None:
         "seeds": extra.get("seeds", 0),
         "ki_blast_bonuses": extra.get("ki_blast_bonuses", {}),
         "ki_moves": extra.get("ki_moves", []),
+        "active_blast_id": extra.get("active_blast_id"),
+        "learned_blasts": extra.get("learned_blasts", []),
         "copper": extra.get("copper", 0),
         "map": extra.get("map", "level_01"),
         "equipment": extra.get("equipment", {}),
         "inventory": extra.get("inventory", {}),
+        "last_blast_observe_at": 0.0,
     }
 
 
@@ -384,6 +389,58 @@ def list_players() -> list[str]:
     conn = _get_conn()
     rows = conn.execute("SELECT username FROM players").fetchall()
     return [r["username"] for r in rows]
+
+
+# ── Admin helpers ─────────────────────────────────────────────────────────────
+
+def get_player_npc_limit() -> int | None:
+    """Return max NPCs a player can own, or None for no limit."""
+    raw = get_setting("admin_npc_limit_player", "")
+    try:
+        v = int(raw)
+        return v if v > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def get_rival_npc_limit() -> int | None:
+    """Return max NPCs the AI rival can own, or None for no limit."""
+    raw = get_setting("admin_npc_limit_rival", "")
+    try:
+        v = int(raw)
+        return v if v > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def get_speed_multiplier() -> float:
+    """Return global speed multiplier (1.0 = normal)."""
+    raw = get_setting("admin_speed_multiplier", "")
+    try:
+        v = float(raw)
+        return v if v > 0 else 1.0
+    except (ValueError, TypeError):
+        return 1.0
+
+
+def wipe_all_npcs():
+    """Delete all NPCs from DB and clear npc_ids on every player record."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM npcs")
+    conn.execute("UPDATE players SET npc_ids = '[]'")
+    conn.commit()
+
+
+def reset_player_stats_to_default(username: str | None = None):
+    """Reset combat/progression stats to defaults.  Pass username=None to reset all."""
+    conn = _get_conn()
+    sql = "UPDATE players SET level=1, xp=0, str=1, def=1, hp=20, max_hp=20"
+    params: tuple = ()
+    if username:
+        sql += " WHERE username=?"
+        params = (username,)
+    conn.execute(sql, params)
+    conn.commit()
 
 
 # ── NPC operations ────────────────────────────────────────────────────────────
