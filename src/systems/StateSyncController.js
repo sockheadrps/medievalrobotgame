@@ -11,6 +11,7 @@ export class StateSyncController {
     scene._xpMultipliers = (data.xp_multipliers && typeof data.xp_multipliers === 'object')
       ? { ...data.xp_multipliers }
       : (scene._xpMultipliers || { player: 1, npc: 1, ai_player: 1, ai_npc: 1 });
+    if (data.speed_multiplier != null) scene._speedMultiplier = data.speed_multiplier;
     if (scene.playerId === 'default') return;
 
     const players = data.players || {};
@@ -37,6 +38,11 @@ export class StateSyncController {
       scene.player.kiSkillXp = me.kiSkillXp ?? scene.player.kiSkillXp;
       scene.player.kiBlastBonuses = (me.ki_blast_bonuses && typeof me.ki_blast_bonuses === 'object') ? { ...me.ki_blast_bonuses } : (scene.player.kiBlastBonuses || {});
       if (Array.isArray(me.ki_moves)) scene.player.kiMoves = me.ki_moves;
+      if (me.fly_skill_level != null) scene.player.flySkillLevel = me.fly_skill_level;
+      if (me.fly_xp != null) scene.player.flyXp = me.fly_xp;
+      if (me.flying != null && !scene.player._flying) scene.player._flying = !!me.flying;
+      if (me.meditating != null && !scene.player._meditating) scene.player._meditating = !!me.meditating;
+      if (me.hair != null) scene._applyHairToEntity?.(scene.player, me.hair, false);
       scene.player.str = me.str ?? scene.player.str;
       scene.player.def = me.def ?? scene.player.def;
       scene.player.level = me.level ?? scene.player.level;
@@ -46,6 +52,8 @@ export class StateSyncController {
       scene.player.combatMode = me.combat_mode ?? scene.player.combatMode ?? 'kill';
       scene.player.equipment = me.equipment ?? scene.player.equipment ?? {};
       scene.player.inventory = me.inventory ?? scene.player.inventory ?? {};
+      scene.player.activeBlastId = me.active_blast_id ?? scene.player.activeBlastId ?? null;
+      scene.player.learnedBlasts = Array.isArray(me.learned_blasts) ? me.learned_blasts : (scene.player.learnedBlasts ?? []);
       scene.player._carrying = !!me.carrying;
 
       // Map change detection
@@ -74,6 +82,7 @@ export class StateSyncController {
       }
       const wasDead = rp._dead;
       rp.applyState(pState);
+      if (pState.hair != null) scene._applyHairToEntity?.(rp, pState.hair, false);
       if (pState.dead && !wasDead) {
         scene._notifyNearbyNPCsOfKill('player', pid, null, rp.x, rp.y);
       }
@@ -119,6 +128,7 @@ export class StateSyncController {
         if (serverNPC.blastLevel != null) npc.blastLevel = serverNPC.blastLevel;
         npc.kiBlastBonuses = (serverNPC.ki_blast_bonuses && typeof serverNPC.ki_blast_bonuses === 'object') ? { ...serverNPC.ki_blast_bonuses } : (npc.kiBlastBonuses || {});
         if (Array.isArray(serverNPC.ki_moves)) npc.kiMoves = serverNPC.ki_moves;
+        if (serverNPC.hair != null) scene._applyHairToEntity?.(npc, serverNPC.hair, true);
         if (serverNPC.stones != null) npc.stones = serverNPC.stones;
         if (serverNPC.crystals != null) npc.crystals = serverNPC.crystals;
         // Sync ore/resource inventory from server (updated by background worker ticks)
@@ -304,6 +314,7 @@ export class StateSyncController {
         const wasDead = rnpc._dead;
         const wasKnocked = rnpc.isKnockedOut?.() || false;
         rnpc.applyState(npcState);
+        if (npcState.hair != null) scene._applyHairToEntity?.(rnpc, npcState.hair, true);
         const ownerColor = pState.chatColor || '#cccccc';
         rnpc.setOwnerColor(ownerColor);
         if (npcState.knocked_out && !wasKnocked) {
