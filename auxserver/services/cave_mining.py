@@ -102,6 +102,14 @@ class CaveMiningService:
                 "text": f"+{ore_amount} {ore_type.replace('_', ' ')}"
             })
 
+            # Geode: 25% chance to also yield a blast_crystal
+            if ore_type == "geode" and random.random() < 0.25:
+                inv["blast_crystal"] = inv.get("blast_crystal", 0) + 1
+                self.gs.fx_events.append({
+                    "type": "chat_hint", "pid": pid,
+                    "text": "+1 blast crystal! (Use it to learn a random ki blast technique)"
+                })
+
         # Send updated mine tiles to player
         self.gs.fx_events.append({
             "type": "mine_update", "pid": pid,
