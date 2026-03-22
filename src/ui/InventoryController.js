@@ -12,6 +12,9 @@ import {
   FRAME_TRACK_H,
   FRAME_GATE,
   FRAME_FENCE,
+  BLAST_DEFS,
+  BLAST_SPRITE_META,
+  NRG_KEY,
 } from '../constants.js';
 
 const TOP_HUD_MARGIN = 133;
@@ -500,5 +503,135 @@ export class InventoryController {
     this.closeInvContextMenu();
     for (const el of scene._inventoryEls) el.destroy();
     scene._inventoryEls = [];
+  }
+
+  buildBlastSlot(x, y) {
+    const scene = this.scene;
+    this._blastSlotX = x;
+    this._blastSlotY = y;
+
+    this._blastSlotBg = scene.add.rectangle(x, y, 48, 48, 0x1a1a2e)
+      .setStrokeStyle(1, 0x444466).setDepth(30).setScrollFactor(0);
+    scene.addHud?.(this._blastSlotBg);
+
+    this._blastSlotSprite = scene.add.sprite(x, y, NRG_KEY, 0)
+      .setDepth(31).setScrollFactor(0).setScale(1.5).setVisible(false);
+    scene.addHud?.(this._blastSlotSprite);
+
+    this._blastSlotQuestion = scene.add.text(x, y, '?', {
+      fontSize: '18px', color: '#555577',
+    }).setOrigin(0.5, 0.5).setDepth(31).setScrollFactor(0);
+    scene.addHud?.(this._blastSlotQuestion);
+
+    this._blastSlotLabel = scene.add.text(x, y + 26, '', {
+      fontSize: '8px', color: '#aaaacc',
+    }).setOrigin(0.5, 0.5).setDepth(31).setScrollFactor(0);
+    scene.addHud?.(this._blastSlotLabel);
+
+    this._blastSlotBg.setInteractive({ useHandCursor: true });
+    this._blastSlotBg.on('pointerdown', (ptr) => {
+      if (ptr.rightButtonDown()) {
+        this._openBlastPicker();
+      }
+    });
+
+    scene.input.mouse?.disableContextMenu?.();
+  }
+
+  updateBlastSlot(player) {
+    if (!this._blastSlotBg) return;
+    const activeId = player?.activeBlastId;
+    const def = activeId ? BLAST_DEFS[activeId] : null;
+    if (def && def.sprite && this.scene.textures.exists(`blast_${def.sprite}`)) {
+      const meta = BLAST_SPRITE_META[def.sprite];
+      let frame = 0;
+      if (meta && meta.dirs !== 1) {
+        frame = 0; // "down" frame
+      }
+      this._blastSlotSprite.setTexture(`blast_${def.sprite}`, frame).setVisible(true);
+      this._blastSlotQuestion.setVisible(false);
+      this._blastSlotLabel.setText(def.displayName || activeId);
+    } else {
+      this._blastSlotSprite.setVisible(false);
+      this._blastSlotQuestion.setVisible(true);
+      this._blastSlotLabel.setText('');
+    }
+  }
+
+  _openBlastPicker() {
+    this._closeBlastPicker();
+    const scene = this.scene;
+    const learned = scene.player?.learnedBlasts ?? [];
+    if (learned.length === 0) return;
+
+    const slotX = this._blastSlotX ?? 60;
+    const slotY = this._blastSlotY ?? 500;
+
+    const rowH = 52;
+    const panelW = 220;
+    const panelH = learned.length * rowH + 20;
+    const px = slotX - panelW / 2;
+    const py = slotY - panelH - 10;
+
+    this._pickerEls = [];
+    const add = (obj) => {
+      scene.addHud?.(obj);
+      this._pickerEls.push(obj);
+      return obj;
+    };
+
+    add(scene.add.rectangle(px + panelW / 2, py + panelH / 2, panelW, panelH, 0x111122, 0.95)
+      .setStrokeStyle(1, 0x4455aa).setDepth(60).setScrollFactor(0));
+
+    learned.forEach((blastId, idx) => {
+      const def = BLAST_DEFS[blastId];
+      if (!def) return;
+      const ry = py + 10 + idx * rowH;
+
+      const sprKey = `blast_${def.sprite}`;
+      if (scene.textures.exists(sprKey)) {
+        add(scene.add.sprite(px + 26, ry + 22, sprKey, 0)
+          .setDepth(62).setScrollFactor(0).setScale(1.5));
+      }
+
+      add(scene.add.text(px + 54, ry + 8, def.displayName || blastId, {
+        fontSize: '12px', color: '#eeeeff',
+      }).setDepth(62).setScrollFactor(0));
+
+      add(scene.add.text(px + 54, ry + 24, `Ki: ${def.kiCost}`, {
+        fontSize: '10px', color: '#9999bb',
+      }).setDepth(62).setScrollFactor(0));
+
+      const hitZone = scene.add.rectangle(px + panelW / 2, ry + 22, panelW - 4, rowH - 4, 0xffffff, 0)
+        .setInteractive({ useHandCursor: true }).setDepth(63).setScrollFactor(0);
+      hitZone.on('pointerdown', () => {
+        scene._conn?.send({ type: 'set_active_blast', blast_id: blastId });
+        if (scene.player) scene.player.activeBlastId = blastId;
+        this.updateBlastSlot(scene.player);
+        this._closeBlastPicker();
+      });
+      add(hitZone);
+    });
+
+    // Click outside to close
+    this._pickerCloseHandler = () => this._closeBlastPicker();
+    scene.time.delayedCall(50, () => {
+      scene.input.once('pointerdown', this._pickerCloseHandler);
+    });
+  }
+
+  _closeBlastPicker() {
+    const scene = this.scene;
+    if (this._pickerEls) {
+      for (const el of this._pickerEls) {
+        scene.removeHud?.(el);
+        el.destroy();
+      }
+      this._pickerEls = null;
+    }
+    if (this._pickerCloseHandler) {
+      scene.input.off('pointerdown', this._pickerCloseHandler);
+      this._pickerCloseHandler = null;
+    }
   }
 }

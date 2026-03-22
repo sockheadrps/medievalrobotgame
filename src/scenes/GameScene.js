@@ -337,6 +337,18 @@ export default class GameScene extends Phaser.Scene {
     this._hotbarAssignments = this._loadHotbarAssignments();
     this._buildHotbar();
 
+    // ── Blast slot (to the left of hotbar) ────────────────────────────────
+    {
+      const _slotSize = 72;
+      const _padding = 6;
+      const _viewportW = screenW - RIGHT_HUD_MARGIN;
+      const _totalW = 6 * (_slotSize + _padding) - _padding;
+      const _startX = Math.max(12, Math.floor((_viewportW - _totalW) / 2));
+      const _blastSlotX = _startX - 56;
+      const _blastSlotY = screenH - _slotSize - 18 + _slotSize / 2;
+      this._inventoryUi.buildBlastSlot(_blastSlotX, _blastSlotY);
+    }
+
     // Connection status
     this._netStatus = this.addHud(this.add.text(screenW - 12, 8, 'Connecting...', {
       fontSize: '16px', color: '#ffaa44', backgroundColor: '#00000088',
@@ -577,6 +589,7 @@ export default class GameScene extends Phaser.Scene {
 
     // Update hotbar counts
     this._updateHotbar();
+    this._inventoryUi.updateBlastSlot(this.player);
 
     // Update crate proximity labels
     for (const crate of this._crates) {
