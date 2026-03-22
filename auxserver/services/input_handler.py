@@ -318,8 +318,9 @@ class InputHandler:
 
         elif msg_type == "set_active_blast":
             blast_id = data.get("blast_id")
-            learned = p.get("learned_blasts", [])
-            if blast_id in learned:
+            if blast_id is None:
+                p["active_blast_id"] = None
+            elif blast_id in p.get("learned_blasts", []):
                 p["active_blast_id"] = blast_id
             # Silently reject if not known
 

@@ -568,8 +568,9 @@ export class InventoryController {
     const slotY = this._blastSlotY ?? 500;
 
     const rowH = 52;
+    const noneRowH = 32;
     const panelW = 220;
-    const panelH = learned.length * rowH + 20;
+    const panelH = noneRowH + learned.length * rowH + 20;
     const px = slotX - panelW / 2;
     const py = slotY - panelH - 10;
 
@@ -583,10 +584,23 @@ export class InventoryController {
     add(scene.add.rectangle(px + panelW / 2, py + panelH / 2, panelW, panelH, 0x111122, 0.95)
       .setStrokeStyle(1, 0x4455aa).setDepth(60).setScrollFactor(0));
 
+    // "None" row to clear active blast
+    const noneY = py + 10;
+    add(scene.add.text(px + 14, noneY + 8, '✕  None', { fontSize: '12px', color: '#886666' }).setDepth(62).setScrollFactor(0));
+    const noneHit = scene.add.rectangle(px + panelW / 2, noneY + noneRowH / 2, panelW - 4, noneRowH - 4, 0xffffff, 0)
+      .setInteractive({ useHandCursor: true }).setDepth(63).setScrollFactor(0);
+    noneHit.on('pointerdown', () => {
+      scene._conn?.send({ type: 'set_active_blast', blast_id: null });
+      if (scene.player) scene.player.activeBlastId = null;
+      this.updateBlastSlot(scene.player);
+      this._closeBlastPicker();
+    });
+    add(noneHit);
+
     learned.forEach((blastId, idx) => {
       const def = BLAST_DEFS[blastId];
       if (!def || !def.sprite || def.kiCost == null) return;
-      const ry = py + 10 + idx * rowH;
+      const ry = py + 10 + noneRowH + idx * rowH;
 
       const sprKey = `blast_${def.sprite}`;
       if (scene.textures.exists(sprKey)) {
