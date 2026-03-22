@@ -181,10 +181,18 @@ class GatheringService:
         # Decrement HP
         wo["hp"] -= 1
         # Award drops on each hit
-        inv = p.setdefault("inventory", {})
         for drop in wo_def.drops:
             amount = random.randint(drop.min, drop.max)
-            inv[drop.resource] = inv.get(drop.resource, 0) + amount
+            res = str(drop.resource or "").lower()
+            if res in ("log", "logs"):
+                p["logs"] = int(p.get("logs", 0) or 0) + amount
+            elif res in ("stone", "stones"):
+                p["stones"] = int(p.get("stones", 0) or 0) + amount
+            elif res in ("crystal", "crystals"):
+                p["crystals"] = int(p.get("crystals", 0) or 0) + amount
+            else:
+                inv = p.setdefault("inventory", {})
+                inv[res] = inv.get(res, 0) + amount
         # Depleted?
         if wo["hp"] <= 0:
             wo["depleted"] = True

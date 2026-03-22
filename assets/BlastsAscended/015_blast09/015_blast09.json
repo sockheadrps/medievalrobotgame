@@ -1,0 +1,45 @@
+{
+  "spriteSheet": "015_blast09.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "9",
+  "stateAlias": "blast09",
+  "stateUses": [
+    "Changeling Frieza primary blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 256,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 8,
+    "rows": 1
+  },
+  "totalFrames": 8,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 2,
+    "delays": [
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast09_1_down",
+    "1": "blast09_1_up",
+    "2": "blast09_1_right",
+    "3": "blast09_1_left",
+    "4": "blast09_2_down",
+    "5": "blast09_2_up",
+    "6": "blast09_2_right",
+    "7": "blast09_2_left"
+  }
+}

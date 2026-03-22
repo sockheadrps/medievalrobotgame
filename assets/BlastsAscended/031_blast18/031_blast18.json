@@ -1,0 +1,59 @@
+{
+  "spriteSheet": "031_blast18.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "18",
+  "stateAlias": "blast18",
+  "stateUses": [
+    "Demi-God charged blast",
+    "Human charged blast",
+    "Spirit Doll charged blast",
+    "Arconian charged blast",
+    "Saiyan Low-Class charged blast",
+    "Saiyan Normal charged blast",
+    "Changeling King Kold charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 512,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 16,
+    "rows": 1
+  },
+  "totalFrames": 16,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 2,
+    "delays": [
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast18_1_down",
+    "1": "blast18_1_up",
+    "2": "blast18_1_right",
+    "3": "blast18_1_left",
+    "4": "blast18_1_southeast",
+    "5": "blast18_1_southwest",
+    "6": "blast18_1_northeast",
+    "7": "blast18_1_northwest",
+    "8": "blast18_2_down",
+    "9": "blast18_2_up",
+    "10": "blast18_2_right",
+    "11": "blast18_2_left",
+    "12": "blast18_2_southeast",
+    "13": "blast18_2_southwest",
+    "14": "blast18_2_northeast",
+    "15": "blast18_2_northwest"
+  }
+}

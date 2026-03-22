@@ -236,7 +236,7 @@ class InputHandler:
             cost, _dmg = gs.combat._calc_blast(p.get("blastLevel", 0))
             cost, _dmg = gs.combat._apply_blast_mode(cost, _dmg, data.get("blast_mode", ""))
             if gs.combat._try_ki_spend(p, cost):
-                gs.combat._queue_ki_blast_fx(p)
+                gs.combat._queue_ki_blast_fx(p, owner_pid=pid)
 
         elif msg_type == "ki_blast_player":
             gs.combat._ki_blast_player(pid, data.get("target_id"), data.get("blast_mode", ""))
@@ -320,9 +320,11 @@ class InputHandler:
             blast_id = data.get("blast_id")
             if blast_id is None:
                 p["active_blast_id"] = None
-            elif blast_id in p.get("learned_blasts", []):
-                p["active_blast_id"] = blast_id
-            # Silently reject if not known
+            else:
+                _KI_MOVE_IDS = {"ki_shot", "absorb", "barrier"}
+                from services.combat_ki import BLAST_DEFS as _BD
+                if blast_id in _KI_MOVE_IDS or blast_id in _BD:
+                    p["active_blast_id"] = blast_id
 
         elif msg_type == "use_blast_crystal":
             inv = p.setdefault("inventory", {})

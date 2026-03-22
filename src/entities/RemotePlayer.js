@@ -13,6 +13,7 @@ import {
 } from '../constants.js';
 import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
 import { createEquipmentOverlay, syncEquipmentOverlay } from './EquipmentOverlay.js';
+import { createHairOverlay, syncHairOverlay } from './HairOverlay.js';
 
 const SCALE = TILE_SIZE / PLAYER_FRAME_H;
 const LERP_SPEED = 0.35;
@@ -101,6 +102,9 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
     this._barrierOverlay = createBarrierOverlay(scene, this);
     this._equipOverlays = {};
     this.equipment = {};
+    this._hairOverlay = null;
+    this._flying = false;
+    this._meditating = false;
     this._ensureAnims(scene);
   }
 
@@ -115,6 +119,12 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
   setAttackable(on) {
     this._attackable = !!on;
     this._updateVisualState();
+  }
+
+  setHairOverlay(textureKey) {
+    if (this._hairOverlay) { this._hairOverlay.destroy(); this._hairOverlay = null; }
+    if (!textureKey) return;
+    this._hairOverlay = createHairOverlay(this.scene, this, textureKey, false);
   }
 
   applyState(state) {
@@ -139,6 +149,8 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
     this.kiSkillXp = state.kiSkillXp ?? this.kiSkillXp;
     if (state.ki_blast_bonuses) this.kiBlastBonuses = state.ki_blast_bonuses;
     if (Array.isArray(state.ki_moves)) this.kiMoves = state.ki_moves;
+    if (state.flying != null) this._flying = !!state.flying;
+    if (state.meditating != null) this._meditating = !!state.meditating;
     if (state.chatColor) {
       this.chatColor = state.chatColor;
       this._nameLabel?.setColor(state.chatColor);
@@ -273,6 +285,7 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
     this._kiBar.setFillStyle(kiColor);
     syncBarrierOverlay(this._barrierOverlay, this);
     this._syncEquipOverlays();
+    if (this._hairOverlay) syncHairOverlay(this._hairOverlay, this);
   }
 
   _syncEquipOverlays() {
@@ -326,6 +339,8 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
     this._barrierOverlay?.destroy();
     for (const overlay of Object.values(this._equipOverlays || {})) overlay?.destroy();
     this._equipOverlays = {};
+    this._hairOverlay?.destroy();
+    this._hairOverlay = null;
     super.destroy(fromScene);
   }
 }

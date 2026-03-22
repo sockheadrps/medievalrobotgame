@@ -1,0 +1,36 @@
+{
+  "spriteSheet": "002_Flight.png",
+  "sourceDmi": "Armor_Rit1Glacial2.dmi",
+  "sourceState": "Flight",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 128,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 4,
+    "rows": 1
+  },
+  "totalFrames": 4,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 1,
+    "delays": [],
+    "loop": null,
+    "rewind": false,
+    "movement": true,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "Flight_down",
+    "1": "Flight_up",
+    "2": "Flight_right",
+    "3": "Flight_left"
+  }
+}

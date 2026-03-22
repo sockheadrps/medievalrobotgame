@@ -240,6 +240,47 @@ MINECART_PORTALS = _load_minecart_portals()
 
 WORLD_OBJECT_INSTANCES = {}  # populated by init_world_objects() after asset_registry loads
 
+_collision_cache: dict[str, set[tuple[int, int]]] = {}
+_map_dims_cache: dict[str, tuple[int, int]] = {}
+
+def get_map_dimensions(map_name: str) -> tuple[int, int]:
+    """Return (cols, rows) for a given map, loading from disk on first call."""
+    if map_name in _map_dims_cache:
+        return _map_dims_cache[map_name]
+    maps_dir = Path(__file__).resolve().parent.parent / "maps"
+    map_path = maps_dir / f"{map_name}.json"
+    if map_path.exists():
+        try:
+            data = json.loads(map_path.read_text(encoding="utf-8"))
+            cols = data.get("width", MAP_COLS)
+            rows = data.get("height", MAP_ROWS)
+            _map_dims_cache[map_name] = (cols, rows)
+            logger.info("Map dimensions for %s: %dx%d", map_name, cols, rows)
+            return (cols, rows)
+        except Exception as e:
+            logger.warning("Failed to load map dimensions for %s: %s", map_name, e)
+    # Fallback to level_01 dimensions
+    _map_dims_cache[map_name] = (MAP_COLS, MAP_ROWS)
+    return (MAP_COLS, MAP_ROWS)
+
+def get_collision_tiles(map_name: str) -> set[tuple[int, int]]:
+    """Return the collision tile set for a given map, loading from disk on first call."""
+    if map_name in _collision_cache:
+        return _collision_cache[map_name]
+    maps_dir = Path(__file__).resolve().parent.parent / "maps"
+    col_path = maps_dir / f"{map_name}_collision.json"
+    tiles: set[tuple[int, int]] = set()
+    if col_path.exists():
+        try:
+            col_data = json.loads(col_path.read_text(encoding="utf-8"))
+            for ct in col_data.get("collisionTiles", []):
+                tiles.add((int(ct["x"]), int(ct["y"])))
+            logger.info("Loaded %d collision tiles for %s", len(tiles), map_name)
+        except Exception as e:
+            logger.warning("Failed to load collision tiles for %s: %s", map_name, e)
+    _collision_cache[map_name] = tiles
+    return tiles
+
 
 def init_world_objects():
     """Call after asset_registry.load_all() to populate world object instances."""

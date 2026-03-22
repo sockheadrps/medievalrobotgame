@@ -1,0 +1,36 @@
+{
+  "spriteSheet": "007_Attack.png",
+  "sourceDmi": "Clothes_TankTop.dmi",
+  "sourceState": "Attack",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 128,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 4,
+    "rows": 1
+  },
+  "totalFrames": 4,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 1,
+    "delays": [],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "Attack_down",
+    "1": "Attack_up",
+    "2": "Attack_right",
+    "3": "Attack_left"
+  }
+}

@@ -43,8 +43,14 @@ const HOTBAR_ACTIONS = {
   empty: { id: 'empty', label: 'Empty', frame: 6 },
 };
 
-const HOTBAR_DEFAULT_ASSIGNMENTS = ['drop_log', 'drop_stone', 'place_anvil', 'place_crafting_station', 'ki_shot', 'barrier'];
-const IMPLEMENTED_HOTBAR_MOVES = ['ki_shot', 'absorb', 'barrier'];
+const HOTBAR_DEFAULT_ASSIGNMENTS = ['ki_shot', 'absorb', 'barrier', 'drop_log', 'drop_stone', 'place_anvil'];
+const KI_SLOT_COUNT = 3; // first 3 slots are ki-only
+
+const KI_MOVE_DEFS = {
+  ki_shot:  { id: 'ki_shot',  label: 'Ki Shot',  desc: 'Standard ki blast', stats: p => ({ 'Damage': p?.getBlastDmg?.() ?? '?', 'Cost': `${p?.getBlastCost?.() ?? '?'} Ki`, 'Type': 'Projectile' }) },
+  absorb:   { id: 'absorb',   label: 'Absorb',   desc: 'Absorb an NPC\'s power', stats: () => ({ 'Cost': 'None', 'Type': 'Channel', 'Effect': 'Absorb target NPC' }) },
+  barrier:  { id: 'barrier',  label: 'Barrier',   desc: 'Block incoming attacks', stats: () => ({ 'Block': '10% punch + ki', 'Cost': '3 Ki per proc', 'Type': 'Passive toggle' }) },
+};
 
 export class InventoryController {
   constructor(scene) {
@@ -115,7 +121,8 @@ export class InventoryController {
       if (!Array.isArray(parsed)) return fallback.slice(0, HOTBAR_SLOT_COUNT);
       return Array.from({ length: HOTBAR_SLOT_COUNT }, (_v, i) => {
         const actionId = String(parsed[i] || fallback[i] || 'empty');
-        return HOTBAR_ACTIONS[actionId] ? actionId : (fallback[i] || 'empty');
+        if (HOTBAR_ACTIONS[actionId] || KI_MOVE_DEFS[actionId] || BLAST_DEFS[actionId]) return actionId;
+        return fallback[i] || 'empty';
       });
     } catch {
       return fallback.slice(0, HOTBAR_SLOT_COUNT);
@@ -132,18 +139,20 @@ export class InventoryController {
 
   getHotbarEntry(slotIndex) {
     const actionId = this.scene._hotbarAssignments?.[slotIndex] || 'empty';
-    return HOTBAR_ACTIONS[actionId] || HOTBAR_ACTIONS.empty;
+    if (HOTBAR_ACTIONS[actionId]) return HOTBAR_ACTIONS[actionId];
+    // Ki moves not in HOTBAR_ACTIONS (scatter_shot, explosive_shot, custom blasts)
+    if (KI_MOVE_DEFS[actionId]) return { id: actionId, label: KI_MOVE_DEFS[actionId].label, frame: FRAME_CRYSTAL };
+    if (BLAST_DEFS[actionId]) return { id: actionId, label: BLAST_DEFS[actionId].displayName || actionId, frame: FRAME_CRYSTAL };
+    return HOTBAR_ACTIONS.empty;
   }
 
   getAvailableHotbarActions() {
-    const actions = [
+    // Non-ki actions only (ki moves go in slots 1-3 with their own picker)
+    return [
       HOTBAR_ACTIONS.drop_log,
       HOTBAR_ACTIONS.drop_stone,
       HOTBAR_ACTIONS.place_anvil,
       HOTBAR_ACTIONS.use_crystal,
-      HOTBAR_ACTIONS.ki_shot,
-      HOTBAR_ACTIONS.absorb,
-      HOTBAR_ACTIONS.barrier,
       HOTBAR_ACTIONS.build_ki_target,
       HOTBAR_ACTIONS.plant_seed,
       HOTBAR_ACTIONS.place_conveyor,
@@ -155,7 +164,176 @@ export class InventoryController {
       HOTBAR_ACTIONS.place_fence,
       HOTBAR_ACTIONS.empty,
     ];
-    return actions;
+  }
+
+  /** Get ki moves the player currently knows. */
+  getAvailableKiMoves() {
+    const p = this.scene.player;
+    const moves = [];
+    if (p?.hasKiBlast !== false) moves.push(KI_MOVE_DEFS.ki_shot);
+    const km = p?.kiMoves || [];
+    if (km.includes('absorb')) moves.push(KI_MOVE_DEFS.absorb);
+    // Also include custom blasts from BLAST_DEFS
+    for (const def of Object.values(BLAST_DEFS)) {
+      moves.push({
+        id: def.id,
+        label: def.displayName || def.id,
+        desc: def.description || 'Custom blast',
+        stats: () => {
+          const s = {};
+          if (def.kiCost != null) s['Cost'] = `${def.kiCost} Ki`;
+          s['Type'] = 'Projectile';
+          const fx = def.effects || {};
+          if (fx.burn_dps > 0) s['Burn'] = `${fx.burn_dps}/s for ${fx.burn_duration}s`;
+          if (fx.slow_pct > 0) s['Slow'] = `${fx.slow_pct}%`;
+          if (fx.stun_duration > 0) s['Stun'] = `${fx.stun_duration}s`;
+          if (fx.siphon_pct > 0) s['Siphon'] = `${fx.siphon_pct}%`;
+          if (fx.vampiric_pct > 0) s['Vampiric'] = `${fx.vampiric_pct}%`;
+          if (fx.pushback > 0) s['Pushback'] = `${fx.pushback}`;
+          if (fx.ki_drain > 0) s['Ki Drain'] = `${fx.ki_drain}`;
+          if (fx.expose_pct > 0) s['Expose'] = `${fx.expose_pct}% for ${fx.expose_duration}s`;
+          if (fx.decay_def > 0) s['Def Decay'] = `${fx.decay_def} for ${fx.decay_duration}s`;
+          return s;
+        },
+      });
+    }
+    return moves;
+  }
+
+  /** Open ki move picker for slots 0-2. */
+  openKiMovePicker(slotIndex, centerX, topY) {
+    const scene = this.scene;
+    if (scene._hotbarPickerSlot === slotIndex) {
+      this.closeHotbarPicker();
+      return;
+    }
+    this.closeHotbarPicker();
+
+    // Fetch fresh blast defs
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', `${API_BASE}/api/blasts`, false);
+      xhr.send();
+      if (xhr.status === 200) {
+        for (const def of JSON.parse(xhr.responseText)) BLAST_DEFS[def.id] = def;
+      }
+    } catch (e) { /* ignore */ }
+
+    const moves = this.getAvailableKiMoves();
+    const noneEntry = { id: 'empty', label: '✕  None', desc: '', stats: () => ({}) };
+    const km = scene.player?.kiMoves || [];
+    const hasBarrier = km.includes('barrier');
+    const entries = [noneEntry, ...moves];
+    // Barrier is passive — shown as info-only after None
+    const barrierEntry = hasBarrier ? KI_MOVE_DEFS.barrier : null;
+
+    const W = scene._screenWidth();
+    const rowH = 28;
+    const panelW = 180;
+    const infoPanelW = 180;
+    const totalRows = entries.length + (barrierEntry ? 1 : 0);
+    const panelH = 34 + totalRows * rowH;
+    const x = Phaser.Math.Clamp(centerX - panelW / 2, 10, W - panelW - infoPanelW - 20);
+    const y = Math.max(TOP_HUD_MARGIN + 6, topY - panelH - 8);
+    const add = (obj) => { scene.addHud(obj); scene._hotbarPickerEls.push(obj); return obj; };
+
+    add(scene.add.rectangle(x + panelW / 2, y + panelH / 2, panelW, panelH, 0x111827, 0.97)
+      .setStrokeStyle(1, 0x4c6d92).setDepth(70));
+    add(scene.add.text(x + 10, y + 8, `Ki Slot ${slotIndex + 1}`, {
+      fontSize: '13px', color: '#88bbff',
+    }).setDepth(71));
+
+    // Info panel elements (shown on hover)
+    const infoX = x + panelW + 4;
+    const infoH = 140;
+    const infoBg = add(scene.add.rectangle(infoX + infoPanelW / 2, y + infoH / 2, infoPanelW, infoH, 0x111827, 0.97)
+      .setStrokeStyle(1, 0x4c6d92).setDepth(70).setVisible(false));
+    const infoTitle = add(scene.add.text(infoX + 8, y + 8, '', {
+      fontSize: '13px', color: '#ffdd66', fontStyle: 'bold',
+    }).setDepth(71).setVisible(false));
+    const infoDesc = add(scene.add.text(infoX + 8, y + 26, '', {
+      fontSize: '11px', color: '#aabbcc', wordWrap: { width: infoPanelW - 16 },
+    }).setDepth(71).setVisible(false));
+    const infoStats = add(scene.add.text(infoX + 8, y + 44, '', {
+      fontSize: '11px', color: '#d7ecff', lineSpacing: 4,
+    }).setDepth(71).setVisible(false));
+
+    const showInfo = (entry) => {
+      if (!entry || entry.id === 'empty') {
+        infoBg.setVisible(false);
+        infoTitle.setVisible(false);
+        infoDesc.setVisible(false);
+        infoStats.setVisible(false);
+        return;
+      }
+      infoTitle.setText(entry.label).setVisible(true);
+      infoDesc.setText(entry.desc).setVisible(true);
+      const stats = entry.stats(scene.player);
+      const lines = Object.entries(stats).map(([k, v]) => `${k}: ${v}`).join('\n');
+      infoStats.setText(lines).setVisible(true);
+      // Resize info bg to fit content
+      const totalH = Math.max(80, 52 + Object.keys(stats).length * 18);
+      infoBg.setSize(infoPanelW, totalH)
+        .setPosition(infoX + infoPanelW / 2, y + totalH / 2)
+        .setVisible(true);
+    };
+
+    let rowIdx = 0;
+    const currentAssignment = scene._hotbarAssignments?.[slotIndex] || 'empty';
+
+    // Render None entry
+    const noneBy = y + 30 + rowIdx * rowH;
+    const noneIsActive = 'empty' === currentAssignment;
+    const noneBtn = add(scene.add.rectangle(x + panelW / 2, noneBy + rowH / 2, panelW - 8, rowH - 2,
+      noneIsActive ? 0x294865 : 0x203246, 1).setStrokeStyle(1, 0x486a8c).setDepth(71).setInteractive({ useHandCursor: true }));
+    const noneLbl = add(scene.add.text(x + 12, noneBy + 6, noneEntry.label, {
+      fontSize: '12px', color: '#aa7766',
+    }).setDepth(72));
+    noneBtn.on('pointerover', () => { noneBtn.setFillStyle(0x2e5475); noneLbl.setColor('#ffffff'); });
+    noneBtn.on('pointerout', () => { noneBtn.setFillStyle(noneIsActive ? 0x294865 : 0x203246); noneLbl.setColor('#aa7766'); });
+    noneBtn.on('pointerdown', () => {
+      scene._hotbarAssignments[slotIndex] = 'empty';
+      this.saveHotbarAssignments();
+      scene._buildHotbar();
+      this.closeHotbarPicker();
+    });
+    rowIdx++;
+
+    // Barrier — sticky disabled info-only row (right after None)
+    if (barrierEntry) {
+      const bby = y + 30 + rowIdx * rowH;
+      const bBtn = add(scene.add.rectangle(x + panelW / 2, bby + rowH / 2, panelW - 8, rowH - 2,
+        0x1a1a2a, 1).setStrokeStyle(1, 0x333355).setDepth(71).setInteractive());
+      const bLbl = add(scene.add.text(x + 12, bby + 6, `${barrierEntry.label}  (passive)`, {
+        fontSize: '11px', color: '#667788',
+      }).setDepth(72));
+      bBtn.on('pointerover', () => { showInfo(barrierEntry); });
+      bBtn.on('pointerout', () => { showInfo(null); });
+      rowIdx++;
+    }
+
+    // Selectable ki moves (skip None, already rendered above)
+    for (let mi = 1; mi < entries.length; mi++) {
+      const entry = entries[mi];
+      const by = y + 30 + rowIdx * rowH;
+      const isActive = entry.id === currentAssignment;
+      const btn = add(scene.add.rectangle(x + panelW / 2, by + rowH / 2, panelW - 8, rowH - 2,
+        isActive ? 0x294865 : 0x203246, 1).setStrokeStyle(1, 0x486a8c).setDepth(71).setInteractive({ useHandCursor: true }));
+      const lbl = add(scene.add.text(x + 12, by + 6, entry.label, {
+        fontSize: '12px', color: '#d7ecff',
+      }).setDepth(72));
+      btn.on('pointerover', () => { btn.setFillStyle(0x2e5475); lbl.setColor('#ffffff'); showInfo(entry); });
+      btn.on('pointerout', () => { btn.setFillStyle(isActive ? 0x294865 : 0x203246); lbl.setColor('#d7ecff'); showInfo(null); });
+      btn.on('pointerdown', () => {
+        scene._hotbarAssignments[slotIndex] = entry.id;
+        this.saveHotbarAssignments();
+        scene._buildHotbar();
+        this.closeHotbarPicker();
+      });
+      rowIdx++;
+    }
+
+    scene._hotbarPickerSlot = slotIndex;
   }
 
   closeHotbarPicker() {
@@ -217,13 +395,23 @@ export class InventoryController {
     const scene = this.scene;
     const item = this.getHotbarEntry(index);
     if (!item) return;
+
+    // Ki slots (0-2): dispatch based on ki move ID
+    if (index < KI_SLOT_COUNT) {
+      const id = item.id;
+      if (id === 'empty') return;
+      // Set this ki move as the active blast slot (spacebar fires it)
+      scene.player.activeBlastId = id;
+      scene._conn?.send({ type: 'set_active_blast', blast_id: id });
+      scene._inventoryUi?.updateBlastSlot(scene.player);
+      return;
+    }
+
+    // Action slots (3-5)
     if (item.id === 'drop_log') this.dropLog();
     else if (item.id === 'drop_stone') this.dropStone();
     else if (item.id === 'place_anvil') this.placeAnvil();
     else if (item.id === 'use_crystal') this.useCrystal();
-    else if (item.id === 'ki_shot') scene._fireKiBlast();
-    else if (item.id === 'absorb') scene._fireAbsorb();
-    else if (item.id === 'barrier') scene.chatBox?._addLog(`${item.label} is passive or contextual.`, '#88bbff');
     else if (item.id === 'build_ki_target') this.buildKiTarget();
     else if (item.id === 'plant_seed') this.armPlantSeed();
     else if (item.id === 'place_conveyor') this.toggleConveyorPlacement();
@@ -538,16 +726,21 @@ export class InventoryController {
   updateBlastSlot(player) {
     if (!this._blastSlotBg) return;
     const activeId = player?.activeBlastId;
+    const KI_MOVE_LABELS = { ki_shot: 'Ki Shot', absorb: 'Absorb', barrier: 'Barrier' };
     const def = activeId ? BLAST_DEFS[activeId] : null;
-    if (def && def.sprite && this.scene.textures.exists(`blast_${def.sprite}`)) {
-      const meta = BLAST_SPRITE_META[def.sprite];
-      let frame = 0;
-      if (meta && meta.dirs !== 1) {
-        frame = 0; // "down" frame
-      }
-      this._blastSlotSprite.setTexture(`blast_${def.sprite}`, frame).setVisible(true);
-      this._blastSlotQuestion.setVisible(false);
+    if (def) {
       this._blastSlotLabel.setText(def.displayName || activeId);
+      if (def.sprite && this.scene.textures.exists(`blast_${def.sprite}`)) {
+        this._blastSlotSprite.setTexture(`blast_${def.sprite}`, 0).setVisible(true);
+        this._blastSlotQuestion.setVisible(false);
+      } else {
+        this._blastSlotSprite.setVisible(false);
+        this._blastSlotQuestion.setVisible(true);
+      }
+    } else if (activeId && KI_MOVE_LABELS[activeId]) {
+      this._blastSlotLabel.setText(KI_MOVE_LABELS[activeId]);
+      this._blastSlotSprite.setVisible(false);
+      this._blastSlotQuestion.setVisible(true);
     } else {
       this._blastSlotSprite.setVisible(false);
       this._blastSlotQuestion.setVisible(true);
@@ -558,106 +751,79 @@ export class InventoryController {
   _openBlastPicker() {
     this._closeBlastPicker();
     const scene = this.scene;
-    const learned = scene.player?.learnedBlasts ?? [];
-    if (learned.length === 0) return;
 
+    // Always fetch fresh blast list synchronously
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', `${API_BASE}/api/blasts`, false);
+      xhr.send();
+      if (xhr.status === 200) {
+        for (const def of JSON.parse(xhr.responseText)) BLAST_DEFS[def.id] = def;
+      }
+    } catch (e) { /* ignore */ }
+
+    // Build ki move entries from player state
+    const player = scene.player;
+    const kiMoveEntries = [];
+    if (player?.hasKiBlast !== false) {
+      kiMoveEntries.push({ id: 'ki_shot', label: 'Ki Shot', sub: '' });
+    }
+    if (Array.isArray(player?.kiMoves)) {
+      if (player.kiMoves.includes('absorb')) kiMoveEntries.push({ id: 'absorb', label: 'Absorb', sub: '' });
+      if (player.kiMoves.includes('barrier')) kiMoveEntries.push({ id: 'barrier', label: 'Barrier', sub: '' });
+    }
+
+    const blastList = Object.values(BLAST_DEFS);
+    const entries = [
+      { id: null, label: '✕  None', sub: '' },
+      ...kiMoveEntries,
+      ...blastList.map(d => ({ id: d.id, label: d.displayName || d.id, sub: d.kiCost != null ? `Ki: ${d.kiCost}` : '' })),
+    ];
+
+    const W = scene._screenWidth();
     const slotX = this._blastSlotX ?? 60;
     const slotY = this._blastSlotY ?? 500;
+    const rowH = 26;
+    const panelW = 200;
+    const panelH = 34 + entries.length * rowH;
+    const x = Phaser.Math.Clamp(slotX - panelW / 2, 10, W - panelW - 10);
+    const y = Math.max(TOP_HUD_MARGIN + 6, slotY - panelH - 8);
 
-    const rowH = 52;
-    const noneRowH = 32;
-    const panelW = 220;
-    const panelH = noneRowH + learned.length * rowH + 20;
-    const px = slotX - panelW / 2;
-    const py = slotY - panelH - 10;
+    scene._blastPickerEls = scene._blastPickerEls ?? [];
+    const add = (obj) => { scene.addHud(obj); scene._blastPickerEls.push(obj); return obj; };
 
-    this._pickerEls = [];
-    const add = (obj) => {
-      scene.addHud?.(obj);
-      this._pickerEls.push(obj);
-      return obj;
-    };
+    add(scene.add.rectangle(x + panelW / 2, y + panelH / 2, panelW, panelH, 0x111827, 0.97)
+      .setStrokeStyle(1, 0x4c6d92).setDepth(70));
+    add(scene.add.text(x + 10, y + 8, 'Select Blast', { fontSize: '13px', color: '#d7ecff' }).setDepth(71));
 
-    add(scene.add.rectangle(px + panelW / 2, py + panelH / 2, panelW, panelH, 0x111122, 0.95)
-      .setStrokeStyle(1, 0x4455aa).setDepth(60).setScrollFactor(0));
-
-    // "None" row to clear active blast
-    const noneY = py + 10;
-    add(scene.add.text(px + 14, noneY + 8, '✕  None', { fontSize: '12px', color: '#886666' }).setDepth(62).setScrollFactor(0));
-    const noneHit = scene.add.rectangle(px + panelW / 2, noneY + noneRowH / 2, panelW - 4, noneRowH - 4, 0xffffff, 0)
-      .setInteractive({ useHandCursor: true }).setDepth(63).setScrollFactor(0);
-    noneHit.on('pointerdown', () => {
-      scene._conn?.send({ type: 'set_active_blast', blast_id: null });
-      if (scene.player) scene.player.activeBlastId = null;
-      this.updateBlastSlot(scene.player);
-      this._closeBlastPicker();
-    });
-    add(noneHit);
-
-    learned.forEach((blastId, idx) => {
-      const def = BLAST_DEFS[blastId];
-      if (!def || !def.sprite || def.kiCost == null) return;
-      const ry = py + 10 + noneRowH + idx * rowH;
-
-      const sprKey = `blast_${def.sprite}`;
-      if (scene.textures.exists(sprKey)) {
-        const pickerSpr = scene.add.sprite(px + 26, ry + 22, sprKey, 0)
-          .setDepth(62).setScrollFactor(0).setScale(1.5);
-        const pickerMeta = BLAST_SPRITE_META[def.sprite];
-        if (pickerMeta && pickerMeta.frames > 1) {
-          const pickerAnimKey = `blast_picker_anim_${def.sprite}`;
-          if (!scene.anims.exists(pickerAnimKey)) {
-            const pickerFrameNums = [];
-            for (let f = 0; f < pickerMeta.frames; f++) {
-              pickerFrameNums.push(pickerMeta.dirs === 1 ? f : f * pickerMeta.dirs);
-            }
-            scene.anims.create({
-              key: pickerAnimKey,
-              frames: pickerFrameNums.map(n => ({ key: sprKey, frame: n })),
-              frameRate: 8,
-              repeat: -1,
-            });
-          }
-          pickerSpr.play(pickerAnimKey);
-        }
-        add(pickerSpr);
-      }
-
-      add(scene.add.text(px + 54, ry + 8, def.displayName || blastId, {
-        fontSize: '12px', color: '#eeeeff',
-      }).setDepth(62).setScrollFactor(0));
-
-      add(scene.add.text(px + 54, ry + 24, `Ki: ${def.kiCost}`, {
-        fontSize: '10px', color: '#9999bb',
-      }).setDepth(62).setScrollFactor(0));
-
-      const hitZone = scene.add.rectangle(px + panelW / 2, ry + 22, panelW - 4, rowH - 4, 0xffffff, 0)
-        .setInteractive({ useHandCursor: true }).setDepth(63).setScrollFactor(0);
-      hitZone.on('pointerdown', () => {
-        scene._conn?.send({ type: 'set_active_blast', blast_id: blastId });
-        if (scene.player) scene.player.activeBlastId = blastId;
+    entries.forEach((entry, idx) => {
+      const by = y + 30 + idx * rowH;
+      const isActive = entry.id === scene.player?.activeBlastId;
+      const btn = add(scene.add.rectangle(x + panelW / 2, by + rowH / 2, panelW - 8, rowH - 2,
+        isActive ? 0x294865 : 0x203246, 1).setStrokeStyle(1, 0x486a8c).setDepth(71).setInteractive({ useHandCursor: true }));
+      const lbl = add(scene.add.text(x + 12, by + 6, entry.label + (entry.sub ? `  (${entry.sub})` : ''), {
+        fontSize: '12px', color: entry.id === null ? '#aa7766' : '#d7ecff',
+      }).setDepth(72));
+      btn.on('pointerover', () => { btn.setFillStyle(0x2e5475); lbl.setColor('#ffffff'); });
+      btn.on('pointerout', () => { btn.setFillStyle(isActive ? 0x294865 : 0x203246); lbl.setColor(entry.id === null ? '#aa7766' : '#d7ecff'); });
+      btn.on('pointerdown', () => {
+        scene._conn?.send({ type: 'set_active_blast', blast_id: entry.id });
+        if (scene.player) scene.player.activeBlastId = entry.id;
         this.updateBlastSlot(scene.player);
         this._closeBlastPicker();
       });
-      add(hitZone);
     });
 
-    // Click outside to close
-    this._pickerCloseHandler = () => this._closeBlastPicker();
-    scene.time.delayedCall(50, () => {
-      scene.input.once('pointerdown', this._pickerCloseHandler);
-    });
+    this._pickerEls = scene._blastPickerEls;
   }
 
   _closeBlastPicker() {
     const scene = this.scene;
-    if (this._pickerEls) {
-      for (const el of this._pickerEls) {
-        scene.removeHud?.(el);
-        el.destroy();
-      }
-      this._pickerEls = null;
+    if (scene?._blastPickerEls?.length) {
+      for (const el of scene._blastPickerEls) el.destroy();
+      scene._blastPickerEls = [];
     }
+    this._pickerEls = null;
     if (this._pickerCloseHandler) {
       scene.input.off('pointerdown', this._pickerCloseHandler);
       this._pickerCloseHandler = null;

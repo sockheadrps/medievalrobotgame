@@ -135,7 +135,7 @@ export async function generateNPCChat(npcA, npcB) {
   const [chatPromptA, chatPromptB, impactPrompt] = await Promise.all([
     fetchPrompt('npc_chat', { name: nameA, target_name: nameB, personality_json: JSON.stringify(persA), trust: trust.toFixed(2), anger: anger.toFixed(2), logs: npcA.logs ?? 0, target_logs: npcB.logs ?? 0, recent_memory: recentMem, phrases: formatPhrases(npcA.soul?.learned_phrases).join(', ') }),
     fetchPrompt('npc_chat', { name: nameB, target_name: nameA, personality_json: JSON.stringify(persB), trust: trustB.toFixed(2), anger: angerB.toFixed(2), logs: npcB.logs ?? 0, target_logs: npcA.logs ?? 0, recent_memory: recentMemB, phrases: formatPhrases(npcB.soul?.learned_phrases).join(', ') }),
-    fetchPrompt('npc_chat_impact'),
+    fetchPrompt('chat_impact'),
   ]);
   return runNPCChatExchange(_call, npcA, npcB, chatPromptA, chatPromptB, impactPrompt);
 }

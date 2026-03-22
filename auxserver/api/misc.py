@@ -1,8 +1,11 @@
 """Miscellaneous routes that don't belong to a specific domain router."""
 
 import logging
+import os
+import json as _json_mod
+from pathlib import Path
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from typing import Optional
 
 from core.config import templates
@@ -13,10 +16,68 @@ from services.database import load_npc as db_load_npc
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+ASSETS_DIR_PATH = Path(__file__).resolve().parent.parent.parent / "assets"
+
+
+@router.get("/api/customization/assets")
+async def customization_assets():
+    """Scan hair/, clothing/, and items/ overlay folders and return asset metadata."""
+    result = []
+    for category in ("hair", "clothing", "items"):
+        cat_dir = ASSETS_DIR_PATH / category
+        if not cat_dir.exists():
+            continue
+        for item_dir in sorted(cat_dir.iterdir()):
+            if not item_dir.is_dir():
+                continue
+            # Look for a JSON file in this subfolder
+            json_files = list(item_dir.glob("*.json"))
+            if not json_files:
+                continue
+            try:
+                data = _json_mod.loads(json_files[0].read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            # Find PNG
+            png_files = list(item_dir.glob("*.png"))
+            png_path = f"assets/{category}/{item_dir.name}/{png_files[0].name}" if png_files else None
+            result.append({
+                "name": data.get("name", item_dir.name),
+                "slug": data.get("slug", item_dir.name),
+                "category": data.get("category", category),
+                "description": data.get("description", ""),
+                "frameCount": data.get("frameCount", 1),
+                "pngPath": png_path,
+                "frameWidth": data.get("frameWidth", 32),
+                "frameHeight": data.get("frameHeight", 32),
+            })
+    return result
+
 
 @router.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@router.get("/api/debug/bounds")
+def debug_bounds():
+    from services.world_data import MAP_COLS, MAP_ROWS, get_collision_tiles
+    from core.constants import TILE_SIZE
+    from core.constants import MAP_COLS as CONST_COLS, MAP_ROWS as CONST_ROWS
+    l01_col = get_collision_tiles("level_01")
+    rival_col = get_collision_tiles("rivalmap")
+    players = {}
+    for pid, p in game.players.items():
+        players[pid] = {"x": round(p.get("x", 0), 1), "y": round(p.get("y", 0), 1), "map": p.get("map", "level_01")}
+    return {
+        "world_data": {"MAP_COLS": MAP_COLS, "MAP_ROWS": MAP_ROWS},
+        "constants": {"MAP_COLS": CONST_COLS, "MAP_ROWS": CONST_ROWS},
+        "world_w": MAP_COLS * TILE_SIZE,
+        "world_h": MAP_ROWS * TILE_SIZE,
+        "collision_level_01": len(l01_col),
+        "collision_rivalmap": len(rival_col),
+        "players": players,
+    }
 
 
 @router.get("/api/debug/buildings")

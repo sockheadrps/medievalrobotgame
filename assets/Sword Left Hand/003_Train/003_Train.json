@@ -1,0 +1,47 @@
+{
+  "spriteSheet": "003_Train.png",
+  "sourceDmi": "Sword Left Hand.dmi",
+  "sourceState": "Train",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 224,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 7,
+    "rows": 1
+  },
+  "totalFrames": 7,
+  "stateInfo": {
+    "dirs": 1,
+    "frames": 7,
+    "delays": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "Train_1",
+    "1": "Train_2",
+    "2": "Train_3",
+    "3": "Train_4",
+    "4": "Train_5",
+    "5": "Train_6",
+    "6": "Train_7"
+  }
+}

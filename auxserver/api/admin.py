@@ -19,7 +19,7 @@ from services.database import (
     get_player_npc_limit, get_rival_npc_limit,
     get_speed_multiplier,
     wipe_all_npcs, reset_player_stats_to_default,
-    list_players,
+    list_players, save_player,
 )
 
 logger = logging.getLogger(__name__)
@@ -196,6 +196,8 @@ def _entity_snapshot(actor: dict, npc_id: Optional[str] = None) -> dict:
         "blastLevel": actor.get("blastLevel", 0),
         "ki_moves": list(actor.get("ki_moves") or []),
         "has_ki_blast": bool(actor.get("has_ki_blast", True)),
+        "learned_blasts": list(actor.get("learned_blasts") or []),
+        "active_blast_id": actor.get("active_blast_id"),
     }
 
 
@@ -235,6 +237,8 @@ class SetEntityStatsRequest(BaseModel):
     blastLevel: Optional[int] = None
     ki_moves: Optional[list] = None
     has_ki_blast: Optional[bool] = None
+    learned_blasts: Optional[list] = None
+    active_blast_id: Optional[str] = None
 
 
 @router.post("/api/admin/set_entity_stats")
@@ -274,6 +278,14 @@ async def set_entity_stats(req: SetEntityStatsRequest):
         actor["ki_moves"] = [str(m) for m in req.ki_moves]
     if req.has_ki_blast is not None:
         actor["has_ki_blast"] = req.has_ki_blast
+    if req.learned_blasts is not None:
+        actor["learned_blasts"] = [str(b) for b in req.learned_blasts]
+    if req.active_blast_id is not None:
+        actor["active_blast_id"] = str(req.active_blast_id) if req.active_blast_id else None
+
+    # Persist player to DB immediately so changes survive server restarts
+    if not req.npc_id:
+        save_player(req.pid, p)
 
     label = f"{req.pid}" + (f"/npc:{req.npc_id}" if req.npc_id else "")
     logger.info("Admin: set stats for %s", label)

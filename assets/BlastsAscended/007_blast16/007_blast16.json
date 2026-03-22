@@ -1,0 +1,49 @@
+{
+  "spriteSheet": "007_blast16.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "16",
+  "stateAlias": "blast16",
+  "stateUses": [
+    "Legendary Saiyan charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 224,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 7,
+    "rows": 1
+  },
+  "totalFrames": 7,
+  "stateInfo": {
+    "dirs": 1,
+    "frames": 7,
+    "delays": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast16_1",
+    "1": "blast16_2",
+    "2": "blast16_3",
+    "3": "blast16_4",
+    "4": "blast16_5",
+    "5": "blast16_6",
+    "6": "blast16_7"
+  }
+}

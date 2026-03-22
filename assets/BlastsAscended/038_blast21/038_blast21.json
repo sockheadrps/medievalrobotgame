@@ -1,0 +1,53 @@
+{
+  "spriteSheet": "038_blast21.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "21",
+  "stateAlias": "blast21",
+  "stateUses": [
+    "Changeling Koola primary blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 512,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 16,
+    "rows": 1
+  },
+  "totalFrames": 16,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 2,
+    "delays": [
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast21_1_down",
+    "1": "blast21_1_up",
+    "2": "blast21_1_right",
+    "3": "blast21_1_left",
+    "4": "blast21_1_southeast",
+    "5": "blast21_1_southwest",
+    "6": "blast21_1_northeast",
+    "7": "blast21_1_northwest",
+    "8": "blast21_2_down",
+    "9": "blast21_2_up",
+    "10": "blast21_2_right",
+    "11": "blast21_2_left",
+    "12": "blast21_2_southeast",
+    "13": "blast21_2_southwest",
+    "14": "blast21_2_northeast",
+    "15": "blast21_2_northwest"
+  }
+}

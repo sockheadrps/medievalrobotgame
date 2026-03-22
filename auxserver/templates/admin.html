@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html><head>
+<title>Server Admin</title>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a1e; color: #ccc; font-family: 'Consolas', monospace; font-size: 13px; padding: 16px; }
+  h1 { color: #ff6644; font-size: 20px; margin-bottom: 4px; }
+  h2 { color: #66aaff; font-size: 14px; margin: 12px 0 8px; border-bottom: 1px solid #222; padding-bottom: 4px; }
+  h3 { color: #aaddff; font-size: 13px; margin: 8px 0 4px; }
+  nav { margin-bottom: 16px; }
+  nav a { color: #66aaff; text-decoration: none; margin-right: 16px; font-size: 12px; }
+  nav a:hover { color: #aaddff; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  .card { background: #111; border: 1px solid #222; border-radius: 6px; padding: 14px; }
+  .card.danger { border-color: #442222; }
+  #status { color: #556677; font-size: 11px; margin-bottom: 12px; }
+  .stat { display: inline-block; margin: 2px 10px 2px 0; }
+  .stat b { color: #aaddff; }
+  .player-row { background: #0f0f20; padding: 6px 8px; margin: 4px 0; border-radius: 4px; border-left: 3px solid #336688; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .player-row b { color: #aaddff; }
+
+  /* Buttons */
+  .btn { display: inline-block; padding: 6px 14px; border-radius: 4px; border: none; cursor: pointer; font-family: 'Consolas', monospace; font-size: 12px; transition: background 0.15s; }
+  .btn-red   { background: #551111; color: #ffaaaa; }
+  .btn-red:hover   { background: #772222; }
+  .btn-orange { background: #553311; color: #ffcc88; }
+  .btn-orange:hover { background: #774422; }
+  .btn-blue  { background: #112244; color: #88bbff; }
+  .btn-blue:hover  { background: #1a3366; }
+  .btn-green { background: #113322; color: #88ffbb; }
+  .btn-green:hover { background: #1a4433; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Inputs */
+  .limit-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .limit-row label { min-width: 110px; color: #99aacc; }
+  .limit-input { width: 80px; background: #0f0f28; border: 1px solid #334; border-radius: 3px; color: #cce; padding: 4px 7px; font-family: 'Consolas', monospace; font-size: 12px; }
+  .limit-input:focus { outline: none; border-color: #66aaff; }
+  .note { color: #556677; font-size: 11px; margin-top: 4px; }
+
+  /* Feedback toast */
+  #toast { position: fixed; bottom: 20px; right: 20px; background: #1a3322; border: 1px solid #336644; color: #88ffbb; padding: 10px 16px; border-radius: 6px; font-size: 13px; display: none; z-index: 999; }
+  #toast.err { background: #331a1a; border-color: #664433; color: #ffaaaa; }
+
+  /* Player reset select */
+  .reset-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  select { background: #0f0f28; border: 1px solid #334; border-radius: 3px; color: #cce; padding: 4px 7px; font-family: 'Consolas', monospace; font-size: 12px; }
+  select:focus { outline: none; border-color: #66aaff; }
+
+  .confirm-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .confirm-box { display: none; }
+  .confirm-box.visible { display: flex; gap: 8px; align-items: center; }
+  .confirm-text { color: #ffcc44; font-size: 12px; }
+
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  /* Entity Editor */
+  .ee-row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 12px; }
+  .ee-col { display: flex; flex-direction: column; gap: 8px; min-width: 180px; }
+  .ee-field { display: flex; align-items: center; gap: 8px; }
+  .ee-field label { min-width: 130px; color: #99aacc; font-size: 12px; }
+  .ee-input { width: 80px; background: #0f0f28; border: 1px solid #334; border-radius: 3px; color: #cce; padding: 4px 7px; font-family: 'Consolas', monospace; font-size: 12px; }
+  .ee-input:focus { outline: none; border-color: #66aaff; }
+  .ee-check-group { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0; }
+  .ee-check { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #aaddcc; cursor: pointer; }
+  .ee-check input { cursor: pointer; }
+  .ee-divider { border: none; border-top: 1px solid #222; margin: 8px 0; }
+  .ee-label { color: #778899; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
+  .ee-notloaded { color: #445566; font-style: italic; font-size: 12px; }
+</style>
+</head><body>
+
+<h1>Server Admin</h1>
+<nav>
+  <a href="/aip">AI Dashboard</a>
+  <a href="/npc">NPC Dashboard</a>
+  <a href="/asseteditor">Asset Editor</a>
+  <a href="/mapmaker">Map Maker</a>
+</nav>
+<div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
+  <div id="status" style="margin:0">Loading...</div>
+  <button id="pause-btn" class="btn btn-orange" onclick="togglePause()" style="font-size:13px;padding:6px 18px">⏸ Pause</button>
+  <span id="pause-label" style="color:#556677;font-size:12px"></span>
+</div>
+
+<!-- Model Selector -->
+<div class="card" style="margin-bottom:16px">
+  <h2 style="margin-top:0">LLM Model</h2>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+    <select id="model-select" onchange="onModelSelect()"
+      style="flex:1;min-width:200px;background:#0f0f28;border:1px solid #334;border-radius:3px;color:#cce;padding:6px 9px;font-family:'Consolas',monospace;font-size:13px">
+      <option value="">— saved models —</option>
+    </select>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input id="model-input" placeholder="paste or type a new model name..."
+      style="flex:1;min-width:260px;background:#0f0f28;border:1px solid #334;border-radius:3px;color:#cce;padding:6px 9px;font-family:'Consolas',monospace;font-size:13px">
+    <button class="btn btn-green" onclick="applyModel()">Apply</button>
+    <span id="model-status" style="color:#556677;font-size:12px"></span>
+  </div>
+  <div id="model-current" style="color:#556677;font-size:11px;margin-top:6px">Loading...</div>
+</div>
+
+<div class="grid">
+
+  <!-- LEFT: Danger zone -->
+  <div style="display:grid;gap:16px;align-content:start">
+
+    <div class="card danger">
+      <h2>Wipe NPCs</h2>
+      <p style="color:#99aacc;margin-bottom:10px">Removes all NPCs owned by every player and the AI rival. Players keep their stats and accounts.</p>
+      <div id="wipe-confirm" class="confirm-box">
+        <span class="confirm-text">Are you sure? This cannot be undone.</span>
+        <button class="btn btn-red" onclick="doWipeNpcs()">Yes, wipe all NPCs</button>
+        <button class="btn btn-blue" onclick="cancelConfirm('wipe')">Cancel</button>
+      </div>
+      <button id="wipe-btn" class="btn btn-red" onclick="askConfirm('wipe')">Wipe All NPCs</button>
+    </div>
+
+    <div class="card danger">
+      <h2>Reset AI Rival</h2>
+      <p style="color:#99aacc;margin-bottom:10px">Resets the rival's memory, soul/identity, levels, and NPCs. The rival re-spawns fresh at level 1.</p>
+      <div id="rival-confirm" class="confirm-box">
+        <span class="confirm-text">Are you sure? Memory will be erased.</span>
+        <button class="btn btn-orange" onclick="doResetRival()">Yes, reset rival</button>
+        <button class="btn btn-blue" onclick="cancelConfirm('rival')">Cancel</button>
+      </div>
+      <button id="rival-btn" class="btn btn-orange" onclick="askConfirm('rival')">Reset AI Rival</button>
+    </div>
+
+    <div class="card danger">
+      <h2>Reset Player Stats</h2>
+      <p style="color:#99aacc;margin-bottom:6px">Resets level, XP, STR, DEF, HP, Ki stats to defaults. Does not wipe NPCs or inventory.</p>
+      <div class="reset-row">
+        <select id="reset-pid-select">
+          <option value="">— All players —</option>
+        </select>
+        <button class="btn btn-orange" onclick="askResetStats()">Reset Stats</button>
+      </div>
+      <div id="stats-confirm" class="confirm-box" style="margin-top:8px">
+        <span class="confirm-text" id="stats-confirm-text">Are you sure?</span>
+        <button class="btn btn-orange" onclick="doResetStats()">Yes, reset</button>
+        <button class="btn btn-blue" onclick="cancelConfirm('stats')">Cancel</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT: Limits + Current State -->
+  <div style="display:grid;gap:16px;align-content:start">
+
+    <div class="card">
+      <h2>NPC Limits</h2>
+      <p class="note" style="margin-bottom:10px">Cap how many NPCs each side can have. Leave blank or set 0 for no limit.</p>
+      <div class="limit-row">
+        <label>Player max NPCs</label>
+        <input id="limit-player" class="limit-input" type="number" min="0" placeholder="no limit">
+      </div>
+      <div class="limit-row">
+        <label>Rival max NPCs</label>
+        <input id="limit-rival" class="limit-input" type="number" min="0" placeholder="no limit">
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn btn-green" onclick="saveLimits()">Save Limits</button>
+        <button class="btn btn-blue" onclick="clearLimits()" style="margin-left:6px">Clear Limits</button>
+      </div>
+      <p class="note" style="margin-top:8px">Changes take effect immediately. Rival NPC target is capped at this value.</p>
+    </div>
+
+    <div class="card">
+      <h2>Movement Speed</h2>
+      <p class="note" style="margin-bottom:10px">Global multiplier applied to all player movement (walk + run). 1.0 = normal.</p>
+      <div class="limit-row">
+        <label>Speed multiplier</label>
+        <input id="speed-mult" class="limit-input" type="number" min="0.1" max="10" step="0.1" placeholder="1.0">
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn btn-green" onclick="saveSpeed()">Save Speed</button>
+        <button class="btn btn-blue" onclick="resetSpeed()" style="margin-left:6px">Reset (1×)</button>
+      </div>
+      <p class="note" style="margin-top:8px">Applies to both walk and run. Flying adds an additional 1.5× on top.</p>
+    </div>
+
+    <div class="card" id="state-card">
+      <h2>Current State</h2>
+      <div id="state-inner" style="color:#666">Loading...</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Entity Editor ──────────────────────────────────────────────────────── -->
+<div class="card" style="margin-top:16px" id="entity-editor-card">
+  <h2>Entity Editor</h2>
+  <p class="note" style="margin-bottom:12px">Select a connected player or AI Rival, optionally pick one of their NPCs, then adjust stats and save.</p>
+
+  <div class="ee-row">
+    <!-- Selectors -->
+    <div class="ee-col" style="min-width:220px">
+      <div class="ee-label">Select entity</div>
+      <select id="ee-pid-select" onchange="eeSelectPid()">
+        <option value="">— select player / rival —</option>
+      </select>
+      <select id="ee-npc-select" onchange="eeSelectNpc()" style="display:none">
+        <option value="">— player itself —</option>
+      </select>
+      <button class="btn btn-blue" onclick="eeLoad()" style="margin-top:4px">Load</button>
+    </div>
+
+    <!-- Stats -->
+    <div class="ee-col" id="ee-stats" style="display:none">
+      <div class="ee-label">Stats</div>
+      <div class="ee-field"><label>Level</label><input class="ee-input" id="ee-level" type="number" min="1"></div>
+      <div class="ee-field"><label>XP</label><input class="ee-input" id="ee-xp" type="number" min="0"></div>
+      <div class="ee-field"><label>STR</label><input class="ee-input" id="ee-str" type="number" min="1"></div>
+      <div class="ee-field"><label>DEF</label><input class="ee-input" id="ee-def" type="number" min="1"></div>
+      <div class="ee-field"><label>Max HP</label><input class="ee-input" id="ee-maxHp" type="number" min="1"></div>
+      <div class="ee-field"><label>Max Ki</label><input class="ee-input" id="ee-maxKi" type="number" min="1"></div>
+    </div>
+
+    <!-- Ki -->
+    <div class="ee-col" id="ee-ki" style="display:none">
+      <div class="ee-label">Ki Skills</div>
+      <div class="ee-field"><label>Ki Skill Level</label><input class="ee-input" id="ee-kiSkill" type="number" min="1"></div>
+      <div class="ee-field"><label>Blast Level</label><input class="ee-input" id="ee-blast" type="number" min="0"></div>
+
+      <hr class="ee-divider">
+      <div class="ee-label">Ki Abilities</div>
+      <label class="ee-check"><input type="checkbox" id="ee-has-ki-blast"> Has Ki Blast</label>
+      <div class="ee-label" style="margin-top:4px">Ki Moves</div>
+      <div class="ee-check-group">
+        <label class="ee-check"><input type="checkbox" id="ee-move-absorb" value="absorb"> Absorb</label>
+        <label class="ee-check"><input type="checkbox" id="ee-move-fly" value="fly"> Fly</label>
+        <label class="ee-check"><input type="checkbox" id="ee-move-scatter_shot" value="scatter_shot"> Scatter Shot</label>
+        <label class="ee-check"><input type="checkbox" id="ee-move-explosive_shot" value="explosive_shot"> Explosive Shot</label>
+        <span id="ee-learned-blasts-group"></span>
+      </div>
+
+      <hr class="ee-divider">
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn btn-green" onclick="eeSave()">Save Changes</button>
+        <button class="btn btn-blue" onclick="eeLoad()">Reload</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ee-notloaded" class="ee-notloaded">No entity loaded.</div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+let _state = null;
+
+// ── Pause ─────────────────────────────────────────────────────────────────────
+function _applyPauseState(paused) {
+  const btn = document.getElementById('pause-btn');
+  const lbl = document.getElementById('pause-label');
+  if (paused) {
+    btn.textContent = '▶ Resume';
+    btn.className = 'btn btn-green';
+    lbl.textContent = 'Game is PAUSED — AI halted';
+    lbl.style.color = '#ffcc44';
+  } else {
+    btn.textContent = '⏸ Pause';
+    btn.className = 'btn btn-orange';
+    lbl.textContent = '';
+  }
+}
+
+async function togglePause() {
+  const r = await fetch('/api/admin/pause', {method: 'POST'});
+  const d = await r.json();
+  _applyPauseState(d.paused);
+}
+
+// ── Model selector ────────────────────────────────────────────────────────────
+function _populateModelSelect(savedModels, currentModel) {
+  const sel = document.getElementById('model-select');
+  sel.innerHTML = '<option value="">— saved models —</option>';
+  for (const m of (savedModels || [])) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    if (m === currentModel) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
+function onModelSelect() {
+  const val = document.getElementById('model-select').value;
+  if (val) document.getElementById('model-input').value = val;
+}
+
+async function loadModel() {
+  const r = await fetch('/api/admin/model');
+  const d = await r.json();
+  document.getElementById('model-input').value = d.current_model || '';
+  document.getElementById('model-current').textContent = `Active: ${d.current_model}`;
+  _populateModelSelect(d.saved_models, d.current_model);
+}
+
+async function applyModel() {
+  const model = document.getElementById('model-input').value.trim();
+  if (!model) return;
+  const st = document.getElementById('model-status');
+  st.textContent = 'Saving...';
+  st.style.color = '#99aacc';
+  try {
+    const r = await fetch('/api/admin/model', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('model-current').textContent = `Active: ${d.current_model}`;
+      st.textContent = 'Saved & applied ✓';
+      st.style.color = '#88ffbb';
+      _populateModelSelect(d.saved_models, d.current_model);
+    } else {
+      st.textContent = 'Error: ' + (d.error || 'unknown');
+      st.style.color = '#ffaaaa';
+    }
+  } catch(e) {
+    st.textContent = 'Error: ' + e.message;
+    st.style.color = '#ffaaaa';
+  }
+  setTimeout(() => { st.textContent = ''; }, 3000);
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/admin/state');
+    _state = await r.json();
+    renderState(_state);
+    document.getElementById('status').textContent =
+      `Updated ${new Date().toLocaleTimeString()}`;
+  } catch(e) {
+    document.getElementById('status').textContent = 'Error: ' + e.message;
+  }
+}
+
+function renderState(d) {
+  _applyPauseState(d.paused);
+  // Populate player select
+  const sel = document.getElementById('reset-pid-select');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— All players —</option>';
+  for (const p of (d.players || [])) {
+    const opt = document.createElement('option');
+    opt.value = p.pid;
+    opt.textContent = p.pid;
+    sel.appendChild(opt);
+  }
+  sel.value = prev;
+
+  // Populate limit inputs if they haven't been touched
+  const lp = document.getElementById('limit-player');
+  const lr = document.getElementById('limit-rival');
+  if (!lp.dataset.dirty) lp.value = d.limits.player != null ? d.limits.player : '';
+  if (!lr.dataset.dirty) lr.value = d.limits.rival != null ? d.limits.rival : '';
+  lp.addEventListener('input', () => lp.dataset.dirty = '1', {once:true});
+  lr.addEventListener('input', () => lr.dataset.dirty = '1', {once:true});
+
+  const sm = document.getElementById('speed-mult');
+  if (!sm.dataset.dirty) sm.value = d.speed_multiplier != null ? d.speed_multiplier : '1';
+  sm.addEventListener('input', () => sm.dataset.dirty = '1', {once:true});
+
+  // Render state card
+  let html = '';
+
+  // Players
+  for (const p of (d.players || [])) {
+    html += `<div class="player-row">
+      <b>${esc(p.pid)}</b>
+      <span>Lv${p.level} | STR${p.str} DEF${p.def} | XP${p.xp}</span>
+      <span style="color:#aaddaa">NPCs: ${p.alive_npc_count}/${p.npc_count}</span>
+    </div>`;
+  }
+  if (!d.players || d.players.length === 0) {
+    html += '<div style="color:#666">No players connected</div>';
+  }
+
+  // Rival
+  const rv = d.rival || {};
+  html += `<h3 style="margin-top:10px">AI Rival</h3>
+  <div class="player-row" style="border-left-color:#ff6644">
+    <b>__ai_rival__</b>
+    <span>Lv${rv.level || 1}</span>
+    <span style="color:#ffcc88">NPCs: ${rv.npc_count || 0}</span>
+  </div>`;
+
+  // Limits
+  const lims = d.limits || {};
+  html += `<h3 style="margin-top:10px">Active Limits</h3>
+  <div>Player: <b style="color:#aaddff">${lims.player != null ? lims.player : 'unlimited'}</b>
+   &nbsp; Rival: <b style="color:#ffcc88">${lims.rival != null ? lims.rival : 'unlimited'}</b></div>`;
+
+  document.getElementById('state-inner').innerHTML = html;
+
+  // Keep Entity Editor pid list in sync
+  eePopulatePids(d);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Confirm helpers ──────────────────────────────────────────────────────────
+
+function askConfirm(which) {
+  ['wipe','rival','stats'].forEach(w => {
+    const el = document.getElementById(w + '-confirm');
+    if (el) el.classList.remove('visible');
+  });
+  const el = document.getElementById(which + '-confirm');
+  if (el) el.classList.add('visible');
+  const btn = document.getElementById(which + '-btn');
+  if (btn) btn.style.display = 'none';
+}
+
+function cancelConfirm(which) {
+  const el = document.getElementById(which + '-confirm');
+  if (el) el.classList.remove('visible');
+  const btn = document.getElementById(which + '-btn');
+  if (btn) btn.style.display = '';
+}
+
+function askResetStats() {
+  const pid = document.getElementById('reset-pid-select').value;
+  const label = pid ? `"${pid}"` : 'ALL players';
+  document.getElementById('stats-confirm-text').textContent =
+    `Reset stats for ${label}?`;
+  askConfirm('stats');
+}
+
+// ── Actions ──────────────────────────────────────────────────────────────────
+
+async function doWipeNpcs() {
+  cancelConfirm('wipe');
+  try {
+    const r = await fetch('/api/admin/wipe_npcs', {method:'POST'});
+    const d = await r.json();
+    toast(d.ok ? `Wiped ${d.wiped} NPCs.` : 'Error: ' + d.error, !d.ok);
+    refresh();
+  } catch(e) { toast('Request failed: ' + e.message, true); }
+}
+
+async function doResetRival() {
+  cancelConfirm('rival');
+  try {
+    const r = await fetch('/api/admin/reset_rival', {method:'POST'});
+    const d = await r.json();
+    toast(d.ok ? 'AI Rival reset. Re-spawning...' : 'Error: ' + d.error, !d.ok);
+    setTimeout(refresh, 1500);
+  } catch(e) { toast('Request failed: ' + e.message, true); }
+}
+
+async function doResetStats() {
+  cancelConfirm('stats');
+  const pid = document.getElementById('reset-pid-select').value;
+  try {
+    const r = await fetch('/api/admin/reset_player_stats', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({pid: pid || null}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast('Stats reset for: ' + (d.reset || []).join(', '));
+    } else {
+      toast('Error: ' + d.error, true);
+    }
+    refresh();
+  } catch(e) { toast('Request failed: ' + e.message, true); }
+}
+
+async function saveLimits() {
+  const pv = document.getElementById('limit-player').value.trim();
+  const rv = document.getElementById('limit-rival').value.trim();
+  const body = {
+    player_limit: pv === '' ? 0 : parseInt(pv, 10) || 0,
+    rival_limit:  rv === '' ? 0 : parseInt(rv, 10) || 0,
+  };
+  try {
+    const r = await fetch('/api/admin/set_limits', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    document.getElementById('limit-player').dataset.dirty = '';
+    document.getElementById('limit-rival').dataset.dirty = '';
+    toast(d.ok
+      ? `Limits saved — player: ${d.limits.player ?? 'unlimited'}, rival: ${d.limits.rival ?? 'unlimited'}`
+      : 'Error: ' + d.error, !d.ok);
+    refresh();
+  } catch(e) { toast('Request failed: ' + e.message, true); }
+}
+
+async function saveSpeed() {
+  const val = parseFloat(document.getElementById('speed-mult').value);
+  if (isNaN(val) || val <= 0) { toast('Invalid multiplier', true); return; }
+  try {
+    const r = await fetch('/api/admin/set_speed', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({multiplier: val}),
+    });
+    const d = await r.json();
+    document.getElementById('speed-mult').dataset.dirty = '';
+    toast(d.ok ? `Speed multiplier set to ${d.speed_multiplier}×` : 'Error: ' + d.error, !d.ok);
+    refresh();
+  } catch(e) { toast('Request failed: ' + e.message, true); }
+}
+
+async function resetSpeed() {
+  document.getElementById('speed-mult').value = '1';
+  document.getElementById('speed-mult').dataset.dirty = '';
+  try {
+    const r = await fetch('/api/admin/set_speed', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({multiplier: 1.0}),
+    });
+    const d = await r.json();
+    toast(d.ok ? 'Speed reset to 1× (normal).' : 'Error: ' + d.error, !d.ok);
+    refresh();
+  } catch(e) { toast('Request failed: ' + e.message, true); }
+}
+
+async function clearLimits() {
+  document.getElementById('limit-player').value = '';
+  document.getElementById('limit-rival').value = '';
+  document.getElementById('limit-player').dataset.dirty = '';
+  document.getElementById('limit-rival').dataset.dirty = '';
+  try {
+    const r = await fetch('/api/admin/set_limits', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({player_limit: 0, rival_limit: 0}),
+    });
+    const d = await r.json();
+    toast(d.ok ? 'Limits cleared (unlimited).' : 'Error: ' + d.error, !d.ok);
+    refresh();
+  } catch(e) { toast('Request failed: ' + e.message, true); }
+}
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+
+let _toastTimer = null;
+function toast(msg, isErr = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = isErr ? 'err' : '';
+  el.style.display = 'block';
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.style.display = 'none'; }, 3500);
+}
+
+refresh();
+loadModel();
+loadBlastDefs();
+setInterval(refresh, 5000);
+
+// ── Entity Editor ─────────────────────────────────────────────────────────────
+
+let _eePid = '';
+let _eeNpcId = '';
+const KI_MOVES = ['absorb', 'fly', 'scatter_shot', 'explosive_shot'];
+let _blastDefs = [];
+
+async function loadBlastDefs() {
+  try {
+    const r = await fetch('/api/blasts');
+    _blastDefs = await r.json();
+    const grp = document.getElementById('ee-learned-blasts-group');
+    grp.innerHTML = _blastDefs.map(def =>
+      `<label class="ee-check"><input type="checkbox" id="ee-blast-${esc(def.id)}" value="${esc(def.id)}"> ${esc(def.displayName || def.id)}</label>`
+    ).join('');
+  } catch(e) { /* silently ignore */ }
+}
+
+function eePopulatePids(state) {
+  const sel = document.getElementById('ee-pid-select');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— select player / rival —</option>';
+  for (const p of (state.players || [])) {
+    const opt = document.createElement('option');
+    opt.value = p.pid;
+    opt.textContent = p.pid;
+    sel.appendChild(opt);
+  }
+  // Always add AI Rival
+  const ropt = document.createElement('option');
+  ropt.value = '__ai_rival__';
+  ropt.textContent = 'AI Rival (__ai_rival__)';
+  sel.appendChild(ropt);
+  if (prev) sel.value = prev;
+}
+
+function eeSelectPid() {
+  _eePid = document.getElementById('ee-pid-select').value;
+  _eeNpcId = '';
+  document.getElementById('ee-npc-select').style.display = 'none';
+  document.getElementById('ee-npc-select').innerHTML = '<option value="">— player itself —</option>';
+  eeHideStats();
+}
+
+function eeSelectNpc() {
+  _eeNpcId = document.getElementById('ee-npc-select').value || '';
+}
+
+function eeHideStats() {
+  document.getElementById('ee-stats').style.display = 'none';
+  document.getElementById('ee-ki').style.display = 'none';
+  document.getElementById('ee-notloaded').style.display = '';
+}
+
+async function eeLoad() {
+  _eePid = document.getElementById('ee-pid-select').value;
+  if (!_eePid) { toast('Select a player or rival first.', true); return; }
+  _eeNpcId = document.getElementById('ee-npc-select').value || '';
+
+  const params = new URLSearchParams({ pid: _eePid });
+  if (_eeNpcId) params.set('npc_id', _eeNpcId);
+
+  try {
+    const r = await fetch('/api/admin/entity_data?' + params);
+    const d = await r.json();
+    if (!d.ok) { toast('Error: ' + d.error, true); return; }
+
+    // Populate NPC dropdown if we loaded a player (not yet drilling into NPC)
+    if (!_eeNpcId && d.npcs) {
+      const nsel = document.getElementById('ee-npc-select');
+      nsel.innerHTML = '<option value="">— player itself —</option>';
+      for (const npc of d.npcs) {
+        const opt = document.createElement('option');
+        opt.value = npc.id;
+        opt.textContent = `${npc.id}  [Lv${npc.level}${npc.dead ? ' ☠' : ''}]`;
+        nsel.appendChild(opt);
+      }
+      nsel.style.display = '';
+    }
+
+    eePopulateFields(d);
+  } catch(e) { toast('Request failed: ' + e.message, true); }
+}
+
+function eePopulateFields(d) {
+  document.getElementById('ee-level').value = d.level ?? 1;
+  document.getElementById('ee-xp').value = d.xp ?? 0;
+  document.getElementById('ee-str').value = d.str ?? 1;
+  document.getElementById('ee-def').value = d.def ?? 1;
+  document.getElementById('ee-maxHp').value = d.maxHp ?? 20;
+  document.getElementById('ee-maxKi').value = d.maxKi ?? 20;
+  document.getElementById('ee-kiSkill').value = d.kiSkillLevel ?? 1;
+  document.getElementById('ee-blast').value = d.blastLevel ?? 0;
+  document.getElementById('ee-has-ki-blast').checked = !!d.has_ki_blast;
+  const moves = d.ki_moves || [];
+  for (const m of KI_MOVES) {
+    const el = document.getElementById('ee-move-' + m);
+    if (el) el.checked = moves.includes(m);
+  }
+  const learnedBlasts = d.learned_blasts || [];
+  for (const def of _blastDefs) {
+    const el = document.getElementById('ee-blast-' + def.id);
+    if (el) el.checked = learnedBlasts.includes(def.id);
+  }
+  document.getElementById('ee-stats').style.display = '';
+  document.getElementById('ee-ki').style.display = '';
+  document.getElementById('ee-notloaded').style.display = 'none';
+}
+
+async function eeSave() {
+  if (!_eePid) { toast('No entity loaded.', true); return; }
+
+  const ki_moves = KI_MOVES.filter(m => {
+    const el = document.getElementById('ee-move-' + m);
+    return el && el.checked;
+  });
+
+  const learned_blasts = _blastDefs.filter(def => {
+    const el = document.getElementById('ee-blast-' + def.id);
+    return el && el.checked;
+  }).map(def => def.id);
+
+  const body = {
+    pid: _eePid,
+    npc_id: _eeNpcId || null,
+    level: parseInt(document.getElementById('ee-level').value) || 1,
+    xp: parseInt(document.getElementById('ee-xp').value) || 0,
+    str_stat: parseInt(document.getElementById('ee-str').value) || 1,
+    def_stat: parseInt(document.getElementById('ee-def').value) || 1,
+    maxHp: parseInt(document.getElementById('ee-maxHp').value) || 20,
+    maxKi: parseInt(document.getElementById('ee-maxKi').value) || 20,
+    kiSkillLevel: parseInt(document.getElementById('ee-kiSkill').value) || 1,
+    blastLevel: parseInt(document.getElementById('ee-blast').value) || 0,
+    ki_moves,
+    has_ki_blast: document.getElementById('ee-has-ki-blast').checked,
+    learned_blasts,
+  };
+
+  try {
+    const r = await fetch('/api/admin/set_entity_stats', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const label = _eeNpcId ? `NPC ${_eeNpcId}` : _eePid;
+      toast(`Saved stats for ${label}.`);
+      if (d.snapshot) eePopulateFields(d.snapshot);
+    } else {
+      toast('Error: ' + d.error, true);
+    }
+  } catch(e) { toast('Request failed: ' + e.message, true); }
+}
+</script>
+</body></html>

@@ -1,0 +1,53 @@
+{
+  "spriteSheet": "035_blast25.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "25",
+  "stateAlias": "blast25",
+  "stateUses": [
+    "Half-Saiyan (Saiyan Dominant) primary blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 512,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 16,
+    "rows": 1
+  },
+  "totalFrames": 16,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 2,
+    "delays": [
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast25_1_down",
+    "1": "blast25_1_up",
+    "2": "blast25_1_right",
+    "3": "blast25_1_left",
+    "4": "blast25_1_southeast",
+    "5": "blast25_1_southwest",
+    "6": "blast25_1_northeast",
+    "7": "blast25_1_northwest",
+    "8": "blast25_2_down",
+    "9": "blast25_2_up",
+    "10": "blast25_2_right",
+    "11": "blast25_2_left",
+    "12": "blast25_2_southeast",
+    "13": "blast25_2_southwest",
+    "14": "blast25_2_northeast",
+    "15": "blast25_2_northwest"
+  }
+}

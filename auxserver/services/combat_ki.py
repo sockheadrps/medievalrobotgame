@@ -80,16 +80,20 @@ class CombatKiService(CombatUtilsMixin):
         blast_id = attacker.get("active_blast_id")
         if blast_id and blast_id in BLAST_DEFS:
             cost = BLAST_DEFS[blast_id].get("kiCost", cost)
+            dmg_mod = BLAST_DEFS[blast_id].get("effects", {}).get("dmg_mult", 0)
+            if dmg_mod != 0:
+                dmg = max(1, int(dmg * (100 + dmg_mod) / 100))
         cost, dmg = self._apply_blast_mode(cost, dmg, blast_mode)
         if not self._try_ki_spend(attacker, cost):
             return
         self.gs.player_manager._grant_ki_skill_xp(attacker, 1)
-        self._queue_ki_blast_fx(attacker, target=target)
+        self._queue_ki_blast_fx(attacker, target=target, owner_pid=attacker_pid)
 
         attacker.setdefault("last_hit_by_player", {})[cooldown_key] = now
 
-        final_dmg = self._apply_barrier_reduction(target, "ki", self._calc_ki_damage_taken(dmg, target))
-        target["hp"] = max(0, target["hp"] - final_dmg)
+        raw_dmg = self._apply_barrier_reduction(target, "ki", self._calc_ki_damage_taken(dmg, target))
+        final_dmg = min(raw_dmg, max(0, target.get("hp", 0)))
+        target["hp"] = max(0, target["hp"] - raw_dmg)
         self._apply_blast_effects(attacker, target, final_dmg)
         self._proximity_learn(attacker.get("active_blast_id"), attacker["x"], attacker["y"], attacker.get("map", "level_01"))
         self.gs.player_manager._queue_ai_alert(target_pid, f"{attacker_pid} hit me with a ki blast for {final_dmg} damage.", f"{attacker_pid} blasted me.", source_pid=attacker_pid, action="attack_me")
@@ -129,16 +133,20 @@ class CombatKiService(CombatUtilsMixin):
         blast_id = attacker.get("active_blast_id")
         if blast_id and blast_id in BLAST_DEFS:
             cost = BLAST_DEFS[blast_id].get("kiCost", cost)
+            dmg_mod = BLAST_DEFS[blast_id].get("effects", {}).get("dmg_mult", 0)
+            if dmg_mod != 0:
+                dmg = max(1, int(dmg * (100 + dmg_mod) / 100))
         cost, dmg = self._apply_blast_mode(cost, dmg, blast_mode)
         if not self._try_ki_spend(attacker, cost):
             return
         self.gs.player_manager._grant_ki_skill_xp(attacker, 1)
-        self._queue_ki_blast_fx(attacker, target=npc_state)
+        self._queue_ki_blast_fx(attacker, target=npc_state, owner_pid=attacker_pid)
 
         attacker.setdefault("last_hit_by_player", {})[cooldown_key] = now
 
-        final_dmg = self._apply_barrier_reduction(npc_state, "ki", self._calc_ki_damage_taken(dmg, npc_state))
-        npc_state["hp"] = max(0, npc_state["hp"] - final_dmg)
+        raw_dmg = self._apply_barrier_reduction(npc_state, "ki", self._calc_ki_damage_taken(dmg, npc_state))
+        final_dmg = min(raw_dmg, max(0, npc_state.get("hp", 0)))
+        npc_state["hp"] = max(0, npc_state["hp"] - raw_dmg)
         self._apply_blast_effects(attacker, npc_state, final_dmg)
         self._proximity_learn(attacker.get("active_blast_id"), attacker["x"], attacker["y"], attacker.get("map", "level_01"))
         npc_state["_last_attacked_by"] = {"type": "player", "id": attacker_pid}
@@ -176,14 +184,19 @@ class CombatKiService(CombatUtilsMixin):
         blast_id = p.get("active_blast_id")
         if blast_id and blast_id in BLAST_DEFS:
             cost = BLAST_DEFS[blast_id].get("kiCost", cost)
+            dmg_mod = BLAST_DEFS[blast_id].get("effects", {}).get("dmg_mult", 0)
+            if dmg_mod != 0:
+                dmg = max(1, int(dmg * (100 + dmg_mod) / 100))
         cost, dmg = self._apply_blast_mode(cost, dmg, blast_mode)
         if not self._try_ki_spend(p, cost):
             return
         self.gs.player_manager._grant_ki_skill_xp(p, 2)
         p.setdefault("last_hit_by_player", {})[cooldown_key] = now
 
-        dummy["hp"] = max(0, dummy["hp"] - max(1, dmg))
-        self._apply_blast_effects(p, dummy, max(1, dmg))
+        raw_dmg = max(1, dmg)
+        actual_dmg = min(raw_dmg, max(0, dummy.get("hp", 0)))
+        dummy["hp"] = max(0, dummy["hp"] - raw_dmg)
+        self._apply_blast_effects(p, dummy, actual_dmg)
         self._proximity_learn(p.get("active_blast_id"), p["x"], p["y"], p.get("map", "level_01"))
         if dummy.get("owner"):
             self.gs.player_manager._queue_ai_alert(dummy.get("owner"), f"{pid} hit my training dummy with a ki blast.", f"{pid} is hitting my dummy.", source_pid=pid, action="hit_my_dummy")
@@ -227,8 +240,9 @@ class CombatKiService(CombatUtilsMixin):
 
         siphon_pct = effects.get("siphon_pct", 0)
         if siphon_pct > 0 and final_dmg > 0:
-            heal = final_dmg * siphon_pct / 100
-            attacker["hp"] = min(attacker.get("maxHp", 20), attacker.get("hp", 0) + heal)
+            max_hp = attacker.get("maxHp", 20)
+            heal = min(final_dmg * siphon_pct / 100, max_hp * 0.15)  # cap at 15% of max HP per hit
+            attacker["hp"] = min(max_hp, attacker.get("hp", 0) + heal)
 
         # ── Duration effects ─────────────────────────────────────────────────────
         slow_pct = effects.get("slow_pct", 0)
@@ -367,7 +381,7 @@ class CombatKiService(CombatUtilsMixin):
         cost, _dmg = self._calc_blast_for_actor(p)
         if not self._try_ki_spend(p, cost):
             return
-        self._queue_ki_blast_fx(p)
+        self._queue_ki_blast_fx(p, owner_pid=pid)
 
         # Convert log pile to campfire
         log_count = min(item.get("amount", 1), 3)
@@ -412,6 +426,9 @@ class CombatKiService(CombatUtilsMixin):
         blast_id = npc_state.get("active_blast_id")
         if blast_id and blast_id in BLAST_DEFS:
             cost = BLAST_DEFS[blast_id].get("kiCost", cost)
+            dmg_mod = BLAST_DEFS[blast_id].get("effects", {}).get("dmg_mult", 0)
+            if dmg_mod != 0:
+                dmg = max(1, int(dmg * (100 + dmg_mod) / 100))
         if npc_state.get("inf_ki"):
             npc_state["ki"] = npc_state.get("maxKi", KI_MAX_BASE)
             npc_state["blastLevel"] = npc_state.get("blastLevel", 0) + 1
@@ -427,8 +444,9 @@ class CombatKiService(CombatUtilsMixin):
 
         target.setdefault("last_hit_by_player", {})[cooldown_key] = now
 
-        final_dmg = self._apply_barrier_reduction(target, "ki", self._calc_ki_damage_taken(dmg, target))
-        target["hp"] = max(0, target["hp"] - final_dmg)
+        raw_dmg = self._apply_barrier_reduction(target, "ki", self._calc_ki_damage_taken(dmg, target))
+        final_dmg = min(raw_dmg, max(0, target.get("hp", 0)))
+        target["hp"] = max(0, target["hp"] - raw_dmg)
         self._apply_blast_effects(npc_state, target, final_dmg)
         self._proximity_learn(npc_state.get("active_blast_id"), npc_state["x"], npc_state["y"], npc_state.get("map", "level_01"))
         attacker_name = npc_state.get("name", npc_id)
@@ -468,6 +486,9 @@ class CombatKiService(CombatUtilsMixin):
         blast_id = attacker_npc.get("active_blast_id")
         if blast_id and blast_id in BLAST_DEFS:
             cost = BLAST_DEFS[blast_id].get("kiCost", cost)
+            dmg_mod = BLAST_DEFS[blast_id].get("effects", {}).get("dmg_mult", 0)
+            if dmg_mod != 0:
+                dmg = max(1, int(dmg * (100 + dmg_mod) / 100))
         if attacker_npc.get("inf_ki"):
             attacker_npc["ki"] = attacker_npc.get("maxKi", KI_MAX_BASE)
             attacker_npc["blastLevel"] = attacker_npc.get("blastLevel", 0) + 1
@@ -483,8 +504,9 @@ class CombatKiService(CombatUtilsMixin):
 
         npc_state.setdefault("last_hit", {})[cooldown_key] = now
 
-        final_dmg = self._apply_barrier_reduction(npc_state, "ki", self._calc_ki_damage_taken(dmg, npc_state))
-        npc_state["hp"] = max(0, npc_state["hp"] - final_dmg)
+        raw_dmg = self._apply_barrier_reduction(npc_state, "ki", self._calc_ki_damage_taken(dmg, npc_state))
+        final_dmg = min(raw_dmg, max(0, npc_state.get("hp", 0)))
+        npc_state["hp"] = max(0, npc_state["hp"] - raw_dmg)
         self._apply_blast_effects(attacker_npc, npc_state, final_dmg)
         self._proximity_learn(attacker_npc.get("active_blast_id"), attacker_npc["x"], attacker_npc["y"], attacker_npc.get("map", "level_01"))
         npc_state["_last_attacked_by"] = {"type": "npc", "id": attacker_npc_id, "owner": owner_pid}

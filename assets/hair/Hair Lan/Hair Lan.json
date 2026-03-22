@@ -1,0 +1,138 @@
+{
+  "name": "Hair Lan",
+  "slug": "Hair Lan",
+  "category": "hair",
+  "frameCount": 62,
+  "spriteSheet": "Hair Lan.png",
+  "description": "entityhair",
+  "namedFrames": {
+    "0": "face_down",
+    "1": "face_up",
+    "2": "face_right",
+    "3": "face_left",
+    "4": "walk_1_down",
+    "5": "walk_1_up",
+    "6": "walk_1_right",
+    "7": "walk_1_left",
+    "8": "walk_2_down",
+    "9": "walk_2_up",
+    "10": "walk_2_right",
+    "11": "walk_2_left",
+    "12": "walk_3_down",
+    "13": "walk_3_up",
+    "14": "walk_3_right",
+    "15": "walk_3_left",
+    "16": "meditate",
+    "18": "attack_1_down",
+    "19": "attack_2_down",
+    "20": "attack_1_up",
+    "21": "attack_2_up",
+    "22": "attack_1_right",
+    "23": "attack_2_right",
+    "25": "attack_1_left",
+    "27": "attack_2_left",
+    "28": "fly_down",
+    "29": "fly_up",
+    "30": "fly_right",
+    "31": "fly_left",
+    "49": "ko"
+  },
+  "baseFrameMap": {
+    "35": 31,
+    "40": 36,
+    "49": 40
+  },
+  "actions": {
+    "face": {
+      "down": [
+        0
+      ],
+      "left": [
+        3
+      ],
+      "none": [],
+      "up": [
+        1
+      ],
+      "right": [
+        2
+      ]
+    },
+    "walk": {
+      "down": [
+        4,
+        8,
+        12
+      ],
+      "left": [
+        7,
+        11,
+        15
+      ],
+      "none": [],
+      "up": [
+        5,
+        9,
+        13
+      ],
+      "right": [
+        6,
+        10,
+        14
+      ]
+    },
+    "meditate": {
+      "down": [],
+      "left": [],
+      "none": [
+        16
+      ],
+      "up": [],
+      "right": []
+    },
+    "attack": {
+      "down": [
+        18,
+        19
+      ],
+      "left": [
+        25,
+        27
+      ],
+      "none": [],
+      "up": [
+        20,
+        21
+      ],
+      "right": [
+        22,
+        23
+      ]
+    },
+    "fly": {
+      "down": [
+        28
+      ],
+      "left": [
+        31
+      ],
+      "none": [],
+      "up": [
+        29
+      ],
+      "right": [
+        30
+      ]
+    },
+    "ko": {
+      "down": [],
+      "left": [],
+      "none": [
+        49
+      ],
+      "up": [],
+      "right": []
+    }
+  },
+  "updatedAt": "2026-03-21T12:38:51"
+}

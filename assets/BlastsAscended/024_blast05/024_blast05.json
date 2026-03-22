@@ -1,0 +1,42 @@
+{
+  "spriteSheet": "024_blast05.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "5",
+  "stateAlias": "blast05",
+  "stateUses": [
+    "Tsufurujin primary blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 256,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 8,
+    "rows": 1
+  },
+  "totalFrames": 8,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 1,
+    "delays": [],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast05_down",
+    "1": "blast05_up",
+    "2": "blast05_right",
+    "3": "blast05_left",
+    "4": "blast05_southeast",
+    "5": "blast05_southwest",
+    "6": "blast05_northeast",
+    "7": "blast05_northwest"
+  }
+}

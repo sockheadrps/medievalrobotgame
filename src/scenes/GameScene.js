@@ -67,7 +67,7 @@ export default class GameScene extends Phaser.Scene {
     // Load blast definitions synchronously so they're available during preload
     try {
       const xhr = new XMLHttpRequest();
-      xhr.open('GET', '/api/blasts', false);
+      xhr.open('GET', `${API_BASE}/api/blasts`, false);
       xhr.send();
       if (xhr.status === 200) {
         const defs = JSON.parse(xhr.responseText);
@@ -2309,6 +2309,9 @@ export default class GameScene extends Phaser.Scene {
   _openHotbarPicker(slotIndex, centerX, topY) {
     return this._inventoryUi.openHotbarPicker(slotIndex, centerX, topY);
   }
+  _openKiMovePicker(slotIndex, centerX, topY) {
+    return this._inventoryUi.openKiMovePicker(slotIndex, centerX, topY);
+  }
   _buildHotbar() {
     return this._hud.buildHotbar();
   }
@@ -2390,6 +2393,20 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // ── Ki Blast ─────────────────────────────────────────────────────────────────
+  _useBlastSlot() {
+    const activeId = this.player?.activeBlastId;
+    if (!activeId) return;
+    if (activeId === 'absorb') {
+      this._combatFx.firePlayerAbsorb();
+    } else if (activeId === 'barrier') {
+      this._conn?.send({ type: 'activate_barrier', npc_id: null });
+    } else {
+      // ki_shot and custom blasts both go through firePlayerKiBlast —
+      // it already reads player.activeBlastId and uses BLAST_DEFS
+      this._combatFx.firePlayerKiBlast();
+    }
+  }
+
   _fireKiBlast() {
     return this._combatFx.firePlayerKiBlast();
   }

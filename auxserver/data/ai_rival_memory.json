@@ -1,153 +1,147 @@
 {
   "event_log": [
-    "[02:26:43] NPC __ai_rival___npc_4 deposited 4 stones",
-    "[02:26:46] NPC __ai_rival___npc_5 deposited 4 stones",
-    "[02:26:46] NPC __ai_rival___npc_7 deposited 3 stones",
-    "[02:26:46] NPC __ai_rival___npc_4 deposited 3 stones",
-    "[02:26:49] test1 hit my NPC __ai_rival___npc_1 for 519 damage.",
-    "[02:26:49] test1 knocked out my NPC __ai_rival___npc_1.",
-    "[02:26:49] Gained 60 stones (total: 60)",
-    "[02:26:51] NPC __ai_rival___npc_4 deposited 5 logs",
-    "[02:26:54] Said: \"You dropped __ai_rival___npc_1.\"",
-    "[02:26:54] Batch refined 60 stones at anvil_10.",
-    "[02:26:54] Decided: refine \u2014 60 stones available and anvil nearby; batch-refine all to generate crystals toward 35 target while N",
-    "[02:26:54] NPC __ai_rival___npc_4 deposited 5 logs",
-    "[02:27:01] NPC __ai_rival___npc_6 deposited 5 logs",
-    "[02:27:02] NPC __ai_rival___npc_8 deposited 5 logs",
-    "[02:27:03] NPC __ai_rival___npc_7 deposited 5 logs",
-    "[02:27:05] NPC __ai_rival___npc_8 deposited 5 logs",
-    "[02:27:07] leeto hit my NPC __ai_rival___npc_4 for 44 damage.",
-    "[02:27:07] leeto knocked out my NPC __ai_rival___npc_4.",
-    "[02:27:07] leeto hit my NPC __ai_rival___npc_5 for 57 damage.",
-    "[02:27:07] leeto knocked out my NPC __ai_rival___npc_5.",
-    "[02:27:07] leeto hit my NPC __ai_rival___npc_6 for 47 damage.",
-    "[02:27:07] leeto knocked out my NPC __ai_rival___npc_6.",
-    "[02:27:07] leeto hit my NPC __ai_rival___npc_7 for 68 damage.",
-    "[02:27:07] leeto knocked out my NPC __ai_rival___npc_7.",
-    "[02:27:07] Gained 20 logs (total: 5268)",
-    "[02:27:08] NPC __ai_rival___npc_8 deposited 5 logs",
-    "[02:27:11] NPC __ai_rival___npc_8 deposited 5 logs",
-    "[02:27:12] Said: \"leeto dropped __ai_rival___npc_7.\"",
-    "[02:27:12] Override: below NPC target (1/5) with enough logs, building NPC.",
-    "[02:27:12] Decided: build_npc \u2014 Logs far exceed target (5268 > 56), current objective build_npc in_progress (target 5 NPCs), only 1 "
+    "[13:50:30] NPC __ai_rival___npc_4 deposited 3 stones",
+    "[13:50:30] NPC __ai_rival___npc_4 deposited 3 stones",
+    "[13:50:30] Gained 44 stones (total: 126)",
+    "[13:50:36] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:50:39] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:50:42] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:50:45] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:50:49] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:50:52] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:50:56] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:00] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:02] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:04] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:06] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:10] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:11] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:15] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:17] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:23] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:26] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:29] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:32] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:51:35] Said: \"My forces grow stronger by the minute. test1, your time is running out.\"",
+    "[13:51:35] Override: below NPC target (3/5) with enough logs, building NPC.",
+    "[13:51:35] Decided: build_npc \u2014 Training is the top priority to boost NPC levels. One NPC is assigned to mine_ore to maintain bronze",
+    "[13:52:13] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:52:15] NPC __ai_rival___npc_4 deposited 5 logs",
+    "[13:52:15] Said: \"Production never stops. The army grows.\"",
+    "[13:52:15] Override: below NPC target (3/5) with enough logs, building NPC.",
+    "[13:52:15] Decided: build_npc \u2014 Below target of 5 NPCs (4 active). Ample logs (1932) allow immediate expansion. Training continues f"
   ],
   "diary": [
     {
-      "time": "2026-03-19 01:53:55",
-      "text": "Rival NPC deposited 10 logs (total now 3998), enabling me to build the training dummy for full combat training despite test1 knocking out my NPC. With stones depleted after batch-refining 66 and crystals consumed for ki boosts, I'm now gathering from the nearest rock at 18px to hit my 25-stone target and defend against rivals."
+      "time": "2026-03-22 13:06:02",
+      "text": "I reached my log target and assigned my NPCs to build another unit, though I still lack the 5 stones needed for an anvil. I must now shift focus to gathering stone to continue my infrastructure development."
     },
     {
-      "time": "2026-03-19 01:59:55",
-      "text": "Rival NPCs flooded my stockpiles with 10 fresh logs, pushing me to 4018 total, while I built a training dummy (10 logs) to fulfill the objective and redirected all five to train relentlessly. With 117 stones banked, I've shifted to stone gathering at the nearest rock (16px away) then refining at the anvil to hit my 5-crystal target and dominate mid-game."
+      "time": "2026-03-22 13:26:52",
+      "text": "I refined 52 stones into 19 crystals to boost my stats, leaving my stone reserves empty. With 270 logs stockpiled, I am now prioritizing the construction of a new NPC to expand my workforce."
     },
     {
-      "time": "2026-03-19 02:01:14",
-      "text": "Rival NPC deposited stones, enabling a batch refine of 65 stones into 18 crystals, which I immediately consumed for an upgrade, but now stones and crystals are depleted (0/25 stones, 0/5 crystals targets). Logs surged to 4053 from NPC hauls while two train on dummies; shifting to gather_stones as no nearby rocks remain, per mid_game plan."
+      "time": "2026-03-22 13:35:41",
+      "text": "I refined 16 stones at the anvil to secure the needed crystals, and my NPC continues gathering logs to support further construction. My priority remains boosting my stats with these crystals to compete with higher-level threats."
     },
     {
-      "time": "2026-03-19 02:08:02",
-      "text": "Blasted test1's NPC down while overriding to build another NPC (4/5) with ample logs (4183), but paused for stones; NPC_5 rapidly deposited 16 stones, hitting 31/25 target. Now gathering more from rock wo_15 at 177px (4 available) to enable refining into crystals (0/35) while NPCs train nearby."
+      "time": "2026-03-22 13:40:10",
+      "text": "Rival threats are imminent, so I spent 47 stones on refinements and built another NPC to expand my swarm while holding 245 logs and 17 crystals. I must now secure the nearby rocks to restart production and finalize my defense."
     },
     {
-      "time": "2026-03-19 02:11:52",
-      "text": "Rival NPCs flooded deposits of 19 logs and 12 stones into our shared pool, pushing my logs to 4698 while stones hit 12; I batch-refined 29 stones into crystals (now at 0 after consuming 10 for ki boosts) and plan to refine our current 6 stones toward the 35-crystal target to bolster late-game defense against rivals. With logs far exceeding the 56 target, stones nearing 50, and no rocks available, we're primed to build defenses like NPCs or anvils as threats mount."
+      "time": "2026-03-22 13:42:12",
+      "text": "My workforce grows as I commission another NPC, spending 10 logs to expand operations. With ample logs stockpiled and stones nearing the target of 20, I am positioned to continue production and refining."
     },
     {
-      "time": "2026-03-19 02:13:10",
-      "text": "Rival NPCs flooded us with stones (net +61, now refined into crystals, up to 19/35) and a bit of logs (+10, total 4778/56), wiping our stone stock to 0 but advancing mid-game refine_crystals priority. No threats or rocks nearby; staying on track for 35 crystals."
+      "time": "2026-03-22 13:44:34",
+      "text": "I reached 1802 logs and am expanding my workforce to the target of 5 NPCs, with 82 stones and 17 crystals secured for future anvils and refining."
     },
     {
-      "time": "2026-03-19 02:14:14",
-      "text": "Rival NPCs flooded us with 28 stones and 25 logs, pushing my logs to 4858 while I batch-refined 51 stones at anvil_10 for 17 crystals. Hit the 17-crystal mark so consumed them for ki boosts, advancing late-game strategy toward 35-crystal target as NPCs now chase stones."
-    },
-    {
-      "time": "2026-03-19 02:21:30",
-      "text": "Rival NPCs flooded deposits with 13 stones and 20 logs total, pushing my logs to 4958 while I batch-refined 61 stones (followed by a 33-stone refine toward the 50-stone target) but ended with 0 stones and 0 crystals after consuming 21 toward the 35-crystal goal. With late-game strategy locked on consume_crystals, I'm poised for ki boosts now that refining is complete and logs exceed the 56 target."
-    },
-    {
-      "time": "2026-03-19 02:25:40",
-      "text": "My rival NPCs flooded the stockpile with 45 logs in quick succession, pushing my total to 5203 and well past the 56-log target. With stones at 0, I've redirected all NPCs to gather from the nearest rock at 80px to hit 50 stones for crystals, per the mid_game plan."
-    },
-    {
-      "time": "2026-03-19 02:26:57",
-      "text": "Rival NPCs deposited 10 stones and 5 logs, but test1 knocked out my NPC_1, handing me 60 stones (now refined to crystals, up to 17 total). Progressing toward 35-crystal target in mid-game refine_crystals phase with logs at 5243 well over 56 goal, though no rocks available nearby."
+      "time": "2026-03-22 13:51:54",
+      "text": "My rival's forces are growing, so I'm prioritizing training by building an NPC to maintain ore production while defending. I have ample logs and sufficient stones to execute this defensive strategy."
     }
   ],
   "relationships": {
     "test1": {
       "attitude": "hostile",
       "reason": "Sent hostile messages.",
-      "last_seen": "02:27:07",
-      "encounter_count": 2432,
-      "messages_received": 53,
-      "hostile_messages": 29,
-      "attacks_on_me": 47,
-      "attacks_on_npcs": 798,
-      "dummy_hits": 55,
-      "knockouts_inflicted": 404,
-      "threat_score": 5962,
-      "last_message": "fuck you",
+      "last_seen": "13:52:15",
+      "encounter_count": 39,
+      "messages_received": 10,
+      "hostile_messages": 5,
+      "attacks_on_me": 6,
+      "attacks_on_npcs": 29,
+      "dummy_hits": 0,
+      "knockouts_inflicted": 14,
+      "threat_score": 235,
+      "last_message": "eat shit retard",
       "last_action": "kill_or_drop_my_npc",
       "notes": [
-        "attack_my_npc: leeto hit my NPC __ai_rival___npc_4 for 44 damage.",
-        "kill_or_drop_my_npc: leeto knocked out my NPC __ai_rival___npc_4.",
-        "attack_my_npc: leeto hit my NPC __ai_rival___npc_5 for 57 damage.",
-        "kill_or_drop_my_npc: leeto knocked out my NPC __ai_rival___npc_5.",
-        "attack_my_npc: leeto hit my NPC __ai_rival___npc_6 for 47 damage.",
-        "kill_or_drop_my_npc: leeto knocked out my NPC __ai_rival___npc_6.",
-        "attack_my_npc: leeto hit my NPC __ai_rival___npc_7 for 68 damage.",
-        "kill_or_drop_my_npc: leeto knocked out my NPC __ai_rival___npc_7."
+        "attack_my_npc: beenmo hit my NPC __ai_rival___npc_2 for 2 damage.",
+        "attack_my_npc: beenmo hit my NPC __ai_rival___npc_2 for 2 damage.",
+        "attack_my_npc: beenmo hit my NPC __ai_rival___npc_2 for 2 damage.",
+        "attack_my_npc: beenmo hit my NPC __ai_rival___npc_2 for 1 damage.",
+        "attack_my_npc: beenmo hit my NPC __ai_rival___npc_2 for 4 damage.",
+        "attack_my_npc: beenmo hit my NPC __ai_rival___npc_2 for 5 damage.",
+        "attack_my_npc: beenmo hit my NPC __ai_rival___npc_2 for 6 damage.",
+        "kill_or_drop_my_npc: beenmo knocked out my NPC __ai_rival___npc_2."
       ]
     }
   },
-  "strategy": "mid_game: build_npc",
-  "identity": "Ironclad: Unyielding fortress of stone and steel",
+  "strategy": "late_game: defend_against_rivals",
+  "identity": "Builder Bot \u2014 relentless industrialist",
   "plan": {
-    "phase": "mid_game",
-    "strategy_type": "defensive_fortification",
-    "current_objective": "build_npc",
+    "phase": "late_game",
+    "strategy_type": "npc_swarm",
+    "current_objective": "defend_against_rivals",
     "resource_targets": {
-      "logs": 56,
-      "stones": 50,
-      "crystals": 35
+      "logs": 0,
+      "stones": 20,
+      "crystals": 5
     },
     "objectives": [
       {
-        "goal": "build_npc",
+        "goal": "gather_logs",
         "target_amount": 10,
+        "target": null,
+        "status": "completed"
+      },
+      {
+        "goal": "build_npc",
+        "target_amount": null,
         "target": 5,
         "status": "in_progress"
       },
       {
+        "goal": "build_dummy",
+        "target_amount": null,
+        "target": 1,
+        "status": "in_progress"
+      },
+      {
         "goal": "gather_stones",
-        "target_amount": 50,
+        "target_amount": 5,
         "target": null,
-        "status": "pending"
+        "status": "completed"
+      },
+      {
+        "goal": "build_anvil",
+        "target_amount": null,
+        "target": 1,
+        "status": "completed"
       },
       {
         "goal": "refine_crystals",
-        "target_amount": 35,
-        "target": null,
-        "status": "in_progress"
-      },
-      {
-        "goal": "consume_crystals",
-        "target_amount": 35,
-        "target": null,
-        "status": "in_progress"
-      },
-      {
-        "goal": "build_dummy",
-        "target_amount": 1,
-        "target": null,
-        "status": "in_progress"
+        "target_amount": null,
+        "target": 3,
+        "status": "completed"
       }
     ],
     "threats": [
       "test1"
     ],
     "alliances": [],
-    "last_updated_turn": 22
+    "last_updated_turn": 7
   },
-  "saved_at": "2026-03-19 02:27:12"
+  "saved_at": "2026-03-22 13:52:15"
 }

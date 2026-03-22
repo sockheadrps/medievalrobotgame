@@ -5,12 +5,14 @@ import {
   PFRAME_WALK1_DOWN, PFRAME_WALK1_UP, PFRAME_WALK1_RIGHT, PFRAME_WALK1_LEFT,
   PFRAME_WALK2_DOWN, PFRAME_WALK2_UP, PFRAME_WALK2_RIGHT, PFRAME_WALK2_LEFT,
   PFRAME_STAND_DOWN, PFRAME_STAND_UP, PFRAME_STAND_RIGHT, PFRAME_STAND_LEFT,
+  PFRAME_MEDITATE, PFRAME_FLY_DOWN, PFRAME_FLY_UP, PFRAME_FLY_RIGHT, PFRAME_FLY_LEFT,
   PFRAME_PUNCH_LEFT, PFRAME_PUNCH_RIGHT,
   INTERACT_KEY, TILE_SIZE, PLAYER_FRAME_H,
   KI_MAX_BASE, KI_BLAST_BASE_COST, KI_BLAST_BASE_DMG, KI_BLAST_SCALE,
 } from '../constants.js';
 import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
 import { createEquipmentOverlay, syncEquipmentOverlay } from './EquipmentOverlay.js';
+import { createHairOverlay, syncHairOverlay } from './HairOverlay.js';
 
 const HP_REGEN_MS = 30000;
 const SCALE = TILE_SIZE / PLAYER_FRAME_H; // 48/32 = 1.5
@@ -81,6 +83,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.kiBlastBonuses = { blast_speed: 0, blast_range: 0, blast_dmg: 0, blast_cooldown: 0, barrier_duration: 0, barrier_cooldown: 0 };
     this._punching = false;
     this._knockedOut = false;
+    this._meditating = false;
+    this._flying = false;
+    this.flySkillLevel = 1;
+    this.flyXp = 0;
+    this._hairOverlay = null;
     this._barrierOverlay = createBarrierOverlay(scene, this);
     this._equipOverlays = {};  // slot -> overlay sprite
   }
@@ -97,17 +104,17 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       });
     };
 
-    // Walk: face → walk1 → stand → walk2 cycle
-    def('walk-down',  [PFRAME_WALK1_DOWN,  PFRAME_FACE_DOWN,  PFRAME_WALK2_DOWN,  PFRAME_FACE_DOWN],  8);
-    def('walk-up',    [PFRAME_WALK1_UP,    PFRAME_FACE_UP,    PFRAME_WALK2_UP,    PFRAME_FACE_UP],    8);
-    def('walk-left',  [PFRAME_WALK1_LEFT,  PFRAME_FACE_LEFT,  PFRAME_WALK2_LEFT,  PFRAME_FACE_LEFT],  8);
-    def('walk-right', [PFRAME_WALK1_RIGHT, PFRAME_FACE_RIGHT, PFRAME_WALK2_RIGHT, PFRAME_FACE_RIGHT], 8);
+    // Walk: walk1 → stand_directional → walk2 → stand_directional cycle
+    def('walk-down',  [PFRAME_WALK1_DOWN,  PFRAME_STAND_DOWN,  PFRAME_WALK2_DOWN,  PFRAME_STAND_DOWN],  8);
+    def('walk-up',    [PFRAME_WALK1_UP,    PFRAME_STAND_UP,    PFRAME_WALK2_UP,    PFRAME_STAND_UP],    8);
+    def('walk-left',  [PFRAME_WALK1_LEFT,  PFRAME_STAND_LEFT,  PFRAME_WALK2_LEFT,  PFRAME_STAND_LEFT],  8);
+    def('walk-right', [PFRAME_WALK1_RIGHT, PFRAME_STAND_RIGHT, PFRAME_WALK2_RIGHT, PFRAME_STAND_RIGHT], 8);
 
     // Run: same frames, faster
-    def('run-down',  [PFRAME_WALK1_DOWN,  PFRAME_FACE_DOWN,  PFRAME_WALK2_DOWN,  PFRAME_FACE_DOWN],  12);
-    def('run-up',    [PFRAME_WALK1_UP,    PFRAME_FACE_UP,    PFRAME_WALK2_UP,    PFRAME_FACE_UP],    12);
-    def('run-left',  [PFRAME_WALK1_LEFT,  PFRAME_FACE_LEFT,  PFRAME_WALK2_LEFT,  PFRAME_FACE_LEFT],  12);
-    def('run-right', [PFRAME_WALK1_RIGHT, PFRAME_FACE_RIGHT, PFRAME_WALK2_RIGHT, PFRAME_FACE_RIGHT], 12);
+    def('run-down',  [PFRAME_WALK1_DOWN,  PFRAME_STAND_DOWN,  PFRAME_WALK2_DOWN,  PFRAME_STAND_DOWN],  12);
+    def('run-up',    [PFRAME_WALK1_UP,    PFRAME_STAND_UP,    PFRAME_WALK2_UP,    PFRAME_STAND_UP],    12);
+    def('run-left',  [PFRAME_WALK1_LEFT,  PFRAME_STAND_LEFT,  PFRAME_WALK2_LEFT,  PFRAME_STAND_LEFT],  12);
+    def('run-right', [PFRAME_WALK1_RIGHT, PFRAME_STAND_RIGHT, PFRAME_WALK2_RIGHT, PFRAME_STAND_RIGHT], 12);
 
   }
 
@@ -116,6 +123,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   getFacing() { return this._facing; }
+
+  setHairOverlay(textureKey) {
+    if (this._hairOverlay) { this._hairOverlay.destroy(); this._hairOverlay = null; }
+    if (!textureKey) return;
+    this._hairOverlay = createHairOverlay(this.scene, this, textureKey, false);
+  }
 
   /** Play punch frame toward a target. Uses left/right punch frame without changing facing. */
   playAttack(targetX) {
@@ -167,6 +180,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       this.setAlpha(0.6);
       syncBarrierOverlay(this._barrierOverlay, this);
       this._syncEquipOverlays();
+      syncHairOverlay(this._hairOverlay, this);
       if (this._bubble) this._bubble.setPosition(this.x, this.y - this.displayHeight + 4);
       return;
     }
@@ -190,6 +204,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     if (this._punching) {
       syncBarrierOverlay(this._barrierOverlay, this);
       this._syncEquipOverlays();
+      syncHairOverlay(this._hairOverlay, this);
       if (this._bubble) this._bubble.setPosition(this.x, this.y - this.displayHeight + 4);
       return;
     }
@@ -198,6 +213,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     if (this.scene.chatBox?.isOpen()) {
       syncBarrierOverlay(this._barrierOverlay, this);
       this._syncEquipOverlays();
+      syncHairOverlay(this._hairOverlay, this);
       if (this._bubble) this._bubble.setPosition(this.x, this.y - this.displayHeight + 4);
       return;
     }
@@ -218,6 +234,30 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     else if (vy < 0)  this._facing = 'up';
     else if (vy > 0)  this._facing = 'down';
 
+    // Fly: override all animation with directional fly frames
+    if (this._flying) {
+      this.stop();
+      this.setFlipX(false);
+      const flyFrame = { down: PFRAME_FLY_DOWN, up: PFRAME_FLY_UP, left: PFRAME_FLY_LEFT, right: PFRAME_FLY_RIGHT }[this._facing] ?? PFRAME_FLY_DOWN;
+      this.setFrame(flyFrame);
+      syncBarrierOverlay(this._barrierOverlay, this);
+      this._syncEquipOverlays();
+      syncHairOverlay(this._hairOverlay, this);
+      if (this._bubble) this._bubble.setPosition(this.x, this.y - this.displayHeight + 4);
+      return;
+    }
+
+    // Meditate: lock to meditate frame while still
+    if (this._meditating && !moving) {
+      this.stop();
+      this.setFlipX(false);
+      this.setFrame(PFRAME_MEDITATE);
+      syncBarrierOverlay(this._barrierOverlay, this);
+      this._syncEquipOverlays();
+      syncHairOverlay(this._hairOverlay, this);
+      return;
+    }
+
     if (!moving) {
       this.stop();
       const idleFrame = {
@@ -230,6 +270,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       this.setFrame(idleFrame);
       syncBarrierOverlay(this._barrierOverlay, this);
       this._syncEquipOverlays();
+      syncHairOverlay(this._hairOverlay, this);
       return;
     }
 
@@ -245,6 +286,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     if (this.anims.currentAnim?.key !== animKey) this.play(animKey);
     syncBarrierOverlay(this._barrierOverlay, this);
     this._syncEquipOverlays();
+    syncHairOverlay(this._hairOverlay, this);
     if (this._bubble) this._bubble.setPosition(this.x, this.y - this.displayHeight + 4);
   }
 
@@ -317,6 +359,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this._barrierOverlay?.destroy();
     for (const overlay of Object.values(this._equipOverlays || {})) overlay?.destroy();
     this._equipOverlays = {};
+    this._hairOverlay?.destroy();
     this._bubble?.destroy();
     super.destroy(fromScene);
   }

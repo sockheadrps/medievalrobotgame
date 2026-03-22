@@ -1,0 +1,82 @@
+{
+  "spriteSheet": "022_blast04.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "4",
+  "stateAlias": "blast04",
+  "stateUses": [
+    "Ancient Namek charged blast",
+    "Demon charged blast",
+    "Hybrid charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 1280,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 40,
+    "rows": 1
+  },
+  "totalFrames": 40,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 5,
+    "delays": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast04_1_down",
+    "1": "blast04_1_up",
+    "2": "blast04_1_right",
+    "3": "blast04_1_left",
+    "4": "blast04_1_southeast",
+    "5": "blast04_1_southwest",
+    "6": "blast04_1_northeast",
+    "7": "blast04_1_northwest",
+    "8": "blast04_2_down",
+    "9": "blast04_2_up",
+    "10": "blast04_2_right",
+    "11": "blast04_2_left",
+    "12": "blast04_2_southeast",
+    "13": "blast04_2_southwest",
+    "14": "blast04_2_northeast",
+    "15": "blast04_2_northwest",
+    "16": "blast04_3_down",
+    "17": "blast04_3_up",
+    "18": "blast04_3_right",
+    "19": "blast04_3_left",
+    "20": "blast04_3_southeast",
+    "21": "blast04_3_southwest",
+    "22": "blast04_3_northeast",
+    "23": "blast04_3_northwest",
+    "24": "blast04_4_down",
+    "25": "blast04_4_up",
+    "26": "blast04_4_right",
+    "27": "blast04_4_left",
+    "28": "blast04_4_southeast",
+    "29": "blast04_4_southwest",
+    "30": "blast04_4_northeast",
+    "31": "blast04_4_northwest",
+    "32": "blast04_5_down",
+    "33": "blast04_5_up",
+    "34": "blast04_5_right",
+    "35": "blast04_5_left",
+    "36": "blast04_5_southeast",
+    "37": "blast04_5_southwest",
+    "38": "blast04_5_northeast",
+    "39": "blast04_5_northwest"
+  }
+}

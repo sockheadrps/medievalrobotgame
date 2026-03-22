@@ -11,15 +11,6 @@ export default class MovementController {
     this.player = player;
   }
 
-  /**
-   * Register a Phaser physics collider between the player and the static
-   * collision group built from the tilemap. Called from _loadMap() after
-   * the collision group is ready.
-   */
-  addCollisionGroup(collisionGroup) {
-    this.scene.physics.add.collider(this.player, collisionGroup);
-  }
-
   update(delta) {
     const scene = this.scene;
     const player = this.player;
@@ -37,7 +28,9 @@ export default class MovementController {
 
       // Client-side prediction: move locally for responsive feel
       if (dx !== 0 || dy !== 0) {
-        const speed = running ? 280 : 160;
+        let speed = running ? 280 : 160;
+        if (player._flying) speed *= 1.5;
+        speed *= (scene._speedMultiplier ?? 1);
         let mx = dx, my = dy;
         if (mx !== 0 && my !== 0) { mx /= Math.SQRT2; my /= Math.SQRT2; }
         const dt = delta / 1000;
@@ -69,29 +62,43 @@ export default class MovementController {
 
   /**
    * After client-side movement prediction, check if player overlaps any
-   * fence or gate they shouldn't pass through, and push back.
+   * fence, gate, or collision tile, and push back.
    */
   _resolveBarrierCollision(prevX, prevY) {
     const scene = this.scene;
     const p = this.player;
     if (!p) return;
     const halfBody = TILE_SIZE * 0.35; // approximate player half-width
+    const halfTile = TILE_SIZE / 2;
+
+    // Fences and gates (placed buildings)
     for (const entity of Object.values(scene._buildingSprites || {})) {
       if (entity._kind !== 'fence' && entity._kind !== 'gate') continue;
       // Gates: owner can pass through
       if (entity._kind === 'gate' && entity._owner === scene.playerId) continue;
       const bx = entity.x;
       const by = entity.y;
-      const halfTile = TILE_SIZE / 2;
-      // AABB overlap check
       const overlapX = (halfBody + halfTile) - Math.abs(p.x - bx);
       const overlapY = (halfBody + halfTile) - Math.abs(p.y - by);
       if (overlapX <= 0 || overlapY <= 0) continue;
-      // Push back on the axis of least penetration
       if (overlapX < overlapY) {
         p.x = p.x < bx ? bx - halfTile - halfBody : bx + halfTile + halfBody;
       } else {
         p.y = p.y < by ? by - halfTile - halfBody : by + halfTile + halfBody;
+      }
+    }
+
+    // Collision tiles from mapmaker
+    for (const { x, y } of (scene._collisionRects || [])) {
+      const cx = x + halfTile;
+      const cy = y + halfTile;
+      const overlapX = (halfBody + halfTile) - Math.abs(p.x - cx);
+      const overlapY = (halfBody + halfTile) - Math.abs(p.y - cy);
+      if (overlapX <= 0 || overlapY <= 0) continue;
+      if (overlapX < overlapY) {
+        p.x = p.x < cx ? cx - halfTile - halfBody : cx + halfTile + halfBody;
+      } else {
+        p.y = p.y < cy ? cy - halfTile - halfBody : cy + halfTile + halfBody;
       }
     }
   }

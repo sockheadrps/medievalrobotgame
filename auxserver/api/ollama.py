@@ -13,7 +13,8 @@ OLLAMA_BASE = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 
 # ── Legacy Ollama proxy (kept for compatibility) ───────────────────────────────
 
-@router.api_route("/ollama/{path:path}", methods=["GET", "POST"])
+@router.get("/ollama/{path:path}", operation_id="ollama_proxy_get")
+@router.post("/ollama/{path:path}", operation_id="ollama_proxy_post")
 async def ollama_proxy(path: str, request: Request):
     url = f"{OLLAMA_BASE}/{path}"
     body = await request.body()

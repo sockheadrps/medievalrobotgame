@@ -25,7 +25,7 @@ const EMOTION_DELTA_MAX    = 0.05; // max emotion shift per decision — small n
 // Emotion thresholds for autonomous reactions (bypass LLM)
 const FEAR_REACT_THRESHOLD  = 0.7;  // flee toward player
 const ANGER_REACT_THRESHOLD = 0.8;  // attack nearest (Berserker-only automatic rage)
-const EMOTION_REACT_COOLDOWN = 6000; // ms between emotion-triggered reactions
+const EMOTION_REACT_COOLDOWN = 20000; // ms between emotion-triggered reactions
 const OWNER_STICKY_TASKS = new Set([
   'attack_nearest_enemy',
   'train', 'gather', 'gather_stone', 'gather_all',
@@ -624,9 +624,10 @@ export class NPCBrain {
     const prevIntent = this._lastIntent;
     this._lastIntent = intent;
 
-    // Apply speech — but only if something actually changed (don't spam repeated lines)
-    if (decision.speech && intent !== prevIntent) {
+    // Apply speech — show if intent changed OR speech is different from last time
+    if (decision.speech && (intent !== prevIntent || decision.speech !== this._lastSpeech)) {
       npc.showBubble(decision.speech, 4000);
+      this._lastSpeech = decision.speech;
     }
 
     // Apply emotion deltas — toward player by default, toward target NPC if relevant

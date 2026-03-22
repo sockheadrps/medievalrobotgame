@@ -1,0 +1,47 @@
+{
+  "spriteSheet": "012_blast20.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "20",
+  "stateAlias": "blast20",
+  "stateUses": [
+    "Legendary Saiyan primary blast",
+    "Kai charged blast",
+    "Namek charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 256,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 8,
+    "rows": 1
+  },
+  "totalFrames": 8,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 2,
+    "delays": [
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast20_1_down",
+    "1": "blast20_1_up",
+    "2": "blast20_1_right",
+    "3": "blast20_1_left",
+    "4": "blast20_2_down",
+    "5": "blast20_2_up",
+    "6": "blast20_2_right",
+    "7": "blast20_2_left"
+  }
+}

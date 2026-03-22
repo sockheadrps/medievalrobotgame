@@ -10,6 +10,7 @@ const IMPLEMENTED_KI_MOVES = [
   { id: 'absorb', label: 'Absorb' },
   { id: 'barrier', label: 'Barrier' },
   { id: 'sense_ki', label: 'Sense Ki' },
+  { id: 'fly', label: 'Fly' },
 ];
 
 const XP_MULTIPLIER_ROWS = [
@@ -119,7 +120,7 @@ export class AdminPanelController {
       { label: 'Place Anvil', action: () => scene._placeAnvil() },
     ];
     const panelW = page === 3 ? 320 : 240;
-    const page2Rows = 2 + IMPLEMENTED_KI_MOVES.length;
+    const page2Rows = 3 + IMPLEMENTED_KI_MOVES.length;
     const page3Rows = 2 + XP_MULTIPLIER_ROWS.length + 1;
     const panelH = 38 + (page === 1 ? items.length : (page === 2 ? page2Rows : page3Rows)) * 32 + 8;
     const px = W / 2 - panelW / 2;
@@ -191,6 +192,22 @@ export class AdminPanelController {
             actor.kiMoves.push(move.id);
           }
           this.sendAdmin('ki_move_toggle', 0, { move_id: move.id });
+          this.renderAdminPanel();
+        }, 72);
+        row += 1;
+      }
+
+      // Ki Blast Unlocked toggle
+      {
+        const hasBlast = !!(actor?._hasKiBlast || actor?.has_ki_blast);
+        const by = py + 38 + row * (btnH + 4);
+        const lbl = scene.addHud(scene.add.text(px + 14, by + btnH / 2, 'Ki Blast Unlocked', {
+          fontSize: '13px', color: hasBlast ? '#99ffff' : '#ccddff',
+        }).setDepth(62).setOrigin(0, 0.5));
+        els.push(lbl);
+        addMiniButton(px + panelW - 86, by + 2, hasBlast ? 'Revoke' : 'Grant', () => {
+          if (actor) actor._hasKiBlast = !hasBlast;
+          this.sendAdmin('has_ki_blast_toggle', 0);
           this.renderAdminPanel();
         }, 72);
         row += 1;

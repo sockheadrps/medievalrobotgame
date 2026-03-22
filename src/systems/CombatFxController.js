@@ -38,7 +38,7 @@ export class CombatFxController {
       facing,
       dir,
       perp: { x: -dir.y, y: dir.x },
-      spread: TILE_SIZE * 1.5,
+      spread: TILE_SIZE * 2.5,
     };
   }
 
@@ -151,6 +151,7 @@ export class CombatFxController {
     const target = this.findAbsorbTarget(p, range, aim);
     const estCost = p.getBlastCost?.() ?? 3;
     if (!target || (!p.infKi && p.ki < estCost)) return;
+    if (!p.infKi) p.ki = Math.max(0, p.ki - estCost);
     this.startPlayerAbsorb(target);
   }
 
@@ -167,7 +168,12 @@ export class CombatFxController {
 
     const range = this.getKiBlastRange(p);
     const aim = this.getKiBlastAimInfo(p);
-    const estCost = (p.getBlastCost?.() ?? 3) * costMult;
+    let estCost = (p.getBlastCost?.() ?? 3) * costMult;
+    // Use blast def kiCost if equipped blast overrides it (matches server logic)
+    const activeBlastId = p.activeBlastId;
+    if (activeBlastId && BLAST_DEFS[activeBlastId]?.kiCost != null) {
+      estCost = BLAST_DEFS[activeBlastId].kiCost * costMult;
+    }
     if (!p.infKi && p.ki < estCost) {
       if (scene._pf_kiBar) {
         scene.tweens.add({
@@ -180,6 +186,9 @@ export class CombatFxController {
       }
       return;
     }
+
+    // Deduct ki locally so rapid fires can't bypass the check before server sync
+    if (!p.infKi) p.ki = Math.max(0, p.ki - estCost);
 
     scene._lastBlastTime = now;
 
@@ -227,7 +236,6 @@ export class CombatFxController {
     const blastFrame = dirFrames[aim.facing] ?? 0;
     const projX = p.x;
     const projY = p.y - p.displayHeight * 0.4;
-    const activeBlastId = p.activeBlastId;
     const blastDef = activeBlastId ? BLAST_DEFS[activeBlastId] : null;
     const blastSprite = blastDef?.sprite ?? null;
     const blastMeta = blastSprite ? BLAST_SPRITE_META[blastSprite] : null;
@@ -307,10 +315,8 @@ export class CombatFxController {
       }
     }
 
-    const isExplosive = mode === 'explosive_shot';
-    const impactRadius = isExplosive ? 40 : 18;
+    const impactRadius = mode === 'explosive_shot' ? 40 : 18;
     const tint = Number(p.auraTint ?? 0x4fd6ff);
-    if (isExplosive) proj.setScale(2.2);
 
     const animateProj = (sprite, endX, endY, miss = false) => {
       const dist = Phaser.Math.Distance.Between(projX, projY, endX, endY);
@@ -328,29 +334,54 @@ export class CombatFxController {
       });
     };
 
-    if (target) {
-      const variance = Phaser.Math.Clamp(targetSideOffset + Phaser.Math.FloatBetween(-TILE_SIZE * 0.2, TILE_SIZE * 0.2), -aim.spread, aim.spread);
-      const targetProjX = target.x + aim.perp.x * variance;
-      const targetProjY = target.y - (target.displayHeight || TILE_SIZE) * 0.4 + aim.perp.y * variance;
-      const impactPoint = this.getKiBlastImpactPoint(projX, projY, targetProjX, targetProjY, false);
-      animateProj(proj, impactPoint.x, impactPoint.y);
-    } else {
-      const sideOffset = Phaser.Math.FloatBetween(-aim.spread, aim.spread);
-      const intendedEndX = projX + aim.dir.x * range + aim.perp.x * sideOffset;
-      const intendedEndY = projY + aim.dir.y * range + aim.perp.y * sideOffset;
-      const impactPoint = this.getKiBlastImpactPoint(projX, projY, intendedEndX, intendedEndY, false);
-      animateProj(proj, impactPoint.x, impactPoint.y, true);
-    }
-
     if (mode === 'scatter_shot') {
-      for (const sign of [-1, 1]) {
-        const sideProj = scene.add.sprite(projX, projY, NRG_KEY, blastFrame);
-        sideProj.setScale(1.2).setDepth(15).setTint(tint).setAlpha(0.8);
+      // Scatter: destroy default proj, fire 3 spread shots only
+      proj.destroy();
+      for (const sign of [-1, 0, 1]) {
+        const sideProj = scene.add.sprite(projX, projY, projKey, projFrame);
+        sideProj.setScale(1.2).setDepth(15).setAlpha(sign === 0 ? 1 : 0.8);
+        if (blastDef?.tint) sideProj.setTint(parseInt(blastDef.tint.replace('#', ''), 16));
+        else sideProj.setTint(tint);
         const spreadAngle = sign * TILE_SIZE * 1.8;
         const endX = projX + aim.dir.x * range + aim.perp.x * spreadAngle;
         const endY = projY + aim.dir.y * range + aim.perp.y * spreadAngle;
         const ip = this.getKiBlastImpactPoint(projX, projY, endX, endY, false);
         animateProj(sideProj, ip.x, ip.y, !target);
+      }
+    } else if (mode === 'explosive_shot') {
+      // Explosive: destroy default proj, fire one big AoE shot
+      proj.destroy();
+      const exProj = scene.add.sprite(projX, projY, projKey, projFrame);
+      exProj.setScale(2.2).setDepth(15);
+      if (blastDef?.tint) exProj.setTint(parseInt(blastDef.tint.replace('#', ''), 16));
+      else exProj.setTint(tint);
+      if (target) {
+        const variance = Phaser.Math.Clamp(targetSideOffset + Phaser.Math.FloatBetween(-TILE_SIZE * 0.2, TILE_SIZE * 0.2), -aim.spread, aim.spread);
+        const targetProjX = target.x + aim.perp.x * variance;
+        const targetProjY = target.y - (target.displayHeight || TILE_SIZE) * 0.4 + aim.perp.y * variance;
+        const impactPoint = this.getKiBlastImpactPoint(projX, projY, targetProjX, targetProjY, false);
+        animateProj(exProj, impactPoint.x, impactPoint.y);
+      } else {
+        const sideOffset = Phaser.Math.FloatBetween(-aim.spread, aim.spread);
+        const intendedEndX = projX + aim.dir.x * range + aim.perp.x * sideOffset;
+        const intendedEndY = projY + aim.dir.y * range + aim.perp.y * sideOffset;
+        const impactPoint = this.getKiBlastImpactPoint(projX, projY, intendedEndX, intendedEndY, false);
+        animateProj(exProj, impactPoint.x, impactPoint.y, true);
+      }
+    } else {
+      // Normal ki_shot mode
+      if (target) {
+        const variance = Phaser.Math.Clamp(targetSideOffset + Phaser.Math.FloatBetween(-TILE_SIZE * 0.2, TILE_SIZE * 0.2), -aim.spread, aim.spread);
+        const targetProjX = target.x + aim.perp.x * variance;
+        const targetProjY = target.y - (target.displayHeight || TILE_SIZE) * 0.4 + aim.perp.y * variance;
+        const impactPoint = this.getKiBlastImpactPoint(projX, projY, targetProjX, targetProjY, false);
+        animateProj(proj, impactPoint.x, impactPoint.y);
+      } else {
+        const sideOffset = Phaser.Math.FloatBetween(-aim.spread, aim.spread);
+        const intendedEndX = projX + aim.dir.x * range + aim.perp.x * sideOffset;
+        const intendedEndY = projY + aim.dir.y * range + aim.perp.y * sideOffset;
+        const impactPoint = this.getKiBlastImpactPoint(projX, projY, intendedEndX, intendedEndY, false);
+        animateProj(proj, impactPoint.x, impactPoint.y, true);
       }
     }
   }

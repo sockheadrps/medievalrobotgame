@@ -1228,8 +1228,9 @@ function renderSTEditor() {
       <div class="form-group"><label>Fuel Type</label>
         <select id="st_fuelType">
           <option value="none" ${st.fuel_type === 'none' ? 'selected' : ''}>None</option>
+          <option value="logs" ${st.fuel_type === 'logs' ? 'selected' : ''}>Logs</option>
+          <option value="planks" ${st.fuel_type === 'planks' ? 'selected' : ''}>Planks</option>
           <option value="coal" ${st.fuel_type === 'coal' ? 'selected' : ''}>Coal</option>
-          <option value="wood" ${st.fuel_type === 'wood' ? 'selected' : ''}>Wood</option>
         </select>
       </div>
     </div>

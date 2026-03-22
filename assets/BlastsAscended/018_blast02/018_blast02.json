@@ -1,0 +1,45 @@
+{
+  "spriteSheet": "018_blast02.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "2",
+  "stateAlias": "blast02",
+  "stateUses": [
+    "Majin charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 256,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 8,
+    "rows": 1
+  },
+  "totalFrames": 8,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 2,
+    "delays": [
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast02_1_down",
+    "1": "blast02_1_up",
+    "2": "blast02_1_right",
+    "3": "blast02_1_left",
+    "4": "blast02_2_down",
+    "5": "blast02_2_up",
+    "6": "blast02_2_right",
+    "7": "blast02_2_left"
+  }
+}

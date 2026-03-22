@@ -1,0 +1,50 @@
+{
+  "spriteSheet": "033_blast17.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "17",
+  "stateAlias": "blast17",
+  "stateUses": [
+    "Saiyan Elite charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 384,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 12,
+    "rows": 1
+  },
+  "totalFrames": 12,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 3,
+    "delays": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast17_1_down",
+    "1": "blast17_1_up",
+    "2": "blast17_1_right",
+    "3": "blast17_1_left",
+    "4": "blast17_2_down",
+    "5": "blast17_2_up",
+    "6": "blast17_2_right",
+    "7": "blast17_2_left",
+    "8": "blast17_3_down",
+    "9": "blast17_3_up",
+    "10": "blast17_3_right",
+    "11": "blast17_3_left"
+  }
+}

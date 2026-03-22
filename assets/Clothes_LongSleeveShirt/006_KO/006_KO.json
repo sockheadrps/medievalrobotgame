@@ -1,0 +1,33 @@
+{
+  "spriteSheet": "006_KO.png",
+  "sourceDmi": "Clothes_LongSleeveShirt.dmi",
+  "sourceState": "KO",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 32,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 1,
+    "rows": 1
+  },
+  "totalFrames": 1,
+  "stateInfo": {
+    "dirs": 1,
+    "frames": 1,
+    "delays": [],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "KO"
+  }
+}

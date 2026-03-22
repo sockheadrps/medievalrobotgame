@@ -1,0 +1,43 @@
+{
+  "spriteSheet": "003_Rocket.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "Rocket",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 256,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 8,
+    "rows": 1
+  },
+  "totalFrames": 8,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 2,
+    "delays": [
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "Rocket_1_down",
+    "1": "Rocket_1_up",
+    "2": "Rocket_1_right",
+    "3": "Rocket_1_left",
+    "4": "Rocket_2_down",
+    "5": "Rocket_2_up",
+    "6": "Rocket_2_right",
+    "7": "Rocket_2_left"
+  }
+}

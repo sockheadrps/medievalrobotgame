@@ -1,0 +1,53 @@
+{
+  "spriteSheet": "001_unnamed.png",
+  "sourceDmi": "Sword Left Hand.dmi",
+  "sourceState": "",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 512,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 16,
+    "rows": 1
+  },
+  "totalFrames": 16,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 4,
+    "delays": [
+      2.0,
+      2.0,
+      2.0,
+      2.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": true,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "unnamed_1_down",
+    "1": "unnamed_1_up",
+    "2": "unnamed_1_right",
+    "3": "unnamed_1_left",
+    "4": "unnamed_2_down",
+    "5": "unnamed_2_up",
+    "6": "unnamed_2_right",
+    "7": "unnamed_2_left",
+    "8": "unnamed_3_down",
+    "9": "unnamed_3_up",
+    "10": "unnamed_3_right",
+    "11": "unnamed_3_left",
+    "12": "unnamed_4_down",
+    "13": "unnamed_4_up",
+    "14": "unnamed_4_right",
+    "15": "unnamed_4_left"
+  }
+}

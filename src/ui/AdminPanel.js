@@ -31,6 +31,15 @@ export class AdminPanel {
         })
         .catch(e => console.warn('AdminPanel: failed to load asset registry', e));
     }
+    if (!this._customizeAssets) {
+      fetch(`${API_BASE}/api/customization/assets`)
+        .then(r => r.json())
+        .then(assets => {
+          this._customizeAssets = assets;
+          this._buildCustomizeUI();
+        })
+        .catch(e => console.warn('AdminPanel: failed to load customization assets', e));
+    }
   }
 
   switchTab(tab) {
@@ -79,6 +88,7 @@ export class AdminPanel {
           <button class="pdp-tab active" data-tab="stats">Stats</button>
           <button class="pdp-tab" data-tab="inventory">Inventory</button>
           <button class="pdp-tab" data-tab="ki">Ki</button>
+          <button class="pdp-tab" data-tab="customize">Customize</button>
         </div>
         <div class="pdp-body">
           <div class="pdp-pane active" data-pane="stats">
@@ -167,6 +177,17 @@ export class AdminPanel {
               </div>
             </div>
           </div>
+
+          <div class="pdp-pane" data-pane="customize">
+            <div class="pdp-section">
+              <h3>Hair</h3>
+              <div class="pdp-customize-hair"></div>
+            </div>
+            <div class="pdp-section">
+              <h3>Clothing</h3>
+              <div class="pdp-customize-clothing"></div>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -248,6 +269,7 @@ export class AdminPanel {
       adj.innerHTML = `
         ${this._adjRow('Max HP', 'maxHp', 5, '#59d66f')}
         ${this._adjRow('Full HP', 'full_hp', 0, '#59d66f', 'Restore', true)}
+        ${this._adjRow('Dmg 10', '_dmg10', 0, '#ff4444', 'Hit', true)}
         ${this._adjRow('STR', 'str', 1, '#ff9944')}
         ${this._adjRow('DEF', 'def', 1, '#44bbff')}
         ${this._adjRow('Spawn NPC', '_spawn_npc', 0, '#cc88ff', 'Spawn', true)}
@@ -429,14 +451,13 @@ export class AdminPanel {
     `;
 
     const KI_SHOT_MODES = [
-      { id: 'ki_shot', label: 'Ki Shot', desc: 'Single blast' },
       { id: 'scatter_shot', label: 'Scatter Shot', desc: '3-way spread, 2× cost' },
       { id: 'explosive_shot', label: 'Explosive Shot', desc: 'AoE blast, 3× cost' },
     ];
     const activeMode = p.activeKiMode || 'ki_shot';
     const learnedMoves = p.kiMoves || [];
     const modeButtons = KI_SHOT_MODES.map(m => {
-      const learned = m.id === 'ki_shot' || learnedMoves.includes(m.id);
+      const learned = learnedMoves.includes(m.id);
       if (!learned) return `<div class="pdp-ki-mode locked" title="Not learned">${m.label} 🔒</div>`;
       const active = m.id === activeMode ? ' active' : '';
       return `<div class="pdp-ki-mode selectable${active}" data-mode="${m.id}" title="${m.desc}">${m.label}</div>`;
@@ -456,7 +477,8 @@ export class AdminPanel {
 
     for (const btn of this._el.querySelectorAll('.pdp-ki-mode.selectable')) {
       btn.addEventListener('click', () => {
-        p.activeKiMode = btn.dataset.mode;
+        // Toggle: clicking active mode reverts to normal ki_shot
+        p.activeKiMode = (p.activeKiMode === btn.dataset.mode) ? 'ki_shot' : btn.dataset.mode;
         this._refreshKi(p);
       });
     }
@@ -603,6 +625,44 @@ export class AdminPanel {
       <span class="pdp-inv-lbl">${label}</span>
       <strong class="pdp-inv-val" style="color:${color}">${value}</strong>
     </div>`;
+  }
+
+  _buildCustomizeUI() {
+    if (!this._el || !this._customizeAssets) return;
+    const p = this._scene?.player;
+    const hair = this._customizeAssets.filter(a => a.category === 'hair');
+    const clothing = this._customizeAssets.filter(a => a.category === 'clothing');
+
+    const hairEl = this._el.querySelector('.pdp-customize-hair');
+    if (hairEl) {
+      const currentHair = p?.hair || null;
+      hairEl.innerHTML = `
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <div class="pdp-customize-item${!currentHair ? ' active' : ''}" data-customize-type="hair" data-customize-id="" style="padding:4px 8px;cursor:pointer;background:${!currentHair ? '#336' : '#1a1a2e'};border:1px solid #334;border-radius:3px;font-size:11px;color:#aaccee">None</div>
+          ${hair.map(a => `
+            <div class="pdp-customize-item${currentHair === a.slug ? ' active' : ''}" data-customize-type="hair" data-customize-id="${a.slug}" style="padding:4px 8px;cursor:pointer;background:${currentHair === a.slug ? '#225' : '#1a1a2e'};border:1px solid #334;border-radius:3px;font-size:11px;color:#aaccee">${a.name}</div>
+          `).join('')}
+        </div>
+      `;
+      hairEl.querySelectorAll('.pdp-customize-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const type = item.dataset.customizeType;
+          const id = item.dataset.customizeId;
+          if (p) p.hair = id || null;
+          this._scene._conn?.send({ type: 'set_customization', customize_type: type, id: id || null });
+          this._buildCustomizeUI(); // re-render to show active state
+        });
+      });
+    }
+
+    const clothingEl = this._el.querySelector('.pdp-customize-clothing');
+    if (clothingEl) {
+      if (clothing.length === 0) {
+        clothingEl.innerHTML = '<span style="color:#667788;font-size:11px">No clothing available yet</span>';
+      } else {
+        // similar pattern to hair
+      }
+    }
   }
 
   _kv(label, value) {

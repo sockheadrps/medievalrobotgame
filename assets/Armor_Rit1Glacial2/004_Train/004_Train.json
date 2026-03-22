@@ -1,0 +1,68 @@
+{
+  "spriteSheet": "004_Train.png",
+  "sourceDmi": "Armor_Rit1Glacial2.dmi",
+  "sourceState": "Train",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 896,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 28,
+    "rows": 1
+  },
+  "totalFrames": 28,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 7,
+    "delays": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "Train_1_down",
+    "1": "Train_1_up",
+    "2": "Train_1_right",
+    "3": "Train_1_left",
+    "4": "Train_2_down",
+    "5": "Train_2_up",
+    "6": "Train_2_right",
+    "7": "Train_2_left",
+    "8": "Train_3_down",
+    "9": "Train_3_up",
+    "10": "Train_3_right",
+    "11": "Train_3_left",
+    "12": "Train_4_down",
+    "13": "Train_4_up",
+    "14": "Train_4_right",
+    "15": "Train_4_left",
+    "16": "Train_5_down",
+    "17": "Train_5_up",
+    "18": "Train_5_right",
+    "19": "Train_5_left",
+    "20": "Train_6_down",
+    "21": "Train_6_up",
+    "22": "Train_6_right",
+    "23": "Train_6_left",
+    "24": "Train_7_down",
+    "25": "Train_7_up",
+    "26": "Train_7_right",
+    "27": "Train_7_left"
+  }
+}

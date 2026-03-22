@@ -317,8 +317,9 @@ class GameState:
             # Vampiric regen (on attacker) — continuous per second
             if e.get("vampiric_until", 0) > now and e.get("vampiric_pct", 0) > 0:
                 last_dmg = e.get("vampiric_last_dmg", 0)
-                regen_per_sec = last_dmg * e["vampiric_pct"] / 100
-                e["hp"] = min(e.get("maxHp", 20), e.get("hp", 0) + regen_per_sec * dt)
+                max_hp = e.get("maxHp", 20)
+                regen_per_sec = min(last_dmg * e["vampiric_pct"] / 100, max_hp * 0.05)  # cap at 5% max HP/s
+                e["hp"] = min(max_hp, e.get("hp", 0) + regen_per_sec * dt)
 
         # Aftershock zones — tick once per second, remove expired
         live_zones = []
@@ -527,9 +528,8 @@ class GameState:
         self.building._tick_campfires(dt, now)
         self._tick_status_effects(dt)
 
-        # Move players
-        world_w = MAP_COLS * TILE_SIZE
-        world_h = MAP_ROWS * TILE_SIZE
+        # Move players — use per-map dimensions for correct bounds clamping
+        from services.world_data import get_map_dimensions as _get_map_dims
         for move_pid, p in self.players.items():
             if p.get("dead") or p.get("knocked_out"):
                 p["vx"] = 0
@@ -587,8 +587,11 @@ class GameState:
                                     new_x = p["x"]
                                     new_y = p["y"]
                 else:
-                    new_x = max(0, min(world_w, new_x))
-                    new_y = max(0, min(world_h, new_y))
+                    _mcols, _mrows = _get_map_dims(player_map)
+                    _map_w = _mcols * TILE_SIZE
+                    _map_h = _mrows * TILE_SIZE
+                    new_x = max(0, min(_map_w, new_x))
+                    new_y = max(0, min(_map_h, new_y))
                     # Collision tile check with axis sliding — per-map tile set
                     from services.world_data import get_collision_tiles as _gct
                     _map_collision = _gct(player_map)

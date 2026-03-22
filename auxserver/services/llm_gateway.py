@@ -1,65 +1,62 @@
-"""LLM Gateway — proxies requests to Ollama with retry, timeout, and logging."""
+"""LLM Gateway — OpenAI-compatible chat completions (NanoGPT / any v1 endpoint)."""
 import logging
-import os
 import time
 import httpx
+
+import core.config as cfg
 
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 TIMEOUT_SECONDS = 30
 
-_OLLAMA_BASE = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-_DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "dolphin-llama3:latest")
-
-
-async def call_llm(url: str, payload: dict) -> dict:
-    """Call Ollama with retry on failure and timeout."""
-    last_error = None
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        t0 = time.monotonic()
-        try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-                resp = await client.post(url, json=payload)
-                resp.raise_for_status()
-                elapsed = time.monotonic() - t0
-                logger.info(
-                    "LLM call succeeded attempt=%d model=%s elapsed=%.2fs",
-                    attempt,
-                    payload.get("model", "unknown"),
-                    elapsed,
-                )
-                return resp.json()
-        except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            elapsed = time.monotonic() - t0
-            logger.warning(
-                "LLM call failed attempt=%d/%d elapsed=%.2fs error=%s",
-                attempt, MAX_RETRIES, elapsed, e,
-            )
-            last_error = e
-
-    logger.error("LLM unreachable after %d attempts: %s", MAX_RETRIES, last_error)
-    return {"error": "LLM unreachable", "detail": str(last_error)}
+logger.info("LLM gateway: url=%s model=%s api_key_set=%s",
+            cfg.LLM_CHAT_URL, cfg.MODEL, bool(cfg.LLM_API_KEY))
 
 
 async def chat_completion(
     messages: list,
     temperature: float = 0.7,
     max_tokens: int = 300,
-    timeout: float = 30.0,
+    timeout: float = TIMEOUT_SECONDS,
+    max_retries: int = MAX_RETRIES,
 ) -> str:
-    """Compatibility shim — wraps call_llm for callers using the old chat_completion API.
-    Returns the assistant message text as a plain string.
-    """
+    """Call the configured LLM endpoint and return the assistant reply as a string."""
+    url = cfg.LLM_CHAT_URL
+    headers = {"Content-Type": "application/json"}
+    if cfg.LLM_API_KEY:
+        headers["Authorization"] = f"Bearer {cfg.LLM_API_KEY}"
+
     payload = {
-        "model": _DEFAULT_MODEL,
+        "model": cfg.MODEL,
         "messages": messages,
-        "stream": False,
-        "options": {"temperature": temperature, "num_predict": max_tokens},
+        "temperature": temperature,
+        "max_tokens": max_tokens,
     }
-    url = f"{_OLLAMA_BASE}/api/chat"
-    result = await call_llm(url, payload)
-    if "error" in result:
-        raise httpx.RequestError(result.get("detail", "LLM unreachable"))
-    return result.get("message", {}).get("content", "")
+
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        t0 = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                elapsed = time.monotonic() - t0
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"]
+                logger.info(
+                    "LLM call succeeded attempt=%d model=%s elapsed=%.2fs",
+                    attempt, cfg.MODEL, elapsed,
+                )
+                return content
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            elapsed = time.monotonic() - t0
+            logger.warning(
+                "LLM call failed attempt=%d/%d elapsed=%.2fs type=%s error=%r url=%s",
+                attempt, max_retries, elapsed, type(e).__name__, str(e), url,
+            )
+            last_error = e
+
+    logger.error("LLM unreachable after %d attempts. url=%s model=%s api_key_set=%s",
+                 max_retries, url, cfg.MODEL, bool(cfg.LLM_API_KEY))
+    raise httpx.RequestError(f"LLM unreachable: {last_error}")

@@ -1,0 +1,57 @@
+{
+  "spriteSheet": "017_blast34.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "34",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 384,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 12,
+    "rows": 1
+  },
+  "totalFrames": 12,
+  "stateInfo": {
+    "dirs": 1,
+    "frames": 12,
+    "delays": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast34_1",
+    "1": "blast34_2",
+    "2": "blast34_3",
+    "3": "blast34_4",
+    "4": "blast34_5",
+    "5": "blast34_6",
+    "6": "blast34_7",
+    "7": "blast34_8",
+    "8": "blast34_9",
+    "9": "blast34_10",
+    "10": "blast34_11",
+    "11": "blast34_12"
+  }
+}

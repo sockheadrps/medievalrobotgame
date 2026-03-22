@@ -1,0 +1,38 @@
+{
+  "spriteSheet": "006_blast13.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "13",
+  "stateAlias": "blast13",
+  "stateUses": [
+    "Changeling Koola charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 128,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 4,
+    "rows": 1
+  },
+  "totalFrames": 4,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 1,
+    "delays": [],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast13_down",
+    "1": "blast13_up",
+    "2": "blast13_right",
+    "3": "blast13_left"
+  }
+}

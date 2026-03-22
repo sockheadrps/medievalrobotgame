@@ -23,8 +23,14 @@ router = APIRouter()
 
 def _clean_npcs(npcs_dict):
     """Strip internal fields (callables, move targets) from NPC dicts for serialization."""
-    return {nid: {k: v for k, v in npc.items() if not k.startswith("_")}
-            for nid, npc in npcs_dict.items()}
+    cleaned = {}
+    for nid, npc in npcs_dict.items():
+        entry = {k: v for k, v in npc.items() if not k.startswith("_")}
+        entry.setdefault("hair", npc.get("hair"))
+        entry.setdefault("flying", npc.get("flying", False))
+        entry.setdefault("meditating", npc.get("meditating", False))
+        cleaned[nid] = entry
+    return cleaned
 
 
 # Connected clients: pid -> WebSocket
@@ -65,7 +71,13 @@ def _save_player_state(pid: str):
         "vegetables": p.get("vegetables", 0),
         "seeds": p.get("seeds", 0),
         "ki_blast_bonuses": p.get("ki_blast_bonuses", {}),
+        "has_ki_blast": p.get("has_ki_blast", True),
         "ki_moves": p.get("ki_moves", []),
+        "learned_blasts": p.get("learned_blasts", []),
+        "active_blast_id": p.get("active_blast_id"),
+        "hair": p.get("hair"),
+        "fly_skill_level": p.get("fly_skill_level", 1),
+        "fly_xp": p.get("fly_xp", 0.0),
         "npc_ids": [nid for nid in p.get("npc_ids", [])
                     if not p.get("npcs", {}).get(nid, {}).get("dead")],
         "map": p.get("map", "level_01"),
@@ -137,7 +149,10 @@ async def game_loop():
                 "vegetables": p.get("vegetables", 0),
                 "seeds": p.get("seeds", 0),
                 "ki_blast_bonuses": p.get("ki_blast_bonuses", {}),
+                "has_ki_blast": p.get("has_ki_blast", True),
                 "ki_moves": p.get("ki_moves", []),
+                "learned_blasts": p.get("learned_blasts", []),
+                "active_blast_id": p.get("active_blast_id"),
                 "dead": p.get("dead", False),
                 "knocked_out": p.get("knocked_out", False),
                 "knocked_until": p.get("knocked_until"),
@@ -154,6 +169,11 @@ async def game_loop():
                 "inventory": p.get("inventory", {}),
                 "_refine_result": p.pop("_refine_result", None),
                 "_crystal_result": p.pop("_crystal_result", None),
+                "hair": p.get("hair"),
+                "fly_skill_level": p.get("fly_skill_level", 1),
+                "fly_xp": p.get("fly_xp", 0.0),
+                "flying": p.get("flying", False),
+                "meditating": p.get("meditating", False),
             }
         clean_dummies = {}
         for did, d in game.dummies.items():
@@ -265,6 +285,7 @@ async def game_loop():
                 "type": "state",
                 "players": filtered_players,
                 "xp_multipliers": dict(game.xp_multipliers),
+                "speed_multiplier": getattr(game, "_speed_multiplier", 1.0),
                 "trees": game.trees if on_overworld else [],
                 "rocks": game.rocks if on_overworld else [],
                 "ground_items": [gi for gi in game.ground_items
@@ -355,8 +376,16 @@ async def websocket_endpoint(ws: WebSocket):
         player["vegetables"] = saved.get("vegetables", 0)
         player["seeds"] = saved.get("seeds", 0)
         player["ki_blast_bonuses"] = saved.get("ki_blast_bonuses", player.get("ki_blast_bonuses", {}))
+        player["has_ki_blast"] = saved.get("has_ki_blast", True)
         player["ki_moves"] = saved.get("ki_moves", [])
+        player["learned_blasts"] = saved.get("learned_blasts", [])
+        player["active_blast_id"] = saved.get("active_blast_id")
         game.player_manager._ensure_default_ki_moves(player)
+        player["fly_skill_level"] = saved.get("fly_skill_level", 1)
+        player["fly_xp"] = saved.get("fly_xp", 0.0)
+        player["hair"] = saved.get("hair")
+        player["flying"] = False   # always reset to stopped on login
+        player["meditating"] = False
         player["npc_ids"] = saved.get("npc_ids", [])
         player["map"] = saved.get("map", "level_01")
         player["combat_mode"] = saved.get("combat_mode", "kill")
@@ -447,6 +476,27 @@ async def websocket_endpoint(ws: WebSocket):
                             await target_ws.send_text(json.dumps(relay))
                         except Exception:
                             pass
+                elif msg_type == "start_meditate":
+                    p = game.players.get(pid, {})
+                    p["meditating"] = True
+                elif msg_type == "stop_meditate":
+                    p = game.players.get(pid, {})
+                    p["meditating"] = False
+                elif msg_type == "start_fly":
+                    p = game.players.get(pid, {})
+                    if "fly" in p.get("ki_moves", []):
+                        p["flying"] = True
+                elif msg_type == "stop_fly":
+                    p = game.players.get(pid, {})
+                    p["flying"] = False
+                elif msg_type == "set_customization":
+                    p = game.players.get(pid, {})
+                    customize_type = data.get("customize_type", "")
+                    cid = data.get("id")
+                    if customize_type == "hair":
+                        p["hair"] = cid or None
+                    elif customize_type == "clothing":
+                        p["clothing"] = cid or None
                 else:
                     game.handle_input(pid, data)
             except json.JSONDecodeError:

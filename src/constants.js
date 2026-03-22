@@ -4,8 +4,8 @@
 
 // --- Tilemap ---
 export const TILE_SIZE    = 48;
-export const MAP_COLS     = 80;
-export const MAP_ROWS     = 50;
+export const MAP_COLS     = 70;
+export const MAP_ROWS     = 60;
 
 // --- Tile type IDs ---
 export const TILE_GRASS   = 0;

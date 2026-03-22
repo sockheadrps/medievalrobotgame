@@ -13,6 +13,7 @@ import {
 } from '../constants.js';
 import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
 import { createEquipmentOverlay, syncEquipmentOverlay } from './EquipmentOverlay.js';
+import { createHairOverlay, syncHairOverlay } from './HairOverlay.js';
 
 const SCALE = TILE_SIZE / NPC_FRAME_H;
 const LERP_SPEED = 0.35;
@@ -106,6 +107,9 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this.ki = 20;
     this.maxKi = 20;
     this._barrierOverlay = createBarrierOverlay(scene, this);
+    this._hairOverlay = null;
+    this._flying = false;
+    this._meditating = false;
 
     this.on('pointerdown', (pointer, _localX, _localY, event) => {
       this.scene?._handleRemoteEntityPointerDown?.(this, pointer, event);
@@ -135,6 +139,12 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this._updateVisualState();
   }
 
+  setHairOverlay(textureKey) {
+    if (this._hairOverlay) { this._hairOverlay.destroy(); this._hairOverlay = null; }
+    if (!textureKey) return;
+    this._hairOverlay = createHairOverlay(this.scene, this, textureKey, true);
+  }
+
   setOwnerColor(color) {
     this._ownerColor = color;
     this._nameLabel?.setColor(color);
@@ -160,6 +170,8 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     if (state.ki_blast_bonuses) this.kiBlastBonuses = state.ki_blast_bonuses;
     if (Array.isArray(state.ki_moves)) this.kiMoves = state.ki_moves;
     if (state.has_ki_blast != null) this.has_ki_blast = state.has_ki_blast;
+    if (state.flying != null) this._flying = !!state.flying;
+    if (state.meditating != null) this._meditating = !!state.meditating;
     this.gathering = state.gathering ?? false;
     this._name = state.name || this._name;
     this._nameLabel?.setText(this._name);
@@ -273,6 +285,7 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this._kiBar?.setFillStyle(kiColor);
     syncBarrierOverlay(this._barrierOverlay, this);
     this._syncEquipOverlays();
+    if (this._hairOverlay) syncHairOverlay(this._hairOverlay, this);
   }
 
   _syncEquipOverlays() {
@@ -354,6 +367,8 @@ export class RemoteNPC extends Phaser.GameObjects.Sprite {
     this._barrierOverlay?.destroy();
     for (const overlay of Object.values(this._equipOverlays || {})) overlay?.destroy();
     this._equipOverlays = {};
+    this._hairOverlay?.destroy();
+    this._hairOverlay = null;
     super.destroy(fromScene);
   }
 }

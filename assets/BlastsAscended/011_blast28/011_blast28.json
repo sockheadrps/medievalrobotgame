@@ -1,0 +1,47 @@
+{
+  "spriteSheet": "011_blast28.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "28",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 224,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 7,
+    "rows": 1
+  },
+  "totalFrames": 7,
+  "stateInfo": {
+    "dirs": 1,
+    "frames": 7,
+    "delays": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast28_1",
+    "1": "blast28_2",
+    "2": "blast28_3",
+    "3": "blast28_4",
+    "4": "blast28_5",
+    "5": "blast28_6",
+    "6": "blast28_7"
+  }
+}

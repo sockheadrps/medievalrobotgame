@@ -1,0 +1,78 @@
+{
+  "spriteSheet": "030_blast31.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "31",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 1280,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 40,
+    "rows": 1
+  },
+  "totalFrames": 40,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 5,
+    "delays": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast31_1_down",
+    "1": "blast31_1_up",
+    "2": "blast31_1_right",
+    "3": "blast31_1_left",
+    "4": "blast31_1_southeast",
+    "5": "blast31_1_southwest",
+    "6": "blast31_1_northeast",
+    "7": "blast31_1_northwest",
+    "8": "blast31_2_down",
+    "9": "blast31_2_up",
+    "10": "blast31_2_right",
+    "11": "blast31_2_left",
+    "12": "blast31_2_southeast",
+    "13": "blast31_2_southwest",
+    "14": "blast31_2_northeast",
+    "15": "blast31_2_northwest",
+    "16": "blast31_3_down",
+    "17": "blast31_3_up",
+    "18": "blast31_3_right",
+    "19": "blast31_3_left",
+    "20": "blast31_3_southeast",
+    "21": "blast31_3_southwest",
+    "22": "blast31_3_northeast",
+    "23": "blast31_3_northwest",
+    "24": "blast31_4_down",
+    "25": "blast31_4_up",
+    "26": "blast31_4_right",
+    "27": "blast31_4_left",
+    "28": "blast31_4_southeast",
+    "29": "blast31_4_southwest",
+    "30": "blast31_4_northeast",
+    "31": "blast31_4_northwest",
+    "32": "blast31_5_down",
+    "33": "blast31_5_up",
+    "34": "blast31_5_right",
+    "35": "blast31_5_left",
+    "36": "blast31_5_southeast",
+    "37": "blast31_5_southwest",
+    "38": "blast31_5_northeast",
+    "39": "blast31_5_northwest"
+  }
+}

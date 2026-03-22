@@ -13,15 +13,16 @@ const BLAST_SPRITES = [
 
 const EFFECT_FIELDS = [
   // [group, key, label, min, max, step, isFloat, tooltip]
+  ['Damage',   'dmg_mult',      'Damage %',            -100, 100, 1,   false, 'Damage modifier. 0 = normal damage. Negative = reduced damage, positive = bonus damage.'],
   ['Movement', 'slow_pct',      'Slow %',              0, 100, 1,   false, '% speed reduction applied to the target while slowed.'],
   ['Movement', 'slow_duration', 'Slow Duration (s)',    0, 10,  0.5, true,  'How long the slow lasts. Requires Slow % > 0.'],
-  ['Movement', 'pushback',      'Pushback (px)',        0, 200, 8,   false, 'Instantly displaces the target away from the blast origin. Suppresses their movement input for 300ms.'],
-  ['Movement', 'pull',          'Pull (px)',            0, 200, 8,   false, 'Instantly pulls the target toward the blast origin. Suppresses their movement input for 300ms.'],
+  ['Movement', 'pushback',      'Pushback (px)',        0, 200, 1,   false, 'Instantly displaces the target away from the blast origin. Suppresses their movement input for 300ms.'],
+  ['Movement', 'pull',          'Pull (px)',            0, 200, 1,   false, 'Instantly pulls the target toward the blast origin. Suppresses their movement input for 300ms.'],
   ['Movement', 'stun_duration', 'Stun Duration (s)',    0, 5,   0.5, true,  'Target\'s velocity is zeroed for this duration. They cannot move.'],
   ['Damage over Time', 'burn_dps',            'Burn DPS',               0, 20,  1,   false, 'Fire damage dealt per second while burning. Ticks once per second.'],
   ['Damage over Time', 'burn_duration',       'Burn Duration (s)',       0, 10,  0.5, true,  'How long the burn lasts. Requires Burn DPS > 0.'],
   ['Damage over Time', 'aftershock_dps',      'Aftershock DPS',         0, 20,  1,   false, 'Damage per second dealt by a lingering ground zone created at the impact point.'],
-  ['Damage over Time', 'aftershock_radius',   'Aftershock Radius (px)', 0, 300, 16,  false, 'Radius of the aftershock zone. Requires Aftershock DPS > 0.'],
+  ['Damage over Time', 'aftershock_radius',   'Aftershock Radius (px)', 0, 300, 1,   false, 'Radius of the aftershock zone. Requires Aftershock DPS > 0.'],
   ['Damage over Time', 'aftershock_duration', 'Aftershock Duration (s)', 0, 10, 0.5, true,  'How long the ground zone persists. Requires Aftershock DPS > 0.'],
   ['Damage over Time', 'decay_def',           'Decay DEF',              0, 20,  1,   false, 'Reduces the target\'s effective DEF by this amount, making them take more damage from all sources.'],
   ['Damage over Time', 'decay_duration',      'Decay Duration (s)',      0, 10, 0.5, true,  'How long the DEF reduction lasts. Requires Decay DEF > 0.'],
@@ -29,15 +30,16 @@ const EFFECT_FIELDS = [
   ['Ki Effects', 'ki_silence_duration',       'Ki Silence (s)',          0, 5,  0.5, true,  'Target cannot use any ki move (blast, barrier, absorb) for this duration.'],
   ['Ki Effects', 'ki_regen_suppress_duration','Ki Regen Suppress (s)',   0, 10, 0.5, true,  'Pauses the target\'s natural ki regeneration tick for this duration.'],
   ['Utility',   'blind_duration',   'Blind Duration (s)', 0, 5,  0.5, true,  'Target\'s ki blast range is clamped to 20% of base range. Ignores all range bonuses while active.'],
-  ['Utility',   'expose_pct',       'Expose %',           0, 100, 5,  false, 'Target takes X% increased damage from all sources (ki and melee) while exposed.'],
+  ['Utility',   'expose_pct',       'Expose %',           0, 100, 1,  false, 'Target takes X% increased damage from all sources (ki and melee) while exposed.'],
   ['Utility',   'expose_duration',  'Expose Duration (s)', 0, 10, 0.5, true, 'How long the exposed debuff lasts. Requires Expose % > 0.'],
-  ['Sustain',   'siphon_pct',       'Siphon %',           0, 100, 5,  false, 'Heals the attacker for X% of damage dealt, instantly on hit. Distinct from Vampiric.'],
-  ['Sustain',   'vampiric_pct',     'Vampiric %',         0, 100, 5,  false, 'Attacker regens HP per second equal to X% of the damage dealt, for Vampiric Duration. Distinct from Siphon.'],
+  ['Sustain',   'siphon_pct',       'Siphon %',           0, 100, 1,  false, 'Heals the attacker for X% of damage dealt, instantly on hit. Distinct from Vampiric.'],
+  ['Sustain',   'vampiric_pct',     'Vampiric %',         0, 100, 1,  false, 'Attacker regens HP per second equal to X% of the damage dealt, for Vampiric Duration. Distinct from Siphon.'],
   ['Sustain',   'vampiric_duration','Vampiric Duration (s)', 0, 10, 0.5, true, 'How long the vampiric regen lasts on the attacker. Requires Vampiric % > 0.'],
 ];
 
 const EFFECT_DEFAULTS = {};
 for (const [,key,,min] of EFFECT_FIELDS) EFFECT_DEFAULTS[key] = min;
+EFFECT_DEFAULTS.dmg_mult = 0;  // 0 = normal damage, centered slider
 
 // State
 let blastDefs = [];

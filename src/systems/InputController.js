@@ -192,11 +192,11 @@ export default class InputController {
       scene._toggleInventory();
     });
 
-    // Space bar — fire ki blast
+    // Space bar — use active blast slot
     scene.input.keyboard.on('keydown-SPACE', (event) => {
       if (scene.chatBox?.isOpen() || scene._namingNPC || scene._escMenuOpen || scene._inventoryOpen || scene._charMenuOpen || scene._playerKnockedOut) return;
       event.preventDefault();
-      scene._fireKiBlast();
+      scene._useBlastSlot();
     });
 
     // C key — toggle character menu
@@ -216,6 +216,34 @@ export default class InputController {
       if (scene._armedAction) { scene._disarmActionMode(); return; }
       if (scene.selectedNPC || scene._focusedRemote) { scene._clearSelection(); return; }
       scene._toggleEscMenu();
+    });
+
+    // M key — toggle meditate
+    scene.input.keyboard.on('keydown-M', () => {
+      if (scene.chatBox?.isOpen() || scene._namingNPC || scene._escMenuOpen || scene._playerKnockedOut) return;
+      const p = scene.player;
+      if (!p) return;
+      p._meditating = !p._meditating;
+      if (p._meditating) {
+        p._flying = false; // can't fly while meditating
+        scene._conn?.send({ type: 'start_meditate' });
+      } else {
+        scene._conn?.send({ type: 'stop_meditate' });
+      }
+    });
+
+    // F key — toggle fly (only if fly move is learned)
+    scene.input.keyboard.on('keydown-F', () => {
+      if (scene.chatBox?.isOpen() || scene._namingNPC || scene._escMenuOpen || scene._playerKnockedOut) return;
+      const p = scene.player;
+      if (!p || !p.hasKiMove('fly')) return;
+      p._flying = !p._flying;
+      if (p._flying) {
+        p._meditating = false;
+        scene._conn?.send({ type: 'start_fly' });
+      } else {
+        scene._conn?.send({ type: 'stop_fly' });
+      }
     });
 
     // E key — interact with nearby crate

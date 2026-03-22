@@ -54,6 +54,7 @@ export class StateSyncController {
       scene.player.inventory = me.inventory ?? scene.player.inventory ?? {};
       scene.player.activeBlastId = me.active_blast_id ?? scene.player.activeBlastId ?? null;
       scene.player.learnedBlasts = Array.isArray(me.learned_blasts) ? me.learned_blasts : (scene.player.learnedBlasts ?? []);
+      if (me.has_ki_blast != null) scene.player.hasKiBlast = !!me.has_ki_blast;
       scene.player._carrying = !!me.carrying;
 
       // Map change detection

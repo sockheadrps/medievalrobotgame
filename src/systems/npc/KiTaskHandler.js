@@ -318,7 +318,7 @@ export class KiTaskHandler {
     const scene = this._scene;
     const runner = this._runner;
 
-    if (npc.logs >= 5) {
+    if (npc.logs >= 10) {
       cmd._practicePhase = 'return';
       npc.showBubble('Got the logs! Building a target.', 2000);
       return;
@@ -353,7 +353,7 @@ export class KiTaskHandler {
       if (!tree._chopped) {
         const conn = scene._conn;
         if (conn?.connected && tree.treeIndex >= 0) {
-          conn.send({ type: 'npc_chop', tree_id: tree.treeIndex, owner_id: scene.playerId });
+          conn.send({ type: 'npc_chop', tree_id: tree.treeIndex, owner_id: scene.playerId, npc_id: npc.id });
         }
         npc.logs = Math.min(npc.logs + 1, npc.maxLogs);
         npc.showBubble(`Chopping (${npc.logs}/10)`, 1500, { silent: true });

@@ -1,0 +1,42 @@
+{
+  "spriteSheet": "021_blast03.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "3",
+  "stateAlias": "blast03",
+  "stateUses": [
+    "Majin primary blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 256,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 8,
+    "rows": 1
+  },
+  "totalFrames": 8,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 1,
+    "delays": [],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast03_down",
+    "1": "blast03_up",
+    "2": "blast03_right",
+    "3": "blast03_left",
+    "4": "blast03_southeast",
+    "5": "blast03_southwest",
+    "6": "blast03_northeast",
+    "7": "blast03_northwest"
+  }
+}

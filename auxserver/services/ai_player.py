@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 import httpx
 
-from core.config import BASE_DIR
+from core.config import BASE_DIR, MAPS_DIR
 from services.llm_gateway import chat_completion
 from services.game_state import (
     game, TILE_SIZE, TREE_CHOP_DIST, ROCK_MINE_DIST, WORLD_OBJ_MINE_DIST,
@@ -59,6 +59,57 @@ NPC_NAMES = [
     "Kaito", "Sora", "Riku", "Hana", "Yuki",
     "Akira", "Rei", "Shin", "Taro", "Mika",
 ]
+
+
+def _load_rival_build_spots() -> list[dict]:
+    """Read all rival_build:* map items from every *_items.json file.
+
+    Label formats understood:
+      rival_build:dummy                         → etrainer (training dummy, free)
+      rival_build:crate                         → storage crate (free)
+      rival_build:crafting_station:<asset_id>   → crafting station with given asset_id
+
+    Returns a list of {map, col, row, kind, asset_id} dicts.
+    """
+    spots: list[dict] = []
+    for items_file in MAPS_DIR.glob("*_items.json"):
+        try:
+            items_data = json.loads(items_file.read_text(encoding="utf-8"))
+            map_name = items_file.stem.replace("_items", "")
+            for item in items_data.get("mapItems", []):
+                label = item.get("label", "").strip()
+                if not label.startswith("rival_build:"):
+                    continue
+                parts = label.split(":")
+                if len(parts) < 2:
+                    continue
+                build_kind = parts[1]
+                asset_id = parts[2] if len(parts) > 2 else ""
+                col = int(item.get("tileCol") or 0)
+                row = int(item.get("tileRow") or 0)
+                spots.append({"map": map_name, "col": col, "row": row, "kind": build_kind, "asset_id": asset_id})
+        except Exception:
+            pass
+    return spots
+
+
+def _find_rival_spawn() -> tuple[float, float, str] | None:
+    """Scan all *_items.json files for a map item labelled 'rival_spawn'.
+    Returns (pixel_x, pixel_y, map_name) or None."""
+    for items_file in MAPS_DIR.glob("*_items.json"):
+        try:
+            items_data = json.loads(items_file.read_text(encoding="utf-8"))
+            for item in items_data.get("mapItems", []):
+                if item.get("label", "").strip().lower() == "rival_spawn":
+                    col = int(item.get("tileCol") or 0)
+                    row = int(item.get("tileRow") or 0)
+                    map_name = items_file.stem.replace("_items", "")
+                    x = col * TILE_SIZE + TILE_SIZE // 2
+                    y = row * TILE_SIZE + TILE_SIZE // 2
+                    return (float(x), float(y), map_name)
+        except Exception:
+            pass
+    return None
 
 
 def _dist(x1, y1, x2, y2):
@@ -110,11 +161,13 @@ class AIMemory:
             "alliances": [],
             "last_updated_turn": int(plan.get("last_updated_turn", base["last_updated_turn"]) or 0),
         }
+        _TARGET_CAPS = {"logs": 200, "stones": 200, "crystals": 50}
         raw_targets = plan.get("resource_targets")
         if isinstance(raw_targets, dict):
             for key in ("logs", "stones", "crystals"):
                 try:
-                    normalized["resource_targets"][key] = max(0, int(raw_targets.get(key, normalized["resource_targets"][key]) or 0))
+                    val = max(0, int(raw_targets.get(key, normalized["resource_targets"][key]) or 0))
+                    normalized["resource_targets"][key] = min(val, _TARGET_CAPS[key])
                 except (TypeError, ValueError):
                     pass
         raw_objectives = plan.get("objectives")
@@ -454,11 +507,19 @@ class AIPlayer:
         self._inbox: list[dict] = []  # incoming messages from players
         self._training_core_ids: list[str] = []
         self.memory = AIMemory()
+        # Pathfinding
+        self._path: list[tuple[float, float]] = []   # BFS waypoints toward _move_target
+        self._path_ticks: int = 0                    # ticks since last path recompute
+        self._last_known_map: str = ""               # detect map changes to flush path
+        # Stuck detection (fallback if BFS path still leads into something solid)
+        self._last_move_pos: tuple[float, float] | None = None
+        self._stuck_ticks: int = 0
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
-    def spawn(self):
-        """Register the AI rival in the game world, restoring saved state if available."""
+    def spawn(self, force_fresh: bool = False):
+        """Register the AI rival in the game world, restoring saved state if available.
+        Pass force_fresh=True (used by reset()) to skip DB restore and apply rival_spawn."""
         if PID in game.players:
             logger.debug("AIPlayer: Already spawned.")
             return
@@ -468,12 +529,13 @@ class AIPlayer:
         p["is_ai_rival"] = True
         p["chatColor"] = "#ff6644"
 
-        # Try to restore saved state
-        saved = load_player(PID)
+        # Try to restore saved state (skipped on explicit reset)
+        saved = None if force_fresh else load_player(PID)
         if saved:
             for key in ("x", "y", "hp", "maxHp", "str", "def", "level", "xp", "logs"):
                 if key in saved:
                     p[key] = saved[key]
+            p["map"] = saved.get("map", "level_01")
             p["ki"] = saved.get("ki", p.get("ki", 20))
             p["maxKi"] = saved.get("maxKi", p.get("maxKi", 20))
             p["blastLevel"] = saved.get("blastLevel", 0)
@@ -492,6 +554,7 @@ class AIPlayer:
                         "name": npc_data.get("name", npc_id),
                         "x": npc_data.get("x", p["x"] + TILE_SIZE * 2),
                         "y": npc_data.get("y", p["y"]),
+                        "map": npc_data.get("map", p.get("map", "level_01")),
                         "hp": 20, "maxHp": 20,
                         "ki": 20, "maxKi": 20,
                         "str": 1, "def": 1,
@@ -525,14 +588,23 @@ class AIPlayer:
             p["npc_ids"] = [nid for nid in p["npc_ids"] if nid in p["npcs"]]
             logger.info("AIPlayer: Restored saved state (level %s, %s logs, %d NPCs)", p['level'], p['logs'], len(p['npcs']))
         else:
-            # Fresh spawn away from center (center is roughly tile 10,10 = 480,480)
-            cx, cy = 10 * TILE_SIZE, 10 * TILE_SIZE
-            angle = random.uniform(0, 2 * math.pi)
-            dist = (SPAWN_MARGIN + random.randint(2, 6)) * TILE_SIZE
-            p["x"] = cx + math.cos(angle) * dist
-            p["y"] = cy + math.sin(angle) * dist
+            # Check maps for a rival_spawn map item
+            rival_spawn = _find_rival_spawn()
+            if rival_spawn:
+                rx, ry, rmap = rival_spawn
+                p["x"] = rx
+                p["y"] = ry
+                p["map"] = rmap
+                logger.info("AIPlayer: Fresh spawn at rival_spawn on %s (%.0f, %.0f)", rmap, rx, ry)
+            else:
+                # Default: random position away from center
+                cx, cy = 10 * TILE_SIZE, 10 * TILE_SIZE
+                angle = random.uniform(0, 2 * math.pi)
+                dist_px = (SPAWN_MARGIN + random.randint(2, 6)) * TILE_SIZE
+                p["x"] = cx + math.cos(angle) * dist_px
+                p["y"] = cy + math.sin(angle) * dist_px
+                logger.info("AIPlayer: Fresh spawn at (%.0f, %.0f)", p['x'], p['y'])
             p["npc_ids"] = []
-            logger.info("AIPlayer: Fresh spawn at (%.0f, %.0f)", p['x'], p['y'])
 
     def start(self):
         """Start the background brain loop."""
@@ -568,8 +640,13 @@ class AIPlayer:
         self._pending_reactive_speech = None
         self._prev_stats = {}
         self._inbox.clear()
-        # Re-spawn and start
-        self.spawn()
+        self._path = []
+        self._path_ticks = 0
+        self._last_known_map = ""
+        self._last_move_pos = None
+        self._stuck_ticks = 0
+        # Re-spawn and start (force_fresh skips DB restore so rival_spawn takes effect)
+        self.spawn(force_fresh=True)
         self.start()
         logger.info("AIPlayer: Full reset complete.")
 
@@ -651,10 +728,74 @@ class AIPlayer:
         self.memory.log_event(f"{from_pid} said to me: \"{text[:100]}\"")
         self.memory.note_message(from_pid, text)
         if self._running:
+            asyncio.create_task(self._chat_reply(from_pid, text))
             if self._thinking:
                 self._pending_immediate_think = True
             else:
                 asyncio.create_task(self._think())
+
+    async def _chat_reply(self, from_pid: str, text: str):
+        """Fire a quick dedicated LLM call to reply to a player message."""
+        if game.paused:
+            return
+        identity = self.memory.identity or "an AI rival player in a medieval game"
+        rel = self.memory._get_rel(from_pid)
+        attitude = rel.get("attitude", self._current_attitude())
+        notes = rel.get("notes", [])
+        last_msg = rel.get("last_message", "")
+        attacks = rel.get("attacks_on_me", 0)
+        threat = rel.get("threat_score", 0)
+
+        # Build a concise relationship summary for context
+        rel_lines = [f"Your attitude toward {from_pid}: {attitude}."]
+        if attacks > 0:
+            rel_lines.append(f"They have attacked you {attacks} time(s).")
+        if threat >= 5:
+            rel_lines.append(f"You consider them a serious threat (threat score {threat}).")
+        if last_msg:
+            rel_lines.append(f"Their last message to you was: \"{last_msg}\".")
+        if notes:
+            rel_lines.append("What you remember about them: " + "; ".join(notes[-3:]) + ".")
+        rel_context = " ".join(rel_lines)
+
+        try:
+            reply = await chat_completion(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            f"You are {identity}. "
+                            f"{rel_context} "
+                            "Reply to their message in 1-2 short sentences, fully in character. "
+                            "Be direct and reactive. No narration or quotation marks, just your spoken words."
+                        ),
+                    },
+                    {"role": "user", "content": f'{from_pid} says: "{text}"'},
+                ],
+                temperature=0.85,
+                max_tokens=60,
+                timeout=45.0,
+                max_retries=1,
+            )
+            reply = reply.strip().strip('"')
+            if reply:
+                self.memory.log_event(f"Said: \"{reply[:80]}\"")
+                game.handle_input(PID, {"type": "chat", "text": reply})
+
+                # If the reply is aggressive, escalate relationship and trigger immediate think
+                _HOSTILE_WORDS = ("die", "kill", "attack", "destroy", "end you", "crush",
+                                  "fight", "war", "enemy", "threat", "regret", "mistake")
+                if any(w in reply.lower() for w in _HOSTILE_WORDS):
+                    rel = self.memory._get_rel(from_pid)
+                    rel["attitude"] = "hostile"
+                    rel["threat_score"] = max(rel.get("threat_score", 0), 6)
+                    rel.setdefault("notes", []).append(f"I threatened them: {reply[:80]}")
+                    self.memory.relationships[from_pid] = rel
+                    self._pending_immediate_think = True
+                    logger.info("AIPlayer: hostile reply to %s — flagging for immediate think", from_pid)
+
+        except Exception as e:
+            logger.debug("AIPlayer: chat_reply failed: %s", e)
 
     # ── Brain loop ─────────────────────────────────────────────────────────────
 
@@ -663,6 +804,9 @@ class AIPlayer:
         # Small initial delay to let the game state settle
         await asyncio.sleep(3.0)
         while self._running:
+            if game.paused:
+                await asyncio.sleep(1.0)
+                continue
             try:
                 await self._think()
             except asyncio.CancelledError:
@@ -673,6 +817,8 @@ class AIPlayer:
 
     async def _think(self):
         """One brain cycle: observe → decide → act → remember."""
+        if game.paused:
+            return
         if self._thinking:
             return
         self._thinking = True
@@ -698,6 +844,8 @@ class AIPlayer:
             state_ctx = self._build_state()
             self._inbox.clear()  # Clear after building state so messages are seen once
             decision = await self._query_llm(state_ctx)
+            if game.paused:
+                return  # LLM was in-flight when pause hit — discard result
             if self._pending_reactive_speech and not decision.get("speech"):
                 decision["speech"] = self._pending_reactive_speech
                 if decision.get("goal") == "explore":
@@ -705,12 +853,6 @@ class AIPlayer:
                 if not decision.get("reason"):
                     decision["reason"] = "Reacting to a recent combat event."
             self._pending_reactive_speech = None
-            if state_ctx.get("interaction_log") and not decision.get("speech"):
-                decision["speech"] = self._fallback_chat_reply(state_ctx["interaction_log"][-1])
-                if decision.get("goal") == "explore":
-                    decision["goal"] = "talk"
-                if not decision.get("reason"):
-                    decision["reason"] = "Responding to a direct player message."
 
             # Update attitude/identity from LLM response
             attitude = decision.get("attitude", "neutral")
@@ -720,6 +862,9 @@ class AIPlayer:
             # Update relationships based on nearby players
             for np in state_ctx.get("nearby_players", []):
                 self.memory.update_relationship(np["id"], attitude)
+
+            # Run production pipeline (furnace stocking, bronze collection, etc.)
+            self._do_production_tick()
 
             # Execute the decision
             self._execute(decision)
@@ -754,14 +899,79 @@ class AIPlayer:
                 asyncio.create_task(self._think())
 
     def _fallback_chat_reply(self, inbox_line: str) -> str:
+        import random, re
         text = str(inbox_line or '').split(':', 1)[-1].strip().lower()
-        if any(word in text for word in ['fight me', 'come fight', '1v1', 'attack me', 'duel']):
-            return "If you want a fight, come prove it."
-        if any(word in text for word in ['hello', 'hi', 'hey', 'yo', 'sup']):
-            return "I hear you. State your business."
+
+        def has_word(words):
+            return any(re.search(r'\b' + re.escape(w) + r'\b', text) for w in words)
+
+        if has_word(['fight me', 'come fight', '1v1', 'attack me', 'duel']):
+            return random.choice([
+                "Bold of you. Come then.",
+                "You sure about that? I've been waiting for an excuse.",
+                "Fine. Don't cry when it's over.",
+                "I was hoping someone would say that.",
+                "You really want to do this? Alright.",
+                "Let's see what you've got.",
+                "Took you long enough to ask.",
+                "I won't hold back.",
+            ])
+        if has_word(['retard', 'noob', 'trash', 'loser', 'idiot', 'stupid', 'fuck you', 'screw you']):
+            return random.choice([
+                "Keep running your mouth. See what it gets you.",
+                "Real brave talking like that.",
+                "You'll regret that.",
+                "That's the best you've got? Pathetic.",
+                "Talk is cheap. Back it up.",
+                "Interesting choice of words.",
+                "Remember you said that when you're on the ground.",
+                "I've heard worse from better.",
+            ])
+        if has_word(['hello', 'hi', 'hey', 'yo', 'sup', 'wassup']):
+            return random.choice([
+                "State your business.",
+                "You talking to me for a reason?",
+                "I'm busy. Make it quick.",
+                "What do you want?",
+                "Oh, it's you again.",
+                "Hmph. What is it?",
+                "Don't waste my time.",
+                "Yeah? What's up.",
+            ])
+        if has_word(['trade', 'deal', 'ally', 'team', 'together']):
+            return random.choice([
+                "Maybe. What are you offering?",
+                "I'm listening. Convince me.",
+                "Depends. What do you want in return?",
+                "I work alone. Usually.",
+                "You'd have to prove your worth first.",
+                "Interesting proposal. Keep talking.",
+                "What makes you think I need help?",
+                "An alliance? Could be useful... or a trap.",
+            ])
         if '?' in text:
-            return "Maybe. Depends what you offer."
-        return "I heard you."
+            return random.choice([
+                "Good question. Figure it out yourself.",
+                "Maybe. Depends what you offer.",
+                "Why do you want to know?",
+                "That's none of your concern.",
+                "Ask me again when you've earned my trust.",
+                "Wouldn't you like to know.",
+                "I could tell you, but where's the fun in that?",
+                "Think about it harder.",
+            ])
+        return random.choice([
+            "Noted.",
+            "I'm focused. Don't bother me.",
+            "Watch yourself.",
+            "Hmm.",
+            "Is that so.",
+            "Whatever you say.",
+            "I'll keep that in mind.",
+            "Interesting.",
+            "Right.",
+            "Don't push your luck.",
+        ])
 
     def _consume_ai_alerts(self, p: dict):
         alerts = p.pop("_ai_alerts", None)
@@ -831,6 +1041,10 @@ class AIPlayer:
         if crystals >= 3 and len(alive_npcs) >= 3:
             plan["phase"] = "late_game"
         desired_npc_count = EARLY_GAME_NPC_TARGET if plan["phase"] == "early_game" else TARGET_NPC_COUNT
+        from services.database import get_rival_npc_limit as _get_rival_limit
+        _rl = _get_rival_limit()
+        if _rl is not None:
+            desired_npc_count = min(desired_npc_count, _rl)
 
         threats = []
         alliances = []
@@ -1126,10 +1340,61 @@ class AIPlayer:
             if d < 600:
                 nearby_anvils.append({"id": aid, "x": anvil["x"], "y": anvil["y"], "distance": round(d)})
 
+        # Ore counts on current map
+        current_map_pre = p.get("map", "level_01")
+        tin_ore_count = sum(
+            1 for wo in WORLD_OBJECT_INSTANCES.values()
+            if not wo.get("depleted") and wo.get("asset_id") == "tin_ore"
+            and wo.get("map", "level_01") == current_map_pre
+        )
+        copper_ore_count = sum(
+            1 for wo in WORLD_OBJECT_INSTANCES.values()
+            if not wo.get("depleted") and wo.get("asset_id") == "copper_ore"
+            and wo.get("map", "level_01") == current_map_pre
+        )
+
+        # Furnace and crate status on current map
+        furnace_stored = {}
+        crate_stored = {}
+        has_furnace = False
+        has_crate = False
+        for b in game.buildings.values():
+            if b.get("map", "level_01") != current_map_pre:
+                continue
+            if b.get("kind") == "crafting_station" and b.get("asset_id") == "bronze_furnace":
+                has_furnace = True
+                furnace_stored = b.get("stored", {})
+            elif b.get("kind") == "crate":
+                has_crate = True
+                crate_stored = b.get("stored", {})
+
         # Pending messages from players
         inbox = []
         for msg in self._inbox:
             inbox.append(f"{msg['from']}: {msg['text']}")
+
+        # Designated build spots not yet built on the current map
+        current_map = p.get("map", "level_01")
+        unbuilt_spots = []
+        for spot in _load_rival_build_spots():
+            if spot["map"] != current_map:
+                continue
+            col, row, kind, asset_id = spot["col"], spot["row"], spot["kind"], spot.get("asset_id", "")
+            if kind == "dummy":
+                built = any(b.get("kind") == "etrainer" and b.get("col") == col and b.get("row") == row
+                            for b in game.buildings.values())
+            elif kind == "crate":
+                built = any(b.get("kind") == "crate" and b.get("col") == col and b.get("row") == row
+                            for b in game.buildings.values())
+            elif kind == "crafting_station":
+                built = any(b.get("kind") == "crafting_station" and b.get("col") == col
+                            and b.get("row") == row and b.get("asset_id") == asset_id
+                            for b in game.buildings.values())
+            else:
+                built = True
+            if not built:
+                label = kind if not asset_id else f"{kind}:{asset_id}"
+                unbuilt_spots.append({"type": label, "col": col, "row": row})
 
         return {
             "player": player,
@@ -1152,9 +1417,16 @@ class AIPlayer:
             "attitude": self._current_attitude(),
             "think_count": self._think_count,
             "last_goal": self._last_decision.get("goal", "none"),
-            "plan": json.dumps(self.memory.plan, indent=2),
+            "plan": self.memory.plan,
             "memory": self.memory.format_for_prompt(),
             "interaction_log": inbox,
+            "unbuilt_spots": unbuilt_spots,
+            "tin_ore_count": tin_ore_count,
+            "copper_ore_count": copper_ore_count,
+            "has_furnace": has_furnace,
+            "has_crate": has_crate,
+            "furnace_stored": furnace_stored,
+            "crate_stored": crate_stored,
         }
 
     # ── LLM query ──────────────────────────────────────────────────────────────
@@ -1167,27 +1439,27 @@ class AIPlayer:
             logger.warning("AIPlayer: Prompt render error: %s", e)
             system_prompt = "You are an AI rival player. Return JSON with your decision."
 
-        user_content = (
-            "Decide the AI player's next strategic action for the next ~10 seconds.\n"
-            "Return JSON only, no explanation outside the JSON.\n\n"
-            f"Current state:\n{json.dumps(state_context, indent=2)}"
-        )
+        user_content = "Decide the AI player's next strategic action. Return JSON only, no explanation outside the JSON."
 
         try:
+            logger.info("AIPlayer: querying LLM (think#%d goal=%s)...", self._think_count, state_context.get("last_goal", "?"))
             raw_text = await chat_completion(
                 [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
                 temperature=0.4,
-                max_tokens=600,
+                max_tokens=2000,
                 timeout=60.0,
             )
-            logger.debug("AIPlayer: LLM raw -> %s", raw_text[:300])
+            logger.info("AIPlayer: LLM responded (%d chars) -> %s", len(raw_text), raw_text[:120])
 
             parsed = extract_soul_json(raw_text)
             if not parsed:
-                logger.warning("AIPlayer: Failed to parse JSON from LLM response.")
+                logger.warning(
+                    "AIPlayer: Failed to parse JSON from LLM response. Raw text (first 600 chars):\n%s",
+                    raw_text[:600],
+                )
                 return self._fallback_decision(state_context)
 
             return self._validate_decision(parsed)
@@ -1254,6 +1526,11 @@ class AIPlayer:
                 self.memory.strategy = f"{self.memory.plan.get('phase', 'unknown_phase')}: {self.memory.plan.get('current_objective')}"
 
         plan = raw.get("plan")
+        if isinstance(plan, str):
+            try:
+                plan = json.loads(plan)
+            except Exception:
+                plan = None
         if isinstance(plan, dict):
             self.memory.plan = self.memory._normalize_plan(plan)
             if self.memory.plan.get("current_objective"):
@@ -1303,6 +1580,23 @@ class AIPlayer:
 
     # ── Action execution ───────────────────────────────────────────────────────
 
+    def _hostile_player_nearby(self, radius: float = 400.0) -> bool:
+        """Return True if a human player within radius pixels is considered hostile."""
+        p = game.players.get(PID)
+        if not p:
+            return False
+        px, py = p["x"], p["y"]
+        for pid, op in game.players.items():
+            if pid == PID or op.get("dead") or op.get("knocked_out") or op.get("is_ai_rival"):
+                continue
+            d = _dist(px, py, op["x"], op["y"])
+            if d > radius:
+                continue
+            rel = (self.memory.relationships or {}).get(pid, {})
+            if rel.get("attitude") == "hostile":
+                return True
+        return False
+
     def _execute(self, decision: dict):
         """Translate an LLM decision into game.handle_input() calls."""
         goal = decision.get("goal", "explore")
@@ -1330,10 +1624,17 @@ class AIPlayer:
             and nearest_global_rock is not None
         )
         desired_npc_count = EARLY_GAME_NPC_TARGET if plan_phase == "early_game" else TARGET_NPC_COUNT
+        from services.database import get_rival_npc_limit as _get_rival_limit
+        _rl = _get_rival_limit()
+        if _rl is not None:
+            desired_npc_count = min(desired_npc_count, _rl)
+
+        # Preserve LLM's original goal so fallback movement works after build_npc override
+        decision["_original_goal"] = goal
 
         # Sanity overrides — catch cases where the LLM ignores obvious next steps
         npc_count = len([n for n in p.get("npcs", {}).values() if not n.get("dead")])
-        if p["logs"] >= 10 and npc_count < desired_npc_count and goal not in ("attack_player", "build_anvil"):
+        if p["logs"] >= 10 and npc_count < desired_npc_count and goal != "attack_player":
             goal = "build_npc"
             decision["goal"] = goal
             self.memory.log_event(
@@ -1411,6 +1712,21 @@ class AIPlayer:
             )
 
 
+        # Designated build spots — build missing structures at mapmaker-specified positions.
+        # Runs AFTER sanity overrides so NPC building always takes priority over structure placement.
+        # For dummy spots: only build if we have surplus logs (>= 20) so the AI isn't stuck
+        # spending all logs on dummy rebuilds instead of hiring NPCs.
+        if goal not in ("attack_player", "build_npc"):
+            unbuilt = self._get_unbuilt_spot()
+            if unbuilt:
+                logs_now = p.get("logs", 0)
+                logs_needed = 10  # dummy costs 10 logs
+                min_surplus = 20 if unbuilt["kind"] == "dummy" else logs_needed
+                if logs_now >= min_surplus or unbuilt["kind"] != "dummy":
+                    self._do_build_at_spot(unbuilt)
+                    self.memory.log_event(f"Built designated {unbuilt['kind']} ({unbuilt.get('asset_id','')} col={unbuilt['col']} row={unbuilt['row']}).")
+                    return
+
         px, py = p["x"], p["y"]
 
         # Chat
@@ -1430,7 +1746,7 @@ class AIPlayer:
             self._do_gather_stones(target)
 
         elif goal == "build_npc":
-            self._do_build_npc()
+            self._do_build_npc(fallback_decision=decision)
 
         elif goal == "build_dummy":
             self._do_build_dummy()
@@ -1564,15 +1880,77 @@ class AIPlayer:
         else:
             self._move_toward(rock["x"], rock["y"], running=d > 200, on_arrive=_start_mining)
 
-    def _do_build_npc(self):
+    def _do_build_npc(self, fallback_decision: dict | None = None):
         p = game.players[PID]
         if p["logs"] >= 10:
             name = random.choice(NPC_NAMES)
             game.handle_input(PID, {"type": "build_npc", "npc_name": name})
             logger.debug("AIPlayer: Building NPC: %s", name)
+            # Don't stand idle — immediately execute whatever the LLM wanted to do next
+            if fallback_decision:
+                fallback_goal = fallback_decision.get("_original_goal")
+                if fallback_goal == "refine":
+                    self._do_refine(fallback_decision.get("target"))
+                elif fallback_goal == "gather_stones":
+                    self._do_gather_stones(fallback_decision.get("target"))
+                elif fallback_goal == "gather_logs":
+                    self._do_gather_logs(fallback_decision.get("target"))
+                elif fallback_goal == "attack_player":
+                    self._do_attack_player(fallback_decision.get("target"))
         else:
             # Not enough logs — go gather
             self._do_gather_logs(None)
+
+    def _get_unbuilt_spot(self) -> dict | None:
+        """Return the first rival_build spot on the AI's current map that isn't built yet."""
+        p = game.players.get(PID)
+        if not p:
+            return None
+        current_map = p.get("map", "level_01")
+        for spot in _load_rival_build_spots():
+            if spot["map"] != current_map:
+                continue
+            col, row, kind, asset_id = spot["col"], spot["row"], spot["kind"], spot.get("asset_id", "")
+            if kind == "dummy":
+                from services.game_state import tile_pos as _tile_pos
+                dx, dy = _tile_pos(col, row)
+                built = any(
+                    not d.get("dead") and abs(d.get("x", 0) - dx) < 4 and abs(d.get("y", 0) - dy) < 4
+                    for d in game.dummies.values()
+                )
+            elif kind == "crate":
+                built = any(
+                    b.get("kind") == "crate" and b.get("col") == col and b.get("row") == row
+                    for b in game.buildings.values()
+                )
+            elif kind == "crafting_station":
+                built = any(
+                    b.get("kind") == "crafting_station" and b.get("col") == col
+                    and b.get("row") == row and b.get("asset_id") == asset_id
+                    for b in game.buildings.values()
+                )
+            else:
+                built = True  # unknown kind, skip
+            if not built:
+                return spot
+        return None
+
+    def _do_build_at_spot(self, spot: dict):
+        """Place the structure specified by a rival_build spot."""
+        col, row, kind, asset_id = spot["col"], spot["row"], spot["kind"], spot.get("asset_id", "")
+        if kind == "dummy":
+            game.handle_input(PID, {"type": "build_dummy", "logs": 10, "col": col, "row": row})
+            logger.info("AIPlayer: Built training dummy at (%d,%d) on %s", col, row, spot["map"])
+            self.memory.log_event(f"Built training dummy at col={col}, row={row}.")
+        elif kind == "crate":
+            game.handle_input(PID, {"type": "place_building", "kind": "crate", "col": col, "row": row})
+            logger.info("AIPlayer: Placed crate at (%d,%d) on %s", col, row, spot["map"])
+            self.memory.log_event(f"Built storage crate at col={col}, row={row}.")
+        elif kind == "crafting_station":
+            game.handle_input(PID, {"type": "place_building", "kind": "crafting_station",
+                                    "asset_id": asset_id, "col": col, "row": row})
+            logger.info("AIPlayer: Placed crafting_station %s at (%d,%d) on %s", asset_id, col, row, spot["map"])
+            self.memory.log_event(f"Built {asset_id} at col={col}, row={row}.")
 
     def _do_build_dummy(self):
         p = game.players[PID]
@@ -1751,6 +2129,9 @@ class AIPlayer:
             elif task == "follow":
                 npc["_move_target"] = (p["x"], p["y"])
                 npc.pop("_on_arrive", None)
+
+            elif task == "mine_ore":
+                self._npc_mine_ore(npc, npc_id)
 
             elif task == "idle":
                 npc.pop("_move_target", None)
@@ -2103,6 +2484,141 @@ class AIPlayer:
 
         _find_and_mine()
 
+    def _npc_mine_ore(self, npc, npc_id):
+        """Send NPC to mine nearest tin_ore or copper_ore world object, depositing into furnace."""
+        p = game.players.get(PID)
+        if not p:
+            return
+        npc_map = npc.get("map", p.get("map", "level_01"))
+
+        def _find_and_mine():
+            if npc.get("dead") or npc.get("knocked_out"):
+                return
+            nx, ny = npc.get("x", 0), npc.get("y", 0)
+            # Find nearest tin_ore or copper_ore world object on same map
+            best = None
+            best_dist = float("inf")
+            for wo_id, wo in WORLD_OBJECT_INSTANCES.items():
+                if wo.get("depleted"):
+                    continue
+                if wo.get("asset_id") not in ("tin_ore", "copper_ore"):
+                    continue
+                if wo.get("map", "level_01") != npc_map:
+                    continue
+                d = _dist(nx, ny, wo["x"], wo["y"])
+                if d < best_dist:
+                    best_dist = d
+                    best = {"id": wo_id, **wo}
+            if not best:
+                self._npc_gather(npc, npc_id)  # fallback
+                return
+
+            wo_id = best["id"]
+            npc["_resource_target_id"] = wo_id
+            npc["_resource_target_type"] = "ore"
+
+            def on_arrive_mine():
+                game.handle_input(PID, {"type": "npc_interact_world_object", "wo_id": wo_id, "npc_id": npc_id})
+                # Deposit accumulated ore into the furnace
+                npc_inv = npc.get("inventory", {})
+                ore_keys = [k for k in npc_inv if k in ("raw_tin", "raw_copper") and npc_inv[k] > 0]
+                if ore_keys:
+                    self._deposit_ore_to_furnace(npc_inv, ore_keys)
+                # Continue mining if ore still available
+                current = WORLD_OBJECT_INSTANCES.get(wo_id)
+                if current and not current.get("depleted"):
+                    npc["_move_target"] = (current["x"], current["y"])
+                    npc["_on_arrive"] = on_arrive_mine
+                    return
+                npc.pop("_resource_target_id", None)
+                npc.pop("_resource_target_type", None)
+                _find_and_mine()
+
+            npc["_move_target"] = (best["x"], best["y"])
+            npc["_on_arrive"] = on_arrive_mine
+
+        _find_and_mine()
+
+    def _deposit_ore_to_furnace(self, source_inv: dict, ore_keys: list):
+        """Move raw_tin/raw_copper from source_inv into the furnace building stored dict."""
+        p = game.players.get(PID)
+        if not p:
+            return
+        current_map = p.get("map", "level_01")
+        furnace = None
+        for b in game.buildings.values():
+            if b.get("kind") == "crafting_station" and b.get("asset_id") == "bronze_furnace" \
+                    and b.get("map", "level_01") == current_map:
+                furnace = b
+                break
+        if not furnace:
+            return
+        stored = dict(furnace.get("stored", {}))
+        for key in ore_keys:
+            amt = source_inv.pop(key, 0)
+            if amt > 0:
+                stored[key] = stored.get(key, 0) + amt
+        game.handle_input(PID, {"type": "update_building_stored", "building_id": furnace["id"], "stored": stored})
+
+    def _do_production_tick(self):
+        """Stock furnace with logs+ore, collect bronze output into nearest crate."""
+        p = game.players.get(PID)
+        if not p:
+            return
+        current_map = p.get("map", "level_01")
+
+        furnace = None
+        crate = None
+        for b in game.buildings.values():
+            if b.get("map", "level_01") != current_map:
+                continue
+            if b.get("kind") == "crafting_station" and b.get("asset_id") == "bronze_furnace" and not furnace:
+                furnace = b
+            elif b.get("kind") == "crate" and not crate:
+                crate = b
+
+        if not furnace:
+            return
+
+        f_stored = dict(furnace.get("stored", {}))
+        changed = False
+
+        # Stock furnace with logs from AI's inventory (keep 5 in reserve for building)
+        if p.get("logs", 0) > 5:
+            batch = min(p["logs"] - 5, 10)
+            if batch > 0 and f_stored.get("logs", 0) < 20:
+                f_stored["logs"] = f_stored.get("logs", 0) + batch
+                p["logs"] -= batch
+                changed = True
+
+        # Stock furnace with planks from AI's inventory if any (2x efficient fuel)
+        inv = p.get("inventory", {})
+        if inv.get("planks", 0) > 0 and f_stored.get("planks", 0) < 10:
+            move = min(inv["planks"], 10 - f_stored.get("planks", 0))
+            f_stored["planks"] = f_stored.get("planks", 0) + move
+            inv["planks"] -= move
+            if inv["planks"] <= 0:
+                del inv["planks"]
+            changed = True
+
+        if changed:
+            game.handle_input(PID, {"type": "update_building_stored",
+                                    "building_id": furnace["id"], "stored": f_stored})
+
+        # Transfer bronze_bar output from furnace into crate
+        if crate:
+            f_stored = dict(furnace.get("stored", {}))
+            bronze = f_stored.get("bronze_bar", 0)
+            if bronze > 0:
+                c_stored = dict(crate.get("stored", {}))
+                c_stored["bronze_bar"] = c_stored.get("bronze_bar", 0) + bronze
+                f_stored["bronze_bar"] = 0
+                game.handle_input(PID, {"type": "update_building_stored",
+                                        "building_id": furnace["id"], "stored": f_stored})
+                game.handle_input(PID, {"type": "update_building_stored",
+                                        "building_id": crate["id"], "stored": c_stored})
+                self.memory.log_event(f"Moved {bronze} bronze_bar from furnace to crate.")
+
     def _npc_attack(self, npc, npc_id):
         """Send NPC to attack nearest non-AI player."""
         nearest = self._find_nearest_player()
@@ -2167,6 +2683,17 @@ class AIPlayer:
         p = game.players.get(PID)
         if not p:
             return
+
+        # Flush cached path when map changes (path waypoints are map-specific)
+        cur_map = p.get("map", "level_01")
+        if cur_map != self._last_known_map:
+            self._last_known_map = cur_map
+            self._path = []
+            self._path_ticks = 0
+            self._move_target = None
+            self._on_arrive = None
+            self._last_move_pos = None
+            self._stuck_ticks = 0
 
         # Continuous action processing (mining rocks, chopping trees)
         ca = self._continuous_action
@@ -2234,6 +2761,10 @@ class AIPlayer:
             game.handle_input(PID, {"type": "stop"})
             self._move_target = None
             self._move_running = False
+            self._path = []
+            self._path_ticks = 0
+            self._last_move_pos = None
+            self._stuck_ticks = 0
             # Execute pending action on arrival
             if self._on_arrive:
                 cb = self._on_arrive
@@ -2244,16 +2775,101 @@ class AIPlayer:
                     logger.warning("AIPlayer: on_arrive error: %s", e)
             return
 
-        dx = tx - p["x"]
-        dy = ty - p["y"]
-        if dist <= 0:
+        # Recompute BFS path every 10 ticks (~500ms) so the path stays fresh
+        # as the AI moves along it.  Recompute immediately on first tick (path empty).
+        self._path_ticks += 1
+        if not self._path or self._path_ticks >= 10:
+            self._path_ticks = 0
+            self._path = self._compute_path(tx, ty)
+
+        # Advance past any waypoints the AI has already walked through
+        while len(self._path) > 1 and _dist(p["x"], p["y"], self._path[0][0], self._path[0][1]) < ARRIVAL_THRESHOLD:
+            self._path.pop(0)
+
+        # Steer toward next path waypoint, or straight to target when no path needed
+        steer_x, steer_y = self._path[0] if self._path else (tx, ty)
+
+        dx = steer_x - p["x"]
+        dy = steer_y - p["y"]
+        d = math.hypot(dx, dy)
+        if d <= 0:
             return
+
+        # Stuck detection: random nudge if position barely changes over several ticks
+        px, py = p["x"], p["y"]
+        if self._last_move_pos is not None:
+            moved = _dist(px, py, self._last_move_pos[0], self._last_move_pos[1])
+            self._stuck_ticks = self._stuck_ticks + 1 if moved < 1.0 else 0
+        self._last_move_pos = (px, py)
+
+        ndx, ndy = dx / d, dy / d
+        if self._stuck_ticks >= 15:
+            # Last resort: random nudge — BFS will recompute next cycle
+            angle = random.uniform(0, 2 * math.pi)
+            ndx, ndy = math.cos(angle), math.sin(angle)
+            self._stuck_ticks = 0
+
         game.handle_input(PID, {
             "type": "move",
-            "dx": dx / dist,
-            "dy": dy / dist,
+            "dx": ndx,
+            "dy": ndy,
             "running": bool(self._move_running),
         })
+
+    def _compute_path(self, target_x: float, target_y: float) -> list[tuple[float, float]]:
+        """BFS pathfinding on the tile grid. Returns ordered list of (px, py) waypoint centres."""
+        from services.world_data import get_collision_tiles
+        from collections import deque
+
+        p = game.players.get(PID)
+        if not p:
+            return []
+
+        COLLISION_TILES = get_collision_tiles(p.get("map", "level_01"))
+
+        start_col = int(p["x"] // TILE_SIZE)
+        start_row = int(p["y"] // TILE_SIZE)
+        end_col   = int(target_x // TILE_SIZE)
+        end_row   = int(target_y // TILE_SIZE)
+
+        if start_col == end_col and start_row == end_row:
+            return []  # already in the destination tile — go straight
+
+        queue: deque[tuple[int, int]] = deque([(start_col, start_row)])
+        parent: dict[tuple[int, int], tuple[int, int] | None] = {(start_col, start_row): None}
+
+        found = False
+        while queue:
+            col, row = queue.popleft()
+            if col == end_col and row == end_row:
+                found = True
+                break
+            for dc, dr in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+                nc, nr = col + dc, row + dr
+                if (nc, nr) in parent:
+                    continue
+                if (nc, nr) in COLLISION_TILES:
+                    continue
+                if nc < 0 or nr < 0 or nc > 200 or nr > 200:
+                    continue
+                parent[(nc, nr)] = (col, row)
+                queue.append((nc, nr))
+            if len(parent) > 1200:
+                break  # safety: map too large or no path
+
+        if not found:
+            return []
+
+        # Reconstruct path (skip start tile, include end tile)
+        path: list[tuple[int, int]] = []
+        cur: tuple[int, int] | None = (end_col, end_row)
+        while cur is not None and cur != (start_col, start_row):
+            path.append(cur)
+            cur = parent.get(cur)
+        path.reverse()
+
+        half = TILE_SIZE / 2
+        return [(c * TILE_SIZE + half, r * TILE_SIZE + half) for c, r in path]
 
     def _move_toward(self, target_x, target_y, running=False, on_arrive=None):
         """Set velocity to move the AI player toward a target point."""
@@ -2270,24 +2886,23 @@ class AIPlayer:
             self._move_target = None
             self._on_arrive = None
             self._move_running = False
+            self._path = []
+            self._last_move_pos = None
+            self._stuck_ticks = 0
             if on_arrive:
                 on_arrive()
             return
 
+        # When destination changes, reset path so tick() recomputes immediately
+        if self._move_target != (target_x, target_y):
+            self._path = []
+            self._path_ticks = 10  # force recompute on next tick
+            self._last_move_pos = None
+            self._stuck_ticks = 0
         self._move_target = (target_x, target_y)
         self._on_arrive = on_arrive
         self._move_running = bool(running)
-
-        # Normalize to unit direction
-        ndx = dx / dist
-        ndy = dy / dist
-
-        game.handle_input(PID, {
-            "type": "move",
-            "dx": ndx,
-            "dy": ndy,
-            "running": running,
-        })
+        # Steering is handled entirely by tick() — no move input sent here.
 
     # ── Finders ────────────────────────────────────────────────────────────────
 

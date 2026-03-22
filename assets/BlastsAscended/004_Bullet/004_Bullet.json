@@ -1,0 +1,40 @@
+{
+  "spriteSheet": "004_Bullet.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "Bullet",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 256,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 8,
+    "rows": 1
+  },
+  "totalFrames": 8,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 1,
+    "delays": [],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "Bullet_down",
+    "1": "Bullet_up",
+    "2": "Bullet_right",
+    "3": "Bullet_left",
+    "4": "Bullet_southeast",
+    "5": "Bullet_southwest",
+    "6": "Bullet_northeast",
+    "7": "Bullet_northwest"
+  }
+}

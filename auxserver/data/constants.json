@@ -2,8 +2,8 @@
   "_comment": "Single source of truth for constants shared between Python server and JS client.",
 
   "TILE_SIZE":    48,
-  "MAP_COLS":     80,
-  "MAP_ROWS":     50,
+  "MAP_COLS":     70,
+  "MAP_ROWS":     60,
 
   "PLAYER_SPEED":     160,
   "PLAYER_RUN_SPEED": 280,

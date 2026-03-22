@@ -1,0 +1,53 @@
+{
+  "spriteSheet": "014_blast08.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "8",
+  "stateAlias": "blast08",
+  "stateUses": [
+    "Bio-Android charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 512,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 16,
+    "rows": 1
+  },
+  "totalFrames": 16,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 2,
+    "delays": [
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast08_1_down",
+    "1": "blast08_1_up",
+    "2": "blast08_1_right",
+    "3": "blast08_1_left",
+    "4": "blast08_1_southeast",
+    "5": "blast08_1_southwest",
+    "6": "blast08_1_northeast",
+    "7": "blast08_1_northwest",
+    "8": "blast08_2_down",
+    "9": "blast08_2_up",
+    "10": "blast08_2_right",
+    "11": "blast08_2_left",
+    "12": "blast08_2_southeast",
+    "13": "blast08_2_southwest",
+    "14": "blast08_2_northeast",
+    "15": "blast08_2_northwest"
+  }
+}

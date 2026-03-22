@@ -1,0 +1,62 @@
+{
+  "spriteSheet": "034_blast24.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "24",
+  "stateAlias": "blast24",
+  "stateUses": [
+    "Quarter-Saiyan charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 768,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 24,
+    "rows": 1
+  },
+  "totalFrames": 24,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 3,
+    "delays": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast24_1_down",
+    "1": "blast24_1_up",
+    "2": "blast24_1_right",
+    "3": "blast24_1_left",
+    "4": "blast24_1_southeast",
+    "5": "blast24_1_southwest",
+    "6": "blast24_1_northeast",
+    "7": "blast24_1_northwest",
+    "8": "blast24_2_down",
+    "9": "blast24_2_up",
+    "10": "blast24_2_right",
+    "11": "blast24_2_left",
+    "12": "blast24_2_southeast",
+    "13": "blast24_2_southwest",
+    "14": "blast24_2_northeast",
+    "15": "blast24_2_northwest",
+    "16": "blast24_3_down",
+    "17": "blast24_3_up",
+    "18": "blast24_3_right",
+    "19": "blast24_3_left",
+    "20": "blast24_3_southeast",
+    "21": "blast24_3_southwest",
+    "22": "blast24_3_northeast",
+    "23": "blast24_3_northwest"
+  }
+}

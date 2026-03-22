@@ -13,6 +13,7 @@ import {
 } from '../constants.js';
 import { createBarrierOverlay, syncBarrierOverlay } from './BarrierOverlay.js';
 import { createEquipmentOverlay, syncEquipmentOverlay } from './EquipmentOverlay.js';
+import { createHairOverlay, syncHairOverlay } from './HairOverlay.js';
 import NPCPersonality from '../systems/NPCPersonality.js';
 
 const HP_REGEN_MS = 30000;
@@ -29,7 +30,7 @@ const NPC_TO_BASE = {
 // Emotion decay — emotions drift toward baseline every DECAY_INTERVAL ms
 const EMOTION_DECAY_INTERVAL = 2000; // 2 seconds
 const EMOTION_DECAY_RATE = 0.02;       // base decay rate per interval
-const OWNER_DECAY_MULT   = 0.2;       // owner emotions decay 5x slower (1/5)
+const OWNER_DECAY_MULT   = 0.8;       // owner emotions decay reasonably fast
 const OTHER_DECAY_MULT   = 0.15;      // other players' emotions decay much slower (~11 min full decay)
 const DEFAULT_TRUST_BASELINE = 0.5;  // starting baseline
 const DEFAULT_FEAR_BASELINE  = 0.0;
@@ -97,6 +98,12 @@ export class NPC extends Phaser.GameObjects.Sprite {
 
     // Intel — whether this NPC can see attacker stats (future item unlocks this)
     this._canSeeStats = false;
+
+    this._meditating = false;
+    this._flying = false;
+    this.flySkillLevel = 1;
+    this.flyXp = 0;
+    this._hairOverlay = null;
 
     // Equipment
     this.equipment = {};  // slot -> eq_id
@@ -169,6 +176,12 @@ export class NPC extends Phaser.GameObjects.Sprite {
   isDead()        { return this._dead; }
   isKnockedOut()  { return this._knockedOut; }
   getFacing()     { return this._facing; }
+
+  setHairOverlay(textureKey) {
+    if (this._hairOverlay) { this._hairOverlay.destroy(); this._hairOverlay = null; }
+    if (!textureKey) return;
+    this._hairOverlay = createHairOverlay(this.scene, this, textureKey, true);
+  }
 
   /** Effective movement speed — personality base * emotion modifiers. */
   getEffectiveSpeed() {
@@ -993,6 +1006,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._kiBar?.setPosition(this.x - 20, this.y - TILE_SIZE + 3);
     syncBarrierOverlay(this._barrierOverlay, this);
     this._syncEquipOverlays();
+    syncHairOverlay(this._hairOverlay, this);
 
     // Update HP bar width
     const hpPct = this.hp / this.maxHp;
@@ -1084,6 +1098,7 @@ export class NPC extends Phaser.GameObjects.Sprite {
     this._barrierOverlay?.destroy();
     for (const overlay of Object.values(this._equipOverlays || {})) overlay?.destroy();
     this._equipOverlays = {};
+    this._hairOverlay?.destroy();
     super.destroy(fromScene);
   }
 }

@@ -12,7 +12,6 @@ export default class MapManager {
     this.scene = scene;
     this._tileImages = [];
     this._tileImagesOverlay = []; // layer ≥1 tiles — never hidden by MineRenderer
-    this._collisionGroup = null;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -54,18 +53,8 @@ export default class MapManager {
       // Spawn trees at positions found in the map
       scene._spawnTreesAt(treePositions);
 
-      // Create static physics bodies for collision tiles
-      if (!this._collisionGroup) {
-        this._collisionGroup = scene.physics.add.staticGroup();
-      }
-      for (const { x, y, w, h } of collisionRects) {
-        const body = scene.add.rectangle(x + w / 2, y + h / 2, w, h);
-        scene.physics.add.existing(body, true);
-        this._collisionGroup.add(body);
-      }
-      if (scene.player) {
-        scene._movement.addCollisionGroup(this._collisionGroup);
-      }
+      // Store collision rects for manual AABB check in MovementController
+      scene._collisionRects = collisionRects;
 
       console.log(`[map] Loaded level_01: ${width}x${height}, ${treePositions.length} trees, ${rockSpawnTiles.length} rock spawn tiles, ${collisionRects.length} collision tiles`);
     } catch (e) {
@@ -89,7 +78,7 @@ export default class MapManager {
       const status = runner?.getStatus();
       const task = status?.tasks?.[0];
       const staysOnOldMap = npc._map === scene._currentMap
-        && task && ['custom_task', 'mine_ore', 'gather'].includes(task.task);
+        && task && !['follow', 'stay_near_player'].includes(task.task);
       if (staysOnOldMap) {
         // NPC stays behind — hide it
         npc.setVisible(false);
@@ -113,12 +102,6 @@ export default class MapManager {
     // Destroy old trees
     for (const tree of (scene.entities.trees || [])) tree?.destroy?.();
     scene.entities.trees = [];
-
-    // Destroy old collision group
-    if (this._collisionGroup) {
-      this._collisionGroup.clear(true, true);
-      this._collisionGroup = null;
-    }
 
     // Load new map
     try {
@@ -151,16 +134,8 @@ export default class MapManager {
 
       scene._spawnTreesAt(treePositions);
 
-      // Collision group
-      this._collisionGroup = scene.physics.add.staticGroup();
-      for (const { x, y, w, h } of collisionRects) {
-        const body = scene.add.rectangle(x + w / 2, y + h / 2, w, h);
-        scene.physics.add.existing(body, true);
-        this._collisionGroup.add(body);
-      }
-      if (scene.player) {
-        scene._movement.addCollisionGroup(this._collisionGroup);
-      }
+      // Store collision rects for manual AABB check in MovementController
+      scene._collisionRects = collisionRects;
 
       // Mine renderer: request tiles when entering cave, destroy when leaving
       if (newMap === 'cave_01') {

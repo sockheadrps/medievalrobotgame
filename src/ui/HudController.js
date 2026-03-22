@@ -573,12 +573,17 @@ export class HudController {
 
       const slotBg = add(scene.add.rectangle(x + slotSize / 2, y + slotSize / 2, slotSize, slotSize, 0x111122, 0.88)
         .setStrokeStyle(1, 0x334466).setDepth(50).setInteractive({ useHandCursor: true }));
+      const slotIdx = i;
       slotBg.on('pointerdown', (ptr) => {
         ptr._fgHandled = true;
         if (ptr.rightButtonDown()) {
-          scene._openHotbarPicker(i, x + slotSize / 2, y);
+          if (slotIdx < 3) {
+            scene._openKiMovePicker(slotIdx, x + slotSize / 2, y);
+          } else {
+            scene._openHotbarPicker(slotIdx, x + slotSize / 2, y);
+          }
         } else {
-          scene._useHotbarSlot(i);
+          scene._useHotbarSlot(slotIdx);
         }
       });
 

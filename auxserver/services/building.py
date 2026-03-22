@@ -26,13 +26,42 @@ from services.game_state import (
 )
 
 
+def _fuel_available(stored: dict, fuel_type: str, amount: int) -> bool:
+    """Check if `amount` fuel units are available. For 'logs', planks count as 2 units each."""
+    if fuel_type == "logs":
+        return stored.get("logs", 0) + stored.get("planks", 0) * 2 >= amount
+    return stored.get(fuel_type, 0) >= amount
+
+
+def _consume_fuel(stored: dict, fuel_type: str, amount: int):
+    """Consume `amount` fuel units. For 'logs', planks are preferred (2x efficient)."""
+    if fuel_type == "logs":
+        planks = stored.get("planks", 0)
+        logs = stored.get("logs", 0)
+        # Use planks first — each covers 2 units
+        planks_use = min(planks, amount // 2)
+        remaining = amount - planks_use * 2
+        if planks_use:
+            stored["planks"] = planks - planks_use
+            if stored["planks"] <= 0:
+                stored.pop("planks", None)
+        if remaining > 0:
+            stored["logs"] = logs - remaining
+            if stored.get("logs", 0) <= 0:
+                stored.pop("logs", None)
+    else:
+        stored[fuel_type] = stored.get(fuel_type, 0) - amount
+        if stored.get(fuel_type, 0) <= 0:
+            stored.pop(fuel_type, None)
+
+
 class BuildingService:
     def __init__(self, game_state):
         self.gs = game_state
 
     # ── Dummy ──────────────────────────────────────────────────────────────────
 
-    def _try_build_dummy(self, pid, logs_used):
+    def _try_build_dummy(self, pid, logs_used, col=None, row=None):
         p = self.gs.players.get(pid)
         if not p:
             return
@@ -41,8 +70,9 @@ class BuildingService:
             return
         p["logs"] -= logs_used
 
-        col = int(p["x"] / TILE_SIZE) + 2
-        row = int(p["y"] / TILE_SIZE)
+        if col is None or row is None:
+            col = int(p["x"] / TILE_SIZE) + 2
+            row = int(p["y"] / TILE_SIZE)
         dx, dy = tile_pos(col, row)
         did = _gen_dummy_id()
         self.gs.dummies[did] = {
@@ -53,6 +83,7 @@ class BuildingService:
             "owner": pid,
             "dead": False,
             "last_hit_by": {},
+            "map": p.get("map", "level_01"),
         }
 
     # ── Ki Targets ─────────────────────────────────────────────────────────────
@@ -82,6 +113,7 @@ class BuildingService:
             "_ki_target_hp": KI_TARGET_HP,
             "_ki_target_maxHp": KI_TARGET_HP,
             "_ki_target_owner": pid,
+            "map": p.get("map", "level_01"),
         })
         logger.debug("%s built ki target %s at (%.0f, %.0f)", pid, item_id, x, y)
         return item_id
@@ -425,7 +457,7 @@ class BuildingService:
                 for recipe in station_def.recipes:
                     if not all(stored.get(r, 0) >= qty for r, qty in recipe.inputs.items()):
                         continue
-                    if station_def.fuel_type != "none" and stored.get(station_def.fuel_type, 0) < recipe.fuel_cost:
+                    if station_def.fuel_type != "none" and not _fuel_available(stored, station_def.fuel_type, recipe.fuel_cost):
                         continue
                     accum = b.get("_accum", 0.0) + dt
                     process_time = recipe.process_time / station_def.speed_bonus
@@ -438,9 +470,7 @@ class BuildingService:
                         if stored[r] <= 0:
                             del stored[r]
                     if station_def.fuel_type != "none":
-                        stored[station_def.fuel_type] = stored.get(station_def.fuel_type, 0) - recipe.fuel_cost
-                        if stored.get(station_def.fuel_type, 0) <= 0:
-                            stored.pop(station_def.fuel_type, None)
+                        _consume_fuel(stored, station_def.fuel_type, recipe.fuel_cost)
                     for r, qty in recipe.outputs.items():
                         stored[r] = stored.get(r, 0) + qty
                     break

@@ -134,6 +134,8 @@ class PlayerManager:
             actor["vegetables"] = actor.get("vegetables", 0) + int(value)
         elif field == "full_hp":
             actor["hp"] = actor.get("maxHp", actor.get("hp", 1))
+        elif field == "_dmg10":
+            actor["hp"] = max(0, actor.get("hp", 1) - 10)
         elif field == "maxHp":
             actor["maxHp"] = actor.get("maxHp", 20) + int(value)
             actor["hp"] = actor["maxHp"]
@@ -168,6 +170,11 @@ class PlayerManager:
             actor["feathers"] = actor.get("feathers", 0) + int(value)
         elif field == "blastLevel":
             actor["blastLevel"] = max(0, actor.get("blastLevel", 0) + int(value))
+        elif field == "tp_map":
+            target_map = str(data.get("target_map", "level_01"))
+            actor["map"] = target_map
+            actor["x"] = 480
+            actor["y"] = 480
         elif field == "xp_multiplier_set":
             scope = str(data.get("scope", "") or "")
             if scope in self.gs.xp_multipliers:

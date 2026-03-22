@@ -84,7 +84,7 @@ export class GatherTaskHandler {
       if (!tree._chopped) {
         const conn = scene._conn;
         if (conn?.connected && tree.treeIndex >= 0) {
-          conn.send({ type: 'npc_chop', tree_id: tree.treeIndex, owner_id: scene.playerId });
+          conn.send({ type: 'npc_chop', tree_id: tree.treeIndex, owner_id: scene.playerId, npc_id: npc.id });
         }
         npc.logs = Math.min(npc.logs + 1, npc.maxLogs);
         npc.showBubble(`Chopping! (${npc.logs}/${npc.maxLogs})`, 1500, { silent: true });
@@ -332,7 +332,7 @@ export class GatherTaskHandler {
     if (!tree._chopped) {
       const conn = scene._conn;
       if (conn?.connected && tree.treeIndex >= 0) {
-        conn.send({ type: 'npc_chop', tree_id: tree.treeIndex, owner_id: scene.playerId });
+        conn.send({ type: 'npc_chop', tree_id: tree.treeIndex, owner_id: scene.playerId, npc_id: npc.id });
       }
       npc.logs = Math.min(npc.logs + 1, npc.maxLogs);
       npc.showBubble(`Gathering all! (${npc.logs}/${npc.maxLogs} logs)`, 1500, { silent: true });

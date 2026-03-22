@@ -1,0 +1,40 @@
+{
+  "spriteSheet": "002_Blaster.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "Blaster",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 256,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 8,
+    "rows": 1
+  },
+  "totalFrames": 8,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 1,
+    "delays": [],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "Blaster_down",
+    "1": "Blaster_up",
+    "2": "Blaster_right",
+    "3": "Blaster_left",
+    "4": "Blaster_southeast",
+    "5": "Blaster_southwest",
+    "6": "Blaster_northeast",
+    "7": "Blaster_northwest"
+  }
+}

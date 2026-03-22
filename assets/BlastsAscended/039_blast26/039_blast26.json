@@ -1,0 +1,54 @@
+{
+  "spriteSheet": "039_blast26.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "26",
+  "stateAlias": "blast26",
+  "stateUses": [
+    "Makyojin charged blast",
+    "Changeling King Kold primary blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 512,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 16,
+    "rows": 1
+  },
+  "totalFrames": 16,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 2,
+    "delays": [
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast26_1_down",
+    "1": "blast26_1_up",
+    "2": "blast26_1_right",
+    "3": "blast26_1_left",
+    "4": "blast26_1_southeast",
+    "5": "blast26_1_southwest",
+    "6": "blast26_1_northeast",
+    "7": "blast26_1_northwest",
+    "8": "blast26_2_down",
+    "9": "blast26_2_up",
+    "10": "blast26_2_right",
+    "11": "blast26_2_left",
+    "12": "blast26_2_southeast",
+    "13": "blast26_2_southwest",
+    "14": "blast26_2_northeast",
+    "15": "blast26_2_northwest"
+  }
+}

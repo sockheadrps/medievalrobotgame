@@ -1,0 +1,39 @@
+{
+  "spriteSheet": "009_blast06.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "6",
+  "stateAlias": "blast06",
+  "stateUses": [
+    "Tsufurujin charged blast",
+    "Namek primary blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 128,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 4,
+    "rows": 1
+  },
+  "totalFrames": 4,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 1,
+    "delays": [],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast06_down",
+    "1": "blast06_up",
+    "2": "blast06_right",
+    "3": "blast06_left"
+  }
+}

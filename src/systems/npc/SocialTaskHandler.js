@@ -189,14 +189,13 @@ export class SocialTaskHandler {
     const targetKey = cmd.target;
     if (!targetKey) { this._runner._tasks.shift(); return; }
 
-    // Find the target sprite
-    const entry = scene._remoteNPCSprites?.[targetKey]
+    // Find the target sprite — _remoteNPCSprites values are RemoteNPC sprites directly
+    const targetSprite = scene._remoteNPCSprites?.[targetKey]
       || Object.values(scene._remoteNPCSprites || {}).find(
           e => `${e.ownerPid}_${e.npcId}` === targetKey
         );
-    if (!entry?.sprite) { this._runner._tasks.shift(); return; }
-
-    const targetSprite = entry.sprite;
+    if (!targetSprite) { this._runner._tasks.shift(); return; }
+    const entry = targetSprite; // for npcId access below
 
     // Move within 2 tiles
     const dist = Phaser.Math.Distance.Between(npc.x, npc.y, targetSprite.x, targetSprite.y);

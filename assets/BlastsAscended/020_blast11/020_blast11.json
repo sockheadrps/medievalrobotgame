@@ -1,0 +1,60 @@
+{
+  "spriteSheet": "020_blast11.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "11",
+  "stateAlias": "blast11",
+  "stateUses": [
+    "Android charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 640,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 20,
+    "rows": 1
+  },
+  "totalFrames": 20,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 5,
+    "delays": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast11_1_down",
+    "1": "blast11_1_up",
+    "2": "blast11_1_right",
+    "3": "blast11_1_left",
+    "4": "blast11_2_down",
+    "5": "blast11_2_up",
+    "6": "blast11_2_right",
+    "7": "blast11_2_left",
+    "8": "blast11_3_down",
+    "9": "blast11_3_up",
+    "10": "blast11_3_right",
+    "11": "blast11_3_left",
+    "12": "blast11_4_down",
+    "13": "blast11_4_up",
+    "14": "blast11_4_right",
+    "15": "blast11_4_left",
+    "16": "blast11_5_down",
+    "17": "blast11_5_up",
+    "18": "blast11_5_right",
+    "19": "blast11_5_left"
+  }
+}

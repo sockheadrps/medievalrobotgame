@@ -1233,6 +1233,43 @@ function renderMap() {
     mCtx.textBaseline = 'middle';
     mCtx.fillText('X', px + TILE / 2, py + TILE / 2);
   }
+
+  // Draw rival_build overlays — teal background, letter shows build type
+  const _rivalBuildLetters = { dummy: 'D', crate: 'C', crafting_station: 'F' };
+  for (const entry of mapItems) {
+    if (entry.tileCol === null || !String(entry.label).startsWith('rival_build:')) continue;
+    const parts = entry.label.split(':');
+    const buildKind = parts[1] || '';
+    const px = entry.tileCol * TILE;
+    const py = entry.tileRow * TILE;
+    mCtx.save();
+    mCtx.globalAlpha = 0.6;
+    mCtx.fillStyle = '#00ccaa';
+    mCtx.fillRect(px, py, TILE, TILE);
+    mCtx.restore();
+    mCtx.fillStyle = 'rgba(0,0,0,0.9)';
+    mCtx.font = `bold ${Math.max(5, TILE - 7)}px monospace`;
+    mCtx.textAlign = 'center';
+    mCtx.textBaseline = 'middle';
+    mCtx.fillText(_rivalBuildLetters[buildKind] ?? 'B', px + TILE / 2, py + TILE / 2);
+  }
+
+  // Draw rival_spawn overlay
+  for (const entry of mapItems) {
+    if (entry.tileCol === null || entry.label.trim().toLowerCase() !== 'rival_spawn') continue;
+    const px = entry.tileCol * TILE;
+    const py = entry.tileRow * TILE;
+    mCtx.save();
+    mCtx.globalAlpha = 0.6;
+    mCtx.fillStyle = '#ff4422';
+    mCtx.fillRect(px, py, TILE, TILE);
+    mCtx.restore();
+    mCtx.fillStyle = 'rgba(255,255,255,0.95)';
+    mCtx.font = `bold ${Math.max(5, TILE - 7)}px monospace`;
+    mCtx.textAlign = 'center';
+    mCtx.textBaseline = 'middle';
+    mCtx.fillText('R', px + TILE / 2, py + TILE / 2);
+  }
 }
 
 // --- Toolbar Events ---

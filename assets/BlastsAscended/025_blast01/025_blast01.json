@@ -1,0 +1,85 @@
+{
+  "spriteSheet": "025_blast01.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "1",
+  "stateAlias": "blast01",
+  "stateUses": [
+    "Demi-God primary blast",
+    "Human primary blast",
+    "Spirit Doll primary blast",
+    "Kai primary blast",
+    "Arconian primary blast",
+    "Half-Saiyan (Human Dominant) primary blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 1280,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 40,
+    "rows": 1
+  },
+  "totalFrames": 40,
+  "stateInfo": {
+    "dirs": 8,
+    "frames": 5,
+    "delays": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast01_1_down",
+    "1": "blast01_1_up",
+    "2": "blast01_1_right",
+    "3": "blast01_1_left",
+    "4": "blast01_1_southeast",
+    "5": "blast01_1_southwest",
+    "6": "blast01_1_northeast",
+    "7": "blast01_1_northwest",
+    "8": "blast01_2_down",
+    "9": "blast01_2_up",
+    "10": "blast01_2_right",
+    "11": "blast01_2_left",
+    "12": "blast01_2_southeast",
+    "13": "blast01_2_southwest",
+    "14": "blast01_2_northeast",
+    "15": "blast01_2_northwest",
+    "16": "blast01_3_down",
+    "17": "blast01_3_up",
+    "18": "blast01_3_right",
+    "19": "blast01_3_left",
+    "20": "blast01_3_southeast",
+    "21": "blast01_3_southwest",
+    "22": "blast01_3_northeast",
+    "23": "blast01_3_northwest",
+    "24": "blast01_4_down",
+    "25": "blast01_4_up",
+    "26": "blast01_4_right",
+    "27": "blast01_4_left",
+    "28": "blast01_4_southeast",
+    "29": "blast01_4_southwest",
+    "30": "blast01_4_northeast",
+    "31": "blast01_4_northwest",
+    "32": "blast01_5_down",
+    "33": "blast01_5_up",
+    "34": "blast01_5_right",
+    "35": "blast01_5_left",
+    "36": "blast01_5_southeast",
+    "37": "blast01_5_southwest",
+    "38": "blast01_5_northeast",
+    "39": "blast01_5_northwest"
+  }
+}

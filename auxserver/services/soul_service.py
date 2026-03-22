@@ -10,23 +10,70 @@ from services import personality_types as ptypes
 from services.llm_gateway import chat_completion
 
 
-def extract_soul_json(raw: str) -> dict:
-    start = raw.find("{")
+def _try_extract_json_from(text: str) -> dict:
+    """Try to extract the first complete JSON object from text using
+    string-aware brace-depth tracking. Returns {} on failure."""
+    start = text.find("{")
     if start == -1:
         return {}
     depth = 0
-    for i, ch in enumerate(raw[start:], start):
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(text[start:], start):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
         if ch == "{":
             depth += 1
         elif ch == "}":
             depth -= 1
             if depth == 0:
                 try:
-                    return json.loads(raw[start : i + 1])
+                    chunk = text[start : i + 1]
+                    result = json.loads(chunk)
+                    if isinstance(result, dict):
+                        return result
                 except Exception:
-                    pass
+                    # Retry after stripping trailing commas before ] or }
+                    import re as _re
+                    cleaned = _re.sub(r",\s*([}\]])", r"\1", chunk)
+                    try:
+                        result = json.loads(cleaned)
+                        if isinstance(result, dict):
+                            return result
+                    except Exception as exc2:
+                        logger.warning("extract_soul_json: json.loads failed: %s | snippet: %.200s", exc2, chunk)
                 break
     return {}
+
+
+def extract_soul_json(raw: str) -> dict:
+    """Extract the first complete JSON object from LLM output.
+
+    Tries (in order):
+    1. Each ```json / ```python / ``` code block in the text
+    2. The raw text itself
+    Returns {} if nothing parses successfully.
+    """
+    import re
+
+    # Try code blocks first — the LLM often abandons inline JSON mid-way and
+    # then provides a clean version inside a code fence.
+    for m in re.finditer(r"```(?:json|python|)\s*\n(.*?)```", raw, re.DOTALL):
+        result = _try_extract_json_from(m.group(1))
+        if result:
+            return result
+
+    # Fall back to scanning the raw text
+    return _try_extract_json_from(raw)
 
 
 def clamp_deltas(deltas: dict) -> dict:

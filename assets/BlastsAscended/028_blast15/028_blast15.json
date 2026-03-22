@@ -1,0 +1,50 @@
+{
+  "spriteSheet": "028_blast15.png",
+  "sourceDmi": "BlastsAscended.dmi",
+  "sourceState": "15",
+  "stateAlias": "blast15",
+  "stateUses": [
+    "Half-Saiyan (Saiyan Dominant) charged blast"
+  ],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 384,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 12,
+    "rows": 1
+  },
+  "totalFrames": 12,
+  "stateInfo": {
+    "dirs": 4,
+    "frames": 3,
+    "delays": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "blast15_1_down",
+    "1": "blast15_1_up",
+    "2": "blast15_1_right",
+    "3": "blast15_1_left",
+    "4": "blast15_2_down",
+    "5": "blast15_2_up",
+    "6": "blast15_2_right",
+    "7": "blast15_2_left",
+    "8": "blast15_3_down",
+    "9": "blast15_3_up",
+    "10": "blast15_3_right",
+    "11": "blast15_3_left"
+  }
+}

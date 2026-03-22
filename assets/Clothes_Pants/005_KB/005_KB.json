@@ -1,0 +1,41 @@
+{
+  "spriteSheet": "005_KB.png",
+  "sourceDmi": "Clothes_Pants.dmi",
+  "sourceState": "KB",
+  "stateAlias": null,
+  "stateUses": [],
+  "indexBase": 0,
+  "sheetSize": {
+    "width": 128,
+    "height": 32
+  },
+  "frameSize": {
+    "width": 32,
+    "height": 32
+  },
+  "layout": {
+    "columns": 4,
+    "rows": 1
+  },
+  "totalFrames": 4,
+  "stateInfo": {
+    "dirs": 1,
+    "frames": 4,
+    "delays": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "loop": null,
+    "rewind": false,
+    "movement": false,
+    "hotspot": null
+  },
+  "namedFrames": {
+    "0": "KB_1",
+    "1": "KB_2",
+    "2": "KB_3",
+    "3": "KB_4"
+  }
+}

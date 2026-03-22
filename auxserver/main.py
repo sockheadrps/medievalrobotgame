@@ -22,6 +22,7 @@ from api.assets import router as assets_router
 from api.ollama import router as ollama_router
 from api.misc import router as misc_router
 from api.prompts import router as prompts_router
+from api.admin import router as admin_router
 from core.config import STATIC_DIR, TEMPLATES_DIR, DEV_MODE, ASSETS_DIR
 from services.database import init_db, migrate_json_files, ensure_dev_accounts
 from services.asset_registry import asset_registry
@@ -35,6 +36,7 @@ class _SuppressNoisy(logging.Filter):
         return not any(p in msg for p in self._SUPPRESS)
 
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(name)s: %(message)s")
 logging.getLogger("uvicorn.access").addFilter(_SuppressNoisy())
 
 app = FastAPI()
@@ -60,6 +62,7 @@ app.include_router(assets_router)
 app.include_router(ollama_router)
 app.include_router(misc_router)
 app.include_router(prompts_router)
+app.include_router(admin_router)
 
 
 @app.on_event("startup")
