@@ -40,6 +40,7 @@ import {
   NRG_KEY, NRG_PATH, NRG_FRAME_W, NRG_FRAME_H,
   FIRE_KEY, FIRE_PATH, FIRE_FRAME_W, FIRE_FRAME_H,
   DINOBIRD_KEY, DINOBIRD_PATH, DINOBIRD_FRAME_W, DINOBIRD_FRAME_H,
+  BLAST_DEFS, BLAST_SPRITE_META, BLAST_SPRITE_KEYS,
 } from '../constants.js';
 import { API_BASE } from '../config.js';
 import { generateDialogue } from '../net/LLMClient.js';
@@ -63,6 +64,48 @@ export default class GameScene extends Phaser.Scene {
   get dummies() { return this.entities.dummies; }
 
   preload() {
+    // Load blast definitions synchronously so they're available during preload
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/blasts', false);
+      xhr.send();
+      if (xhr.status === 200) {
+        const defs = JSON.parse(xhr.responseText);
+        for (const def of defs) {
+          BLAST_DEFS[def.id] = def;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load blast defs:', e);
+    }
+
+    for (const sprite of BLAST_SPRITE_KEYS) {
+      try {
+        const xhr2 = new XMLHttpRequest();
+        xhr2.open('GET', `/assets/BlastsAscended/${sprite}/${sprite}.json`, false);
+        xhr2.send();
+        if (xhr2.status === 200) {
+          const meta = JSON.parse(xhr2.responseText);
+          const fw = meta.frameSize.width;
+          const fh = meta.frameSize.height;
+          BLAST_SPRITE_META[sprite] = {
+            dirs: meta.stateInfo.dirs,
+            frames: meta.stateInfo.frames,
+            frameWidth: fw,
+            frameHeight: fh,
+            columns: meta.layout.columns,
+          };
+          this.load.spritesheet(
+            `blast_${sprite}`,
+            `/assets/BlastsAscended/${sprite}/${sprite}.png`,
+            { frameWidth: fw, frameHeight: fh }
+          );
+        }
+      } catch (e) {
+        console.warn(`Failed to load blast meta for ${sprite}:`, e);
+      }
+    }
+
     this.load.spritesheet(SHEET_KEY, SHEET_PATH, {
       frameWidth:  SHEET_TILE,
       frameHeight: SHEET_TILE,
@@ -2440,5 +2483,67 @@ export default class GameScene extends Phaser.Scene {
       if (dist <= rangePixels) result.push(entry);
     }
     return result;
+  }
+
+  // ── Hair overlay helpers ──────────────────────────────────────────────────
+
+  /** Apply a hair overlay to an entity by slug. Fetches/caches the asset catalog
+   *  and dynamically loads the spritesheet texture on first use.
+   *  Called every state-sync tick via StateSyncController; returns immediately
+   *  once the texture is already loaded. */
+  _applyHairToEntity(entity, hairSlug, isNPC) {
+    if (!entity) return;
+    if (!hairSlug) { entity.setHairOverlay?.(null); return; }
+
+    const key = `hair_${hairSlug.replace(/\s+/g, '_')}`;
+
+    // Already loaded — apply directly
+    if (this.textures.exists(key)) {
+      entity.setHairOverlay?.(key);
+      return;
+    }
+
+    // Queue this entity to receive the overlay once the texture finishes loading
+    if (!this._hairQueue) this._hairQueue = {};
+    if (!this._hairQueue[key]) this._hairQueue[key] = new Set();
+    this._hairQueue[key].add(entity);
+
+    // Avoid duplicate load requests
+    if (!this._hairFetching) this._hairFetching = new Set();
+    if (this._hairFetching.has(key)) return;
+    this._hairFetching.add(key);
+
+    this._loadHairTexture(key, hairSlug);
+  }
+
+  async _loadHairTexture(key, hairSlug) {
+    if (!this._customizationAssets) {
+      try {
+        const r = await fetch(`${API_BASE}/api/customization/assets`);
+        this._customizationAssets = await r.json();
+      } catch (e) {
+        console.warn('[hair] fetch customization assets failed', e);
+        this._hairFetching?.delete(key);
+        return;
+      }
+    }
+
+    const asset = this._customizationAssets.find(
+      a => a.slug === hairSlug && a.category === 'hair'
+    );
+    if (!asset?.pngPath) { this._hairFetching?.delete(key); return; }
+
+    this.load.spritesheet(key, asset.pngPath, {
+      frameWidth:  asset.frameWidth  || 32,
+      frameHeight: asset.frameHeight || 32,
+    });
+    this.load.once(`filecomplete-spritesheet-${key}`, () => {
+      this._hairFetching?.delete(key);
+      for (const ent of (this._hairQueue?.[key] ?? [])) {
+        ent.setHairOverlay?.(key);
+      }
+      if (this._hairQueue) delete this._hairQueue[key];
+    });
+    this.load.start();
   }
 }
