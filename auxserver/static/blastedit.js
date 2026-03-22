@@ -174,6 +174,15 @@ async function startPreview(sprite) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(img, srcX, srcY, fw, fh, 0, 0, canvas.width, canvas.height);
+    // Apply tint overlay if set
+    const def = getDefBySprite(currentSprite);
+    const tint = def?.tint;
+    if (tint && tint !== '#ffffff') {
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = tint;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = 'source-over';
+    }
   };
 
   drawFrame(0);
@@ -260,6 +269,16 @@ function loadDefIntoForm(def) {
   document.getElementById('f-displayName').value = def.displayName || '';
   document.getElementById('f-id').value = def.id || '';
   document.getElementById('f-kiCost').value = def.kiCost || 8;
+  const tint = def.tint || null;
+  const tintInput = document.getElementById('f-tint');
+  const tintHex = document.getElementById('f-tint-hex');
+  if (tint) {
+    tintInput.value = tint;
+    tintHex.textContent = tint;
+  } else {
+    tintInput.value = '#ffffff';
+    tintHex.textContent = 'none';
+  }
   for (const [,key,,min] of EFFECT_FIELDS) {
     const v = (def.effects || {})[key] ?? min;
     const slider = document.getElementById(`eff-${key}`);
@@ -322,6 +341,21 @@ function wireIdentityInputs() {
     const def = ensureDefExists();
     if (!def) return;
     def.kiCost = parseInt(e.target.value) || 8;
+    markDirty();
+  });
+  document.getElementById('f-tint').addEventListener('input', e => {
+    const def = ensureDefExists();
+    if (!def) return;
+    def.tint = e.target.value;
+    document.getElementById('f-tint-hex').textContent = e.target.value;
+    markDirty();
+  });
+  document.getElementById('f-tint-clear').addEventListener('click', () => {
+    const def = ensureDefExists();
+    if (!def) return;
+    delete def.tint;
+    document.getElementById('f-tint').value = '#ffffff';
+    document.getElementById('f-tint-hex').textContent = 'none';
     markDirty();
   });
   document.getElementById('save-btn').addEventListener('click', saveDefs);
