@@ -585,7 +585,7 @@ export class InventoryController {
 
     learned.forEach((blastId, idx) => {
       const def = BLAST_DEFS[blastId];
-      if (!def) return;
+      if (!def || !def.sprite || def.kiCost == null) return;
       const ry = py + 10 + idx * rowH;
 
       const sprKey = `blast_${def.sprite}`;

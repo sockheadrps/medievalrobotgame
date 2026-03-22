@@ -263,7 +263,8 @@ export class CombatFxController {
             idx = f;
           } else {
             const d = { down: 0, up: 1, right: 2, left: 3 };
-            idx = (d[aim.facing] ?? 0) + f * dirs;
+            const dirIdx = Math.min(d[aim.facing] ?? 0, dirs - 1);
+            idx = dirIdx + f * dirs;
           }
           frameNums.push(idx);
         }
@@ -318,6 +319,7 @@ export class CombatFxController {
         alpha: miss ? 0 : 1,
         duration: Math.max(120, (dist / projectileSpeed) * 1000),
         onComplete: () => {
+          if (!sprite.active) return;
           this.showKiBlastImpact(endX, endY, tint, impactRadius, false);
           sprite.destroy();
         },
