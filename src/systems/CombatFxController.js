@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { ABSORB_FRAMES, ABSORB_KEY, NRG_KEY, TILE_SIZE } from '../constants.js';
+import { ABSORB_FRAMES, ABSORB_KEY, BLAST_DEFS, BLAST_SPRITE_META, NRG_KEY, TILE_SIZE } from '../constants.js';
 
 const ABSORB_DURATION_MS = 2000;
 const ABSORB_TINT = 0x66ffff;
@@ -227,10 +227,56 @@ export class CombatFxController {
     const blastFrame = dirFrames[aim.facing] ?? 0;
     const projX = p.x;
     const projY = p.y - p.displayHeight * 0.4;
-    const proj = scene.add.sprite(projX, projY, NRG_KEY, blastFrame);
+    const activeBlastId = p.activeBlastId;
+    const blastDef = activeBlastId ? BLAST_DEFS[activeBlastId] : null;
+    const blastSprite = blastDef?.sprite ?? null;
+    const blastMeta = blastSprite ? BLAST_SPRITE_META[blastSprite] : null;
+
+    let projKey = NRG_KEY;
+    let projFrame = blastFrame;
+    if (blastSprite && blastMeta && scene.textures.exists(`blast_${blastSprite}`)) {
+      projKey = `blast_${blastSprite}`;
+      const dirs = blastMeta.dirs;
+      if (dirs === 1) {
+        projFrame = 0;
+      } else {
+        const dirMap4 = { down: 0, up: 1, right: 2, left: 3 };
+        projFrame = dirMap4[aim.facing] ?? 0;
+      }
+    }
+
+    const proj = scene.add.sprite(projX, projY, projKey, projFrame);
     proj.setScale(1.5);
     proj.setDepth(15);
-    proj.setTint(Number(p.auraTint ?? 0x4fd6ff));
+    if (!blastSprite) {
+      proj.setTint(Number(p.auraTint ?? 0x4fd6ff));
+    }
+
+    if (blastMeta && blastMeta.frames > 1 && scene.textures.exists(projKey)) {
+      const animKey = `blast_anim_${blastSprite}_${aim.facing}`;
+      if (!scene.anims.exists(animKey)) {
+        const dirs = blastMeta.dirs;
+        const frameNums = [];
+        for (let f = 0; f < blastMeta.frames; f++) {
+          let idx;
+          if (dirs === 1) {
+            idx = f;
+          } else {
+            const d = { down: 0, up: 1, right: 2, left: 3 };
+            idx = (d[aim.facing] ?? 0) + f * dirs;
+          }
+          frameNums.push(idx);
+        }
+        scene.anims.create({
+          key: animKey,
+          frames: frameNums.map(n => ({ key: projKey, frame: n })),
+          frameRate: 8,
+          repeat: -1,
+        });
+      }
+      proj.play(animKey);
+    }
+
     const projectileSpeed = this.getKiBlastProjectileSpeed(p);
 
     const conn = scene._conn;
@@ -371,10 +417,28 @@ export class CombatFxController {
     }
     const impactX = Number(event.impact_x || startX);
     const impactY = Number(event.impact_y || startY);
-    const proj = scene.add.sprite(startX, startY, NRG_KEY, blastFrame);
+    const repBlastId = event.blast_id;
+    const repDef = repBlastId ? BLAST_DEFS[repBlastId] : null;
+    const repSprite = repDef?.sprite ?? null;
+    const repKey = (repSprite && scene.textures.exists(`blast_${repSprite}`)) ? `blast_${repSprite}` : NRG_KEY;
+    let repFrame = blastFrame;
+    if (repSprite && repKey !== NRG_KEY) {
+      const repMeta = BLAST_SPRITE_META[repSprite];
+      if (repMeta) {
+        if (repMeta.dirs === 1) {
+          repFrame = 0;
+        } else {
+          const dirMap4 = { down: 0, up: 1, right: 2, left: 3 };
+          repFrame = dirMap4[facing] ?? 0;
+        }
+      }
+    }
+    const proj = scene.add.sprite(startX, startY, repKey, repFrame);
     proj.setScale(1.5);
     proj.setDepth(15);
-    proj.setTint(0x4fd6ff);
+    if (repKey === NRG_KEY) {
+      proj.setTint(0x4fd6ff);
+    }
     const dist = Phaser.Math.Distance.Between(startX, startY, impactX, impactY);
     scene.tweens.add({
       targets: proj,
