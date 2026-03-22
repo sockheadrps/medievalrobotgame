@@ -448,6 +448,7 @@ export class CombatFxController {
       y: impactY,
       duration: Math.max(120, (dist / 400) * 1000),
       onComplete: () => {
+        if (!proj.active) return;
         this.showKiBlastImpact(impactX, impactY, 0x4fd6ff, 18, false);
         proj.destroy();
       },
