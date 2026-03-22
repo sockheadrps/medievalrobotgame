@@ -529,13 +529,10 @@ export class InventoryController {
     scene.addHud?.(this._blastSlotLabel);
 
     this._blastSlotBg.setInteractive({ useHandCursor: true });
-    this._blastSlotBg.on('pointerdown', (ptr) => {
-      if (ptr.rightButtonDown()) {
-        this._openBlastPicker();
-      }
+    this._blastSlotBg.on('pointerdown', () => {
+      if (this._pickerEls) { this._closeBlastPicker(); return; }
+      this._openBlastPicker();
     });
-
-    scene.input.mouse?.disableContextMenu?.();
   }
 
   updateBlastSlot(player) {
