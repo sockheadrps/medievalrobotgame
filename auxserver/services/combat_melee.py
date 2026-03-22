@@ -45,8 +45,12 @@ class CombatMeleeService(CombatUtilsMixin):
         return base + self._equipment_stat_bonus(actor, "str_bonus")
 
     def _get_effective_def(self, actor):
+        import time as _t
         base = max(1, int(actor.get("def", 1) or 1))
-        return base + self._equipment_stat_bonus(actor, "def_bonus")
+        base += self._equipment_stat_bonus(actor, "def_bonus")
+        if actor.get("decay_def_until", 0) > _t.time():
+            base = max(0, base - actor.get("decay_def_amount", 0))
+        return base
 
     def _equipment_stat_bonus(self, actor, stat_key):
         """Sum a stat bonus across all equipped items."""
@@ -68,7 +72,11 @@ class CombatMeleeService(CombatUtilsMixin):
         base = int(s * 1.5) + level // 2
         variance = random.randint(0, max(1, s))
         reduction = d // 3
-        return max(1, base + variance - reduction)
+        result = max(1, base + variance - reduction)
+        import time as _t
+        if defender.get("exposed_until", 0) > _t.time():
+            result = round(result * (1 + defender.get("exposed_pct", 0) / 100))
+        return result
 
     # ── Barrier ───────────────────────────────────────────────────────────────
 

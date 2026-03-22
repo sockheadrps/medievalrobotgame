@@ -80,12 +80,16 @@ class CombatUtilsMixin:
         return cost, dmg
 
     def _calc_ki_damage_taken(self, raw_dmg, target):
+        import time as _t
         base_dmg = max(1, int(raw_dmg or 0))
         effective_def = self._get_effective_def(target)
         after_def = max(1, base_dmg - max(0, effective_def) // KI_DEF_REDUCTION_DIVISOR)
         ki_skill_level = max(1, int(target.get("kiSkillLevel", 1) or 1))
         resist_pct = min(KI_SKILL_RESIST_CAP, max(0.0, (ki_skill_level - 1) * KI_SKILL_RESIST_PER_LEVEL))
-        return max(1, round(after_def * (1.0 - resist_pct)))
+        result = max(1, round(after_def * (1.0 - resist_pct)))
+        if target.get("exposed_until", 0) > _t.time():
+            result = round(result * (1 + target.get("exposed_pct", 0) / 100))
+        return result
 
     def _compute_blast_visual_impact(self, actor, target=None):
         start_x = float(actor.get("x", 0))
