@@ -590,8 +590,26 @@ export class InventoryController {
 
       const sprKey = `blast_${def.sprite}`;
       if (scene.textures.exists(sprKey)) {
-        add(scene.add.sprite(px + 26, ry + 22, sprKey, 0)
-          .setDepth(62).setScrollFactor(0).setScale(1.5));
+        const pickerSpr = scene.add.sprite(px + 26, ry + 22, sprKey, 0)
+          .setDepth(62).setScrollFactor(0).setScale(1.5);
+        const pickerMeta = BLAST_SPRITE_META[def.sprite];
+        if (pickerMeta && pickerMeta.frames > 1) {
+          const pickerAnimKey = `blast_picker_anim_${def.sprite}`;
+          if (!scene.anims.exists(pickerAnimKey)) {
+            const pickerFrameNums = [];
+            for (let f = 0; f < pickerMeta.frames; f++) {
+              pickerFrameNums.push(pickerMeta.dirs === 1 ? f : f * pickerMeta.dirs);
+            }
+            scene.anims.create({
+              key: pickerAnimKey,
+              frames: pickerFrameNums.map(n => ({ key: sprKey, frame: n })),
+              frameRate: 8,
+              repeat: -1,
+            });
+          }
+          pickerSpr.play(pickerAnimKey);
+        }
+        add(pickerSpr);
       }
 
       add(scene.add.text(px + 54, ry + 8, def.displayName || blastId, {
