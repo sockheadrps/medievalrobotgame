@@ -174,13 +174,15 @@ async function startPreview(sprite) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(img, srcX, srcY, fw, fh, 0, 0, canvas.width, canvas.height);
-    // Apply tint overlay if set
+    // Apply tint over opaque pixels only
     const def = getDefBySprite(currentSprite);
     const tint = def?.tint;
     if (tint && tint !== '#ffffff') {
-      ctx.globalCompositeOperation = 'multiply';
+      ctx.globalCompositeOperation = 'source-atop';
       ctx.fillStyle = tint;
+      ctx.globalAlpha = 0.5;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalAlpha = 1.0;
       ctx.globalCompositeOperation = 'source-over';
     }
   };
