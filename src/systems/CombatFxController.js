@@ -248,7 +248,9 @@ export class CombatFxController {
     const proj = scene.add.sprite(projX, projY, projKey, projFrame);
     proj.setScale(1.5);
     proj.setDepth(15);
-    if (!blastSprite) {
+    if (blastDef?.tint) {
+      proj.setTint(parseInt(blastDef.tint.replace('#', ''), 16));
+    } else if (!blastSprite) {
       proj.setTint(Number(p.auraTint ?? 0x4fd6ff));
     }
 
@@ -438,7 +440,9 @@ export class CombatFxController {
     const proj = scene.add.sprite(startX, startY, repKey, repFrame);
     proj.setScale(1.5);
     proj.setDepth(15);
-    if (repKey === NRG_KEY) {
+    if (repDef?.tint) {
+      proj.setTint(parseInt(repDef.tint.replace('#', ''), 16));
+    } else if (repKey === NRG_KEY) {
       proj.setTint(0x4fd6ff);
     }
     const dist = Phaser.Math.Distance.Between(startX, startY, impactX, impactY);
