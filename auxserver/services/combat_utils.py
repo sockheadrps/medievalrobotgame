@@ -41,9 +41,11 @@ class CombatUtilsMixin:
         return max(0, int(move_data.get(stat_id, 0) or 0))
 
     def _get_blast_range(self, actor):
+        import time as _t
+        if actor.get("blinded_until", 0) > _t.time():
+            return KI_BLAST_RANGE * 0.2
         bonuses = actor.get("ki_blast_bonuses") or {}
         bonus = int(bonuses.get("blast_range", 0) or 0)
-        # Add generous buffer (1 tile) to account for position sync lag
         return KI_BLAST_RANGE + bonus * TILE_SIZE * 0.5 + TILE_SIZE
 
     def _get_blast_cooldown(self, actor):

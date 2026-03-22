@@ -159,14 +159,18 @@ class GameState:
         self.pending_carts = [] # [{map, col, row, resource, amount}] — carts arriving via portal
         self.fx_events = []     # transient replicated visual effects
         self.pending_absorbs = []
+        self.aftershock_zones = []  # [{x, y, map, radius, dps, expires_at, owner_pid, last_tick}]
         self.background_npcs = {}  # npc_id -> {pid, npc_id, map, task, last_tick}
         self.mine_grids = {}       # pid -> MineGrid (loaded on cave entry)
+        self.paused = False        # admin pause — halts AI brain loop and LLM calls
         self.xp_multipliers = {
             "player": 1.0,
             "npc": 1.0,
             "ai_player": 1.0,
             "ai_npc": 1.0,
         }
+        from services.database import get_speed_multiplier as _gsm
+        self._speed_multiplier = _gsm()
         self._last_save = 0     # timestamp of last DB save
         self._last_rock_spawn = time.time()  # last rock spawn check
         self._next_rock_id = 0
@@ -253,6 +257,7 @@ class GameState:
         self.buildings.clear()
         self.fx_events.clear()
         self.pending_absorbs.clear()
+        self.aftershock_zones.clear()
         self.rocks.clear()
         self.xp_multipliers = {
             "player": 1.0,
@@ -286,6 +291,55 @@ class GameState:
                 save_mine_state(pid, mg.to_json())
         except Exception as e:
             logger.warning("Failed to save world state: %s", e)
+
+    def _tick_status_effects(self, dt):
+        """Tick burn DoTs, aftershock zones, and vampiric regen on all entities."""
+        import time as _t
+        now = _t.time()
+
+        # Collect all live entities
+        entities = []
+        for p in self.players.values():
+            if not p.get("dead") and not p.get("knocked_out"):
+                entities.append(p)
+            for npc in p.get("npcs", {}).values():
+                if not npc.get("dead") and not npc.get("knocked_out"):
+                    entities.append(npc)
+
+        for e in entities:
+            # Burn DoT — tick once per second
+            if e.get("burning_until", 0) > now and e.get("burn_dps", 0) > 0:
+                last = e.get("burn_last_tick", 0)
+                if now - last >= 1.0:
+                    e["hp"] = max(0, e.get("hp", 0) - e["burn_dps"])
+                    e["burn_last_tick"] = now
+
+            # Vampiric regen (on attacker) — continuous per second
+            if e.get("vampiric_until", 0) > now and e.get("vampiric_pct", 0) > 0:
+                last_dmg = e.get("vampiric_last_dmg", 0)
+                regen_per_sec = last_dmg * e["vampiric_pct"] / 100
+                e["hp"] = min(e.get("maxHp", 20), e.get("hp", 0) + regen_per_sec * dt)
+
+        # Aftershock zones — tick once per second, remove expired
+        live_zones = []
+        for zone in self.aftershock_zones:
+            if zone["expires_at"] <= now:
+                continue
+            live_zones.append(zone)
+            last = zone.get("last_tick", 0)
+            if now - last < 1.0:
+                continue
+            zone["last_tick"] = now
+            zx, zy, zmap = zone["x"], zone["y"], zone["map"]
+            rad2 = zone["radius"] ** 2
+            for e in entities:
+                if e.get("map", "level_01") != zmap:
+                    continue
+                dx = e.get("x", 0) - zx
+                dy = e.get("y", 0) - zy
+                if dx * dx + dy * dy <= rad2:
+                    e["hp"] = max(0, e.get("hp", 0) - zone["dps"])
+        self.aftershock_zones = live_zones
 
     def add_player(self, pid: str):
         return self.player_manager.add_player(pid)
@@ -369,6 +423,52 @@ class GameState:
             target["x"] = p["x"]
             target["y"] = p["y"] - 10
 
+        # Tick meditate / fly Ki drain and HP regen
+        for pid, p in self.players.items():
+            if p.get("dead") or p.get("knocked_out"):
+                p["meditating"] = False
+                p["flying"] = False
+                continue
+
+            # Meditate: drain Ki, heal HP
+            if p.get("meditating"):
+                ki = p.get("ki", 0)
+                hp = p.get("hp", 0)
+                maxHp = p.get("maxHp", 20)
+                if ki > 0:
+                    drain = 2.0 * dt  # 2 Ki/sec
+                    p["ki"] = max(0, ki - drain)
+                    # Stop meditating if Ki runs out
+                    if p["ki"] <= 0:
+                        p["meditating"] = False
+                    else:
+                        # Heal 1 HP/sec while meditating
+                        if hp < maxHp:
+                            p["hp"] = min(maxHp, hp + 1.5 * dt)
+                else:
+                    p["meditating"] = False
+
+            # Fly: drain Ki based on fly skill
+            if p.get("flying"):
+                ki = p.get("ki", 0)
+                if ki > 0:
+                    fly_skill = p.get("fly_skill_level", 1)
+                    # Drain: starts at 3 Ki/sec, -0.2 per skill level, min 0.5
+                    drain_rate = max(0.5, 3.0 - (fly_skill - 1) * 0.2)
+                    drain = drain_rate * dt
+                    p["ki"] = max(0, ki - drain)
+                    # Gain fly XP while flying
+                    p["fly_xp"] = p.get("fly_xp", 0.0) + dt
+                    xp_per_level = 60.0  # 60 seconds of fly time per skill level
+                    while p["fly_xp"] >= xp_per_level:
+                        p["fly_xp"] -= xp_per_level
+                        p["fly_skill_level"] = p.get("fly_skill_level", 1) + 1
+                    # Stop flying if Ki runs out
+                    if p["ki"] <= 0:
+                        p["flying"] = False
+                else:
+                    p["flying"] = False
+
         # Ki regen — scales with level.
         if self.pending_absorbs:
             remaining_absorbs = []
@@ -388,6 +488,9 @@ class GameState:
             ki = p.get("ki", 0)
             maxKi = p.get("maxKi", KI_MAX_BASE)
             if ki < maxKi:
+                if p.get("ki_regen_suppressed_until", 0) > now:
+                    p["_ki_regen_accum"] = 0.0
+                    continue
                 level = max(1, p.get("level", 1))
                 ki_level = max(1, int(p.get("kiSkillLevel", 1) or 1))
                 rate = KI_REGEN_BASE * (KI_REGEN_LEVEL_SCALE ** (level - 1)) * (1 + (ki_level - 1) * 0.15)
@@ -406,6 +509,9 @@ class GameState:
                 ki = npc.get("ki", 0)
                 maxKi = npc.get("maxKi", KI_MAX_BASE)
                 if ki < maxKi:
+                    if npc.get("ki_regen_suppressed_until", 0) > now:
+                        npc["_ki_regen_accum"] = 0.0
+                        continue
                     level = max(1, npc.get("level", 1))
                     ki_level = max(1, int(npc.get("kiSkillLevel", 1) or 1))
                     rate = KI_REGEN_BASE * (KI_REGEN_LEVEL_SCALE ** (level - 1)) * (1 + (ki_level - 1) * 0.15)
@@ -419,6 +525,7 @@ class GameState:
 
         # Campfire aura — bonus HP regen + boosted ki regen for nearby actors
         self.building._tick_campfires(dt, now)
+        self._tick_status_effects(dt)
 
         # Move players
         world_w = MAP_COLS * TILE_SIZE
@@ -434,6 +541,19 @@ class GameState:
                 p["vx"] = 0
                 p["vy"] = 0
             else:
+                # Status effect movement gates
+                if p.get("stunned_until", 0) > now:
+                    p["vx"] = 0
+                    p["vy"] = 0
+                    continue
+                if p.get("displaced_until", 0) > now:
+                    p["vx"] = 0
+                    p["vy"] = 0
+                    continue
+                if p.get("slowed_until", 0) > now:
+                    slow = p.get("slow_pct", 0) / 100.0
+                    p["vx"] = p.get("vx", 0) * (1 - slow)
+                    p["vy"] = p.get("vy", 0) * (1 - slow)
                 new_x = p["x"] + p["vx"] * dt
                 new_y = p["y"] + p["vy"] * dt
 
@@ -469,13 +589,18 @@ class GameState:
                 else:
                     new_x = max(0, min(world_w, new_x))
                     new_y = max(0, min(world_h, new_y))
-                    # Collision tile check with axis sliding
-                    if COLLISION_TILES and _is_collision_tile(new_x, new_y):
+                    # Collision tile check with axis sliding — per-map tile set
+                    from services.world_data import get_collision_tiles as _gct
+                    _map_collision = _gct(player_map)
+                    def _is_col(x, y):
+                        return (_map_collision and
+                                (int(x // TILE_SIZE), int(y // TILE_SIZE)) in _map_collision)
+                    if _is_col(new_x, new_y):
                         # Try sliding along X only
-                        if not _is_collision_tile(new_x, p["y"]):
+                        if not _is_col(new_x, p["y"]):
                             new_y = p["y"]
                         # Try sliding along Y only
-                        elif not _is_collision_tile(p["x"], new_y):
+                        elif not _is_col(p["x"], new_y):
                             new_x = p["x"]
                         # Fully blocked
                         else:
