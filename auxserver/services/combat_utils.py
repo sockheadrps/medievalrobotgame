@@ -105,7 +105,7 @@ class CombatUtilsMixin:
             end_y = start_y + dy * blast_range
         return start_x, start_y, end_x, end_y
 
-    def _queue_ki_blast_fx(self, actor, target=None, owner_pid=None, npc_id=None):
+    def _queue_ki_blast_fx(self, actor, target=None, owner_pid=None, npc_id=None, blast_id=None):
         if not actor:
             return
         start_x, start_y, impact_x, impact_y = self._compute_blast_visual_impact(actor, target)
@@ -113,6 +113,7 @@ class CombatUtilsMixin:
             "kind": "ki_blast",
             "owner_pid": owner_pid,
             "npc_id": npc_id,
+            "blast_id": blast_id or actor.get("active_blast_id"),
             "start_x": start_x,
             "start_y": start_y,
             "impact_x": impact_x,
