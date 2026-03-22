@@ -1,0 +1,65 @@
+[
+  {
+    "id": "standard_shot",
+    "displayName": "Standard Shot",
+    "sprite": "001_blastoozarou",
+    "kiCost": 8,
+    "effects": {
+      "slow_pct": 0, "slow_duration": 0,
+      "burn_dps": 0, "burn_duration": 0,
+      "blind_duration": 0,
+      "pushback": 0, "pull": 0,
+      "siphon_pct": 0,
+      "ki_drain": 0,
+      "ki_silence_duration": 0,
+      "expose_pct": 0, "expose_duration": 0,
+      "stun_duration": 0,
+      "ki_regen_suppress_duration": 0,
+      "vampiric_pct": 0, "vampiric_duration": 0,
+      "aftershock_dps": 0, "aftershock_radius": 0, "aftershock_duration": 0,
+      "decay_def": 0, "decay_duration": 0
+    }
+  },
+  {
+    "id": "glacial_spike",
+    "displayName": "Glacial Spike",
+    "sprite": "003_Rocket",
+    "kiCost": 10,
+    "effects": {
+      "slow_pct": 60, "slow_duration": 3.0,
+      "burn_dps": 0, "burn_duration": 0,
+      "blind_duration": 0,
+      "pushback": 0, "pull": 0,
+      "siphon_pct": 0,
+      "ki_drain": 0,
+      "ki_silence_duration": 0,
+      "expose_pct": 0, "expose_duration": 0,
+      "stun_duration": 0,
+      "ki_regen_suppress_duration": 0,
+      "vampiric_pct": 0, "vampiric_duration": 0,
+      "aftershock_dps": 0, "aftershock_radius": 0, "aftershock_duration": 0,
+      "decay_def": 0, "decay_duration": 0
+    }
+  },
+  {
+    "id": "inferno_burst",
+    "displayName": "Inferno Burst",
+    "sprite": "009_blast06",
+    "kiCost": 12,
+    "effects": {
+      "slow_pct": 0, "slow_duration": 0,
+      "burn_dps": 4, "burn_duration": 3.0,
+      "blind_duration": 0,
+      "pushback": 64, "pull": 0,
+      "siphon_pct": 0,
+      "ki_drain": 0,
+      "ki_silence_duration": 0,
+      "expose_pct": 0, "expose_duration": 0,
+      "stun_duration": 0,
+      "ki_regen_suppress_duration": 0,
+      "vampiric_pct": 0, "vampiric_duration": 0,
+      "aftershock_dps": 0, "aftershock_radius": 0, "aftershock_duration": 0,
+      "decay_def": 0, "decay_duration": 0
+    }
+  }
+]
