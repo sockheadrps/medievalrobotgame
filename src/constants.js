@@ -109,6 +109,12 @@ export const PFRAME_WALK2_DOWN  = 12;
 export const PFRAME_WALK2_UP    = 13;
 export const PFRAME_WALK2_RIGHT = 14;
 export const PFRAME_WALK2_LEFT  = 15;
+// Meditate / Fly frames
+export const PFRAME_MEDITATE    = 16;
+export const PFRAME_FLY_DOWN    = 28;
+export const PFRAME_FLY_UP      = 29;
+export const PFRAME_FLY_RIGHT   = 30;
+export const PFRAME_FLY_LEFT    = 31;
 // Punch frames (left/right only)
 export const PFRAME_PUNCH_LEFT  = 25;
 export const PFRAME_PUNCH_RIGHT = 26;
@@ -244,6 +250,22 @@ export const MINE_FRAME_FLOOR    = 578;   // col=8  row=10 — cave floor
 export const MINE_FRAME_ORE_IRON = 1251;  // col=54 row=21 — iron ore overlay
 export const MINE_FRAME_ORE_GOLD = 554;   // col=50 row=9  — gold ore overlay (crystal sprite)
 export const MINE_FRAME_GEODE    = 366;   // col=24 row=6  — geode (chest sprite)
+
+// --- Ki blast sprite keys (one per BlastsAscended subfolder, in order) ---
+export const BLAST_SPRITE_KEYS = [
+  '001_blastoozarou','002_Blaster','003_Rocket','004_Bullet','005_blast14',
+  '006_blast13','007_blast16','008_blast27','009_blast06','010_blast35',
+  '011_blast28','012_blast20','013_blast23','014_blast08','015_blast09',
+  '016_blast22','017_blast34','018_blast02','019_blast10','020_blast11',
+  '021_blast03','022_blast04','023_blast33','024_blast05','025_blast01',
+  '026_blast12','027_blast36','028_blast15','029_blast32','030_blast31',
+  '031_blast18','032_blast30','033_blast17','034_blast24','035_blast25',
+  '036_blast19','037_blast29','038_blast21','039_blast26','040_blast07',
+];
+
+// Populated at runtime in GameScene.preload() via sync XHR
+export const BLAST_DEFS = {};       // id -> blast def object
+export const BLAST_SPRITE_META = {}; // sprite_name -> {dirs, frames, frameWidth, frameHeight, columns}
 
 // --- Grid helpers ---
 export function tilePos(col, row) {
