@@ -52,19 +52,30 @@ async def wipe_map(request: Request):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
         raise HTTPException(status_code=400, detail="Invalid map name.")
 
-    # Remove buildings on this map from live state
+    # Clear instance data if the map has an instance
+    inst = game.instances.get(name)
+    if inst:
+        inst["buildings"] = {}
+        inst["dummies"] = {}
+        inst["anvils"] = {}
+        inst["campfires"] = {}
+        inst["trees"] = []
+        inst["rocks"] = []
+
+    # Remove buildings on this map from live state (fallback for non-instanced maps)
     game.buildings = {bid: b for bid, b in game.buildings.items() if b.get("map", "level_01") != name}
 
     # Remove ground items on this map from live state
     game.ground_items = [gi for gi in game.ground_items if gi.get("map", "level_01") != name]
 
     # Clear mine grids if this is a cave map (reset in-memory + DB)
-    if name == "cave_01":
+    if name.startswith("cave_"):
         game.mine_grids.clear()
         from services.database import delete_all_mine_states
         delete_all_mine_states()
 
     # Persist the stripped state
+    game.instances.save_all()
     save_buildings(game.buildings)
     save_ground_items(game.ground_items)
 

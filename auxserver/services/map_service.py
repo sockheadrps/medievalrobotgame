@@ -33,8 +33,17 @@ def _validated_sprite_id(sprite_id: str) -> str:
     return sid
 
 
+def _resolve_template_name(name: str) -> str:
+    """Resolve instanced map names to their template names."""
+    if name.startswith("home_"):
+        return "home"
+    if name.startswith("cave_") and name != "cave_01":
+        return "cave_01"
+    return name
+
+
 def map_file_path(name: str) -> Path:
-    map_name = _validated_map_name(name)
+    map_name = _validated_map_name(_resolve_template_name(name))
     return MAPS_DIR / f"{map_name}.json"
 
 
@@ -59,12 +68,12 @@ def _decode_png_data_url(data_url: str) -> bytes:
 
 
 def collision_file_path(name: str) -> Path:
-    map_name = _validated_map_name(name)
+    map_name = _validated_map_name(_resolve_template_name(name))
     return MAPS_DIR / f"{map_name}_collision.json"
 
 
 def items_file_path(name: str) -> Path:
-    map_name = _validated_map_name(name)
+    map_name = _validated_map_name(_resolve_template_name(name))
     return MAPS_DIR / f"{map_name}_items.json"
 
 
