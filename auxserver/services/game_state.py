@@ -201,7 +201,8 @@ class GameState:
         from services.portals import PortalService
         self.portals = PortalService(self)
 
-        # Initialize central map instance (always loaded)
+    def init_instances(self):
+        """Initialize map instances. Must be called after init_db()."""
         self.instances.init_central(TREE_POSITIONS, ROCK_SPAWN_POSITIONS)
 
     def _init_trees(self):

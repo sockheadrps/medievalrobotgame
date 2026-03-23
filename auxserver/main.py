@@ -71,6 +71,7 @@ async def startup():
     migrate_json_files()
     asset_registry.load_all(ASSETS_DIR)
     init_world_objects()
+    game.init_instances()
     if DEV_MODE:
         ensure_dev_accounts()
 
