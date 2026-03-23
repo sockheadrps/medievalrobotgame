@@ -283,12 +283,22 @@ def get_player_portals() -> list[dict]:
 _collision_cache: dict[str, set[tuple[int, int]]] = {}
 _map_dims_cache: dict[str, tuple[int, int]] = {}
 
+def _resolve_map_template(name: str) -> str:
+    """Resolve instanced map names to their template names for file lookups."""
+    if name.startswith("home_"):
+        return "home"
+    if name.startswith("cave_") and name != "cave_01":
+        return "cave_01"
+    return name
+
+
 def get_map_dimensions(map_name: str) -> tuple[int, int]:
     """Return (cols, rows) for a given map, loading from disk on first call."""
     if map_name in _map_dims_cache:
         return _map_dims_cache[map_name]
+    resolved = _resolve_map_template(map_name)
     maps_dir = Path(__file__).resolve().parent.parent / "maps"
-    map_path = maps_dir / f"{map_name}.json"
+    map_path = maps_dir / f"{resolved}.json"
     if map_path.exists():
         try:
             data = json.loads(map_path.read_text(encoding="utf-8"))
@@ -307,8 +317,9 @@ def get_collision_tiles(map_name: str) -> set[tuple[int, int]]:
     """Return the collision tile set for a given map, loading from disk on first call."""
     if map_name in _collision_cache:
         return _collision_cache[map_name]
+    resolved = _resolve_map_template(map_name)
     maps_dir = Path(__file__).resolve().parent.parent / "maps"
-    col_path = maps_dir / f"{map_name}_collision.json"
+    col_path = maps_dir / f"{resolved}_collision.json"
     tiles: set[tuple[int, int]] = set()
     if col_path.exists():
         try:

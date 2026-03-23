@@ -23,22 +23,38 @@ from services.game_state import (
 )
 from services.crop_service import crop_manager
 from services.asset_registry import asset_registry
+from services.instance_manager import get_tree_respawn_time
 
 
 class GatheringService:
     # ── Tree chopping ──────────────────────────────────────────────────────────
 
+    def _get_trees_for_map(self, map_name: str) -> list:
+        """Return tree list for the given map from instance manager."""
+        return self.gs.instances.get_trees(map_name)
+
     def _npc_chop(self, tree_id, owner_id, npc_id=None):
         """NPC chops a tree. If npc_id given, credit logs directly to that NPC."""
         if tree_id is None:
             return
-        if tree_id < 0 or tree_id >= len(self.gs.trees):
+        # Determine which map the NPC/owner is on
+        player_map = "level_01"
+        if owner_id:
+            owner = self.gs.players.get(owner_id)
+            if owner and npc_id:
+                npc_data = owner.get("npcs", {}).get(npc_id)
+                if npc_data:
+                    player_map = npc_data.get("map", owner.get("map", "level_01"))
+            elif owner:
+                player_map = owner.get("map", "level_01")
+        trees = self._get_trees_for_map(player_map)
+        if tree_id < 0 or tree_id >= len(trees):
             return
-        tree = self.gs.trees[tree_id]
+        tree = trees[tree_id]
         if tree["chopped"]:
             return
         tree["chopped"] = True
-        tree["regrow_at"] = time.time() + random.uniform(TREE_REGROW_MIN, TREE_REGROW_MAX)
+        tree["regrow_at"] = time.time() + get_tree_respawn_time(player_map)
 
         # Credit logs directly to the NPC if specified (for AI-owned NPCs with no client)
         if npc_id and owner_id:
@@ -56,18 +72,21 @@ class GatheringService:
             "y": tree["y"] + TILE_SIZE * 0.4,
             "resource": "Wood",
             "amount": 1,
+            "map": player_map,
         })
 
     def _try_chop(self, pid, tree_id):
         if tree_id is None:
             return
-        if tree_id < 0 or tree_id >= len(self.gs.trees):
+        player_map = self.gs.players.get(pid, {}).get("map", "level_01")
+        trees = self._get_trees_for_map(player_map)
+        if tree_id < 0 or tree_id >= len(trees):
             return
-        tree = self.gs.trees[tree_id]
+        tree = trees[tree_id]
         if tree["chopped"]:
             return
         tree["chopped"] = True
-        tree["regrow_at"] = time.time() + random.uniform(TREE_REGROW_MIN, TREE_REGROW_MAX)
+        tree["regrow_at"] = time.time() + get_tree_respawn_time(player_map)
 
         # Drop ground item
         item_id = _gen_item_id()
@@ -77,6 +96,7 @@ class GatheringService:
             "y": tree["y"] + TILE_SIZE * 0.4,
             "resource": "Wood",
             "amount": 1,
+            "map": player_map,
         })
 
     # ── Farming ────────────────────────────────────────────────────────────────

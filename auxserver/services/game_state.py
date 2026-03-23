@@ -201,6 +201,9 @@ class GameState:
         from services.portals import PortalService
         self.portals = PortalService(self)
 
+        # Initialize central map instance (always loaded)
+        self.instances.init_central(TREE_POSITIONS, ROCK_SPAWN_POSITIONS)
+
     def _init_trees(self):
         trees = []
         for i, (col, row) in enumerate(TREE_POSITIONS):
@@ -640,12 +643,16 @@ class GameState:
                 # Portal check
                 portal = self.portals.check_portal(p)
                 if portal:
+                    old_map = p.get("map", "level_01")
                     tx, ty = tile_pos(portal["spawn_col"], portal["spawn_row"])
                     p["x"] = tx
                     p["y"] = ty
                     p["map"] = portal["to_map"]
                     p["vx"] = 0
                     p["vy"] = 0
+                    # Track instance occupancy
+                    self.instances.player_left(old_map, pid)
+                    self.instances.player_entered(portal["to_map"], pid)
 
         # Move NPCs with _move_target (server-side NPC movement for AI-owned NPCs)
         for npc_owner_pid, owner in self.players.items():
