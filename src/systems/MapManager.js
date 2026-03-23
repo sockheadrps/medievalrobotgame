@@ -103,11 +103,26 @@ export default class MapManager {
     for (const tree of (scene.entities.trees || [])) tree?.destroy?.();
     scene.entities.trees = [];
 
-    // Load new map
+    // Load new map (with template caching for instanced maps)
     try {
-      const res = await fetch(`${API_BASE}/load-map?name=${newMap}`);
-      if (!res.ok) throw new Error(`Map load failed: ${res.status}`);
-      const mapData = await res.json();
+      // Resolve instance map names to cache keys
+      let cacheKey = newMap;
+      if (newMap.startsWith('home_')) cacheKey = 'home';
+      else if (newMap.startsWith('cave_') && newMap !== 'cave_01') cacheKey = 'cave_01';
+
+      if (!this._mapCache) this._mapCache = {};
+      let mapData;
+      if (this._mapCache[cacheKey]) {
+        mapData = this._mapCache[cacheKey];
+      } else {
+        const res = await fetch(`${API_BASE}/load-map?name=${newMap}`);
+        if (!res.ok) throw new Error(`Map load failed: ${res.status}`);
+        mapData = await res.json();
+        // Cache templates (all homes/caves share the same tile data)
+        if (cacheKey === 'home' || (cacheKey === 'cave_01' && newMap !== 'cave_01')) {
+          this._mapCache[cacheKey] = mapData;
+        }
+      }
       const { treePositions, rockSpawnTiles, collisionRects, tileImages, tileImagesOverlay, width, height } = buildTilemapFromData(scene, mapData);
       scene._currentMap = newMap;
       this._tileImages = tileImages;
@@ -138,7 +153,7 @@ export default class MapManager {
       scene._collisionRects = collisionRects;
 
       // Mine renderer: request tiles when entering cave, destroy when leaving
-      if (newMap === 'cave_01') {
+      if (newMap.startsWith('cave_')) {
         scene._conn?.send({ type: 'request_mine_tiles' });
       } else {
         scene._mineRenderer.destroy();
@@ -165,7 +180,7 @@ export default class MapManager {
   /** Set camera + physics bounds for the given map dimensions. */
   applyMapBounds(mapName, cols, rows) {
     const scene = this.scene;
-    if (mapName === 'cave_01') {
+    if (mapName.startsWith('cave_')) {
       // Initial bounds — MineRenderer will tighten these once tile data arrives
       const EXT = 100;
       const minX = -EXT * TILE_SIZE;
