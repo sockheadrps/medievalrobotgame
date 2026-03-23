@@ -162,6 +162,9 @@ class GameState:
         self.aftershock_zones = []  # [{x, y, map, radius, dps, expires_at, owner_pid, last_tick}]
         self.background_npcs = {}  # npc_id -> {pid, npc_id, map, task, last_tick}
         self.mine_grids = {}       # pid -> MineGrid (loaded on cave entry)
+        from services.instance_manager import InstanceManager
+        self.instances = InstanceManager()
+
         self.paused = False        # admin pause — halts AI brain loop and LLM calls
         self.xp_multipliers = {
             "player": 1.0,
@@ -199,14 +202,25 @@ class GameState:
         self.portals = PortalService(self)
 
     def _init_trees(self):
+        trees = []
         for i, (col, row) in enumerate(TREE_POSITIONS):
             x, y = tile_pos(col, row)
-            self.trees.append({
+            trees.append({
                 "id": i,
                 "x": x, "y": y,
                 "chopped": False,
                 "regrow_at": None,
             })
+        # Store trees in the instance manager for level_01 (backwards compat)
+        self.instances._instances["level_01"] = {
+            "trees": trees, "rocks": [], "buildings": {},
+            "dummies": {}, "anvils": {}, "campfires": {},
+            "world_objects": [],
+        }
+        self.instances.mark_persistent("level_01")
+        self.instances.mark_persistent("central")
+        # Keep flat self.trees as a reference to the instance list for backwards compat
+        self.trees = self.instances._instances["level_01"]["trees"]
 
     def _load_persisted(self):
         """Load ground items, dummies, anvils, campfires, and buildings from the database."""
@@ -289,6 +303,9 @@ class GameState:
             from services.database import save_mine_state
             for pid, mg in self.mine_grids.items():
                 save_mine_state(pid, mg.to_json())
+            # Save and unload idle map instances
+            self.instances.save_all()
+            self.instances.tick_unload()
         except Exception as e:
             logger.warning("Failed to save world state: %s", e)
 
@@ -697,11 +714,12 @@ class GameState:
                     remaining.append(item)
             self.ground_items = remaining
 
-        # Tree regrowth
-        for tree in self.trees:
-            if tree["chopped"] and tree["regrow_at"] and now >= tree["regrow_at"]:
-                tree["chopped"] = False
-                tree["regrow_at"] = None
+        # Tree regrowth — iterate all active instances
+        for _mk, _inst in self.instances._instances.items():
+            for tree in _inst.get("trees", []):
+                if tree["chopped"] and tree.get("regrow_at") and now >= tree["regrow_at"]:
+                    tree["chopped"] = False
+                    tree["regrow_at"] = None
 
         # Rock despawn (unmined rocks past their lifespan)
         self.rocks = [r for r in self.rocks if not (not r["mined"] and now >= r["despawn_at"])]
