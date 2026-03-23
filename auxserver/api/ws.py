@@ -247,7 +247,6 @@ async def game_loop():
         disconnected = []
         for pid, ws in clients.items():
             recipient_map = game.players.get(pid, {}).get("map", "level_01")
-            on_overworld = recipient_map == "level_01"
 
             # Players: include self always; others only if on same map
             filtered_players = {}
@@ -286,16 +285,18 @@ async def game_loop():
                 "players": filtered_players,
                 "xp_multipliers": dict(game.xp_multipliers),
                 "speed_multiplier": getattr(game, "_speed_multiplier", 1.0),
-                "trees": game.trees if on_overworld else [],
-                "rocks": game.rocks if on_overworld else [],
+                "trees": game.instances.get_trees(recipient_map),
+                "rocks": game.instances.get_rocks(recipient_map),
                 "ground_items": [gi for gi in game.ground_items
-                                 if gi.get("map", "level_01") == recipient_map] if on_overworld else [],
+                                 if gi.get("map", "level_01") == recipient_map],
                 "dummies": filtered_dummies,
                 "anvils": filtered_anvils,
                 "campfires": filtered_campfires,
                 "fx_events": pid_fx,
-                "animals": all_animals if on_overworld else [],
-                "crops": all_crops if on_overworld else [],
+                "animals": [a for a in all_animals
+                            if a.get("map", "level_01") == recipient_map],
+                "crops": [c for c in all_crops
+                          if c.get("map", "level_01") == recipient_map],
                 "world_objects": filtered_wo,
                 "buildings": filtered_buildings,
             }
@@ -396,20 +397,26 @@ async def websocket_endpoint(ws: WebSocket):
         player["npc_ids"] = []
         logger.info("ws: New player %s", pid)
 
-    # Send welcome with saved NPC IDs
+    # Send welcome with saved NPC IDs — filtered to player's current map
+    player_map = player.get("map", "level_01")
     snap = game.snapshot()
     welcome = {
         "type": "welcome",
         "your_id": pid,
         "players": {pid_k: {**pv, "npcs": _clean_npcs(pv.get("npcs", {}))}
                      for pid_k, pv in snap["players"].items()},
-        "trees": snap["trees"],
-        "ground_items": snap["ground_items"],
-        "dummies": snap["dummies"],
-        "anvils": snap.get("anvils", {}),
+        "trees": game.instances.get_trees(player_map),
+        "ground_items": [gi for gi in snap["ground_items"]
+                         if gi.get("map", "level_01") == player_map],
+        "dummies": {did: d for did, d in snap["dummies"].items()
+                    if d.get("map", "level_01") == player_map},
+        "anvils": {aid: a for aid, a in snap.get("anvils", {}).items()
+                   if a.get("map", "level_01") == player_map},
         "npc_ids": player.get("npc_ids", []) if SPAWN_NPCS else [],
-        "animals": animal_manager.get_all(),
-        "crops": crop_manager.get_all(),
+        "animals": [a for a in animal_manager.get_all()
+                    if a.get("map", "level_01") == player_map],
+        "crops": [c for c in crop_manager.get_all()
+                  if c.get("map", "level_01") == player_map],
     }
     await ws.send_text(json.dumps(welcome))
     clients[pid] = ws
