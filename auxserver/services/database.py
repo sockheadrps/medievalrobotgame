@@ -39,6 +39,17 @@ def _migrate_v1(conn):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
 
 
+def _migrate_v3(conn):
+    """Add instance_state table for per-map entity storage."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS instance_state (
+            map_key TEXT PRIMARY KEY,
+            state_json TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
 def _migrate_v2(conn):
     """Add indexes on frequently-queried columns."""
     # players.username is already the PRIMARY KEY (auto-indexed); index on it
@@ -193,6 +204,11 @@ def init_db():
     if current < 2:
         _migrate_v2(conn)
         conn.execute("INSERT OR REPLACE INTO schema_version VALUES (2)")
+        conn.commit()
+
+    if current < 3:
+        _migrate_v3(conn)
+        conn.execute("INSERT OR REPLACE INTO schema_version VALUES (3)")
         conn.commit()
 
     # Migrate: add columns if missing (for existing databases)
@@ -798,6 +814,34 @@ def delete_all_mine_states():
     """Delete all mine grid records (used by map wipe for cave maps)."""
     conn = _get_conn()
     conn.execute("DELETE FROM mine_states")
+    conn.commit()
+
+
+# ── Instance state persistence ─────────────────────────────────────────────────
+
+def save_instance_state(map_key: str, state: dict):
+    """Save per-map entity state (trees, buildings, etc.) to DB."""
+    conn = _get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO instance_state (map_key, state_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+        (map_key, json.dumps(state)),
+    )
+    conn.commit()
+
+
+def load_instance_state(map_key: str) -> dict | None:
+    """Load per-map entity state from DB. Returns None if no saved state."""
+    conn = _get_conn()
+    row = conn.execute("SELECT state_json FROM instance_state WHERE map_key = ?", (map_key,)).fetchone()
+    if row:
+        return json.loads(row[0])
+    return None
+
+
+def delete_instance_state(map_key: str):
+    """Delete saved state for a map instance."""
+    conn = _get_conn()
+    conn.execute("DELETE FROM instance_state WHERE map_key = ?", (map_key,))
     conn.commit()
 
 
