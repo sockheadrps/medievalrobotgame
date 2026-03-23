@@ -307,6 +307,8 @@ def save_player(username: str, data: dict):
         "active_blast_id": data.get("active_blast_id"),
         "learned_blasts": data.get("learned_blasts", []),
         "map": data.get("map", "level_01"),
+        "central_portal_col": data.get("central_portal_col"),
+        "central_portal_row": data.get("central_portal_row"),
         "equipment": data.get("equipment", {}),
         "inventory": data.get("inventory", {}),
     })
@@ -368,6 +370,8 @@ def load_player(username: str) -> dict | None:
         "learned_blasts": extra.get("learned_blasts", []),
         "copper": extra.get("copper", 0),
         "map": extra.get("map", "level_01"),
+        "central_portal_col": extra.get("central_portal_col"),
+        "central_portal_row": extra.get("central_portal_row"),
         "equipment": extra.get("equipment", {}),
         "inventory": extra.get("inventory", {}),
         "last_blast_observe_at": 0.0,

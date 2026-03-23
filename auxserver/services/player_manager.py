@@ -10,7 +10,7 @@ import random
 import time
 
 from services.asset_registry import asset_registry
-from services.world_data import TILE_SIZE
+from services.world_data import TILE_SIZE, register_player_portal, get_player_portals, get_map_dimensions
 from core.constants import PLAYER_SPEED, PLAYER_RUN_SPEED, KI_MAX_BASE, KI_MAX_PER_LEVEL
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,40 @@ def _gen_item_id():
     """Delegate to game_state module-level generator so IDs don't collide."""
     from services.game_state import _gen_item_id as _gs_gen
     return _gs_gen()
+
+
+def _assign_central_portal(pid: str) -> tuple[int, int]:
+    """Pick a random perimeter tile on the central map with >=15 tile spacing."""
+    cols, rows = get_map_dimensions("central")
+    existing = [(p["tile_col"], p["tile_row"]) for p in get_player_portals()
+                if p["from_map"] == "central"]
+    min_dist = 15
+    # Build perimeter tile list
+    perimeter = []
+    for c in range(cols):
+        perimeter.append((c, 0))
+        perimeter.append((c, rows - 1))
+    for r in range(1, rows - 1):
+        perimeter.append((0, r))
+        perimeter.append((cols - 1, r))
+    random.shuffle(perimeter)
+
+    best = None
+    best_min_d = -1
+    for attempt, (c, r) in enumerate(perimeter):
+        if attempt >= 50 and best:
+            break
+        if not existing:
+            best = (c, r)
+            break
+        d = min(math.hypot(c - ec, r - er) for ec, er in existing)
+        if d >= min_dist:
+            best = (c, r)
+            break
+        if d > best_min_d:
+            best_min_d = d
+            best = (c, r)
+    return best or (1, 0)
 
 
 class PlayerManager:
@@ -85,12 +119,22 @@ class PlayerManager:
             "npcs": {},  # npc_id -> { hp, maxHp, str, def, x, y, owner }
             "npc_ids": [],  # persistent list of owned NPC IDs
             "chatColor": "#cccccc",
-            "map": "level_01",
+            "map": f"home_{pid}",
             "equipment": {},   # slot -> item_id
             "inventory": {},   # item_id -> quantity (data-driven items)
             "combat_mode": "kill",  # "kill" or "ko" — determines NPC defeat behavior
         }
         self._ensure_default_ki_moves(self.gs.players[pid])
+
+        # Assign central map portal for new player
+        portal_col, portal_row = _assign_central_portal(pid)
+        self.gs.players[pid]["central_portal_col"] = portal_col
+        self.gs.players[pid]["central_portal_row"] = portal_row
+        register_player_portal(pid, portal_col, portal_row, spawn_col=25, spawn_row=25)
+
+        # Initialize home instance
+        self.gs.instances.init_home(f"home_{pid}")
+
         return self.gs.players[pid]
 
     def remove_player(self, pid: str):

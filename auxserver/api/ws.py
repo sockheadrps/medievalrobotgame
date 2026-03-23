@@ -392,6 +392,22 @@ async def websocket_endpoint(ws: WebSocket):
         player["combat_mode"] = saved.get("combat_mode", "kill")
         player["equipment"] = saved.get("equipment", {})
         player["inventory"] = saved.get("inventory", {})
+        # Register portal for existing player (or assign if migrating from pre-portal era)
+        pcol = saved.get("central_portal_col")
+        prow = saved.get("central_portal_row")
+        if pcol is not None and prow is not None:
+            player["central_portal_col"] = pcol
+            player["central_portal_row"] = prow
+            from services.world_data import register_player_portal
+            register_player_portal(pid, pcol, prow, spawn_col=25, spawn_row=25)
+        else:
+            # Migration: existing player without portal assignment
+            from services.player_manager import _assign_central_portal
+            from services.world_data import register_player_portal
+            pcol, prow = _assign_central_portal(pid)
+            player["central_portal_col"] = pcol
+            player["central_portal_row"] = prow
+            register_player_portal(pid, pcol, prow, spawn_col=25, spawn_row=25)
         logger.info("ws: Restored player %s (level %s, %s logs)", pid, player['level'], player['logs'])
     else:
         player["npc_ids"] = []
