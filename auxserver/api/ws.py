@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from services.game_state import game, WORLD_OBJECT_INSTANCES
+from core.constants import TILE_SIZE
 from services.animal_service import animal_manager
 from services.crop_service import crop_manager
 from services.accounts import save_player, load_player
@@ -413,8 +414,11 @@ async def websocket_endpoint(ws: WebSocket):
         player["npc_ids"] = []
         logger.info("ws: New player %s", pid)
 
-    # Send welcome with saved NPC IDs — filtered to player's current map
+    # Track instance occupancy
     player_map = player.get("map", "level_01")
+    game.instances.player_entered(player_map, pid)
+
+    # Send welcome with saved NPC IDs — filtered to player's current map
     snap = game.snapshot()
     welcome = {
         "type": "welcome",
@@ -527,6 +531,26 @@ async def websocket_endpoint(ws: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
+        # Recall NPCs from shared maps before removing player
+        player = game.players.get(pid)
+        if player:
+            home_map = f"home_{pid}"
+            for npc_id, npc in player.get("npcs", {}).items():
+                npc_map = npc.get("map", "level_01")
+                if npc_map not in (home_map, f"cave_{pid}", "level_01"):
+                    # NPC is on central or another player's home — recall
+                    npc["map"] = home_map
+                    npc["x"] = 25 * TILE_SIZE
+                    npc["y"] = 25 * TILE_SIZE
+                    npc["vx"] = 0
+                    npc["vy"] = 0
+                    npc.pop("punching", None)
+                    logger.info("Recalled NPC %s from %s to %s", npc_id, npc_map, home_map)
+
+            # Notify instance manager
+            player_map = player.get("map", "level_01")
+            game.instances.player_left(player_map, pid)
+
         # Save on disconnect
         _save_player_state(pid)
         clients.pop(pid, None)
