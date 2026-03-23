@@ -4,7 +4,8 @@ import json
 import logging
 from pathlib import Path
 
-from services.game_state import PORTALS, TILE_SIZE
+from services.world_data import get_all_portals
+from core.constants import TILE_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +19,21 @@ class PortalService:
         col = int(actor["x"] // TILE_SIZE)
         row = int(actor["y"] // TILE_SIZE)
         actor_map = actor.get("map", "level_01")
-        for portal in PORTALS:
-            if portal["from_map"] == actor_map and portal["tile_col"] == col and portal["tile_row"] == row:
+        for portal in get_all_portals(actor_map):
+            if portal["tile_col"] == col and portal["tile_row"] == row:
                 return portal
         return None
 
     def get_spawn_point_for_map(self, map_name: str):
         """Return (col, row) spawn point for a given map name from portal definitions, or None."""
+        # Resolve instanced map names to template
+        resolved = map_name
+        if map_name.startswith("home_"):
+            resolved = "home"
+        elif map_name.startswith("cave_") and map_name != "cave_01":
+            resolved = "cave_01"
         maps_dir = Path(__file__).resolve().parent.parent / "maps"
-        items_file = maps_dir / f"{map_name}_items.json"
+        items_file = maps_dir / f"{resolved}_items.json"
         if not items_file.exists():
             return None
         try:

@@ -240,6 +240,46 @@ MINECART_PORTALS = _load_minecart_portals()
 
 WORLD_OBJECT_INSTANCES = {}  # populated by init_world_objects() after asset_registry loads
 
+# ── Dynamic player portals (registered at runtime) ───────────────────────────
+_player_portals: list[dict] = []
+
+
+def register_player_portal(player_id: str, col: int, row: int,
+                           spawn_col: int = 25, spawn_row: int = 25):
+    """Register bidirectional portals: central ↔ home_{player_id}."""
+    home_map = f"home_{player_id}"
+    # Central → home
+    _player_portals.append({
+        "from_map": "central",
+        "tile_col": col,
+        "tile_row": row,
+        "to_map": home_map,
+        "spawn_col": spawn_col,
+        "spawn_row": spawn_row,
+    })
+    # Home → central (east edge portal, fixed at col 49, row 25 in home template)
+    _player_portals.append({
+        "from_map": home_map,
+        "tile_col": 49,
+        "tile_row": 25,
+        "to_map": "central",
+        "spawn_col": col,
+        "spawn_row": row,
+    })
+    logger.info("Registered bidirectional portal for %s at central (%d, %d)", player_id, col, row)
+
+
+def get_all_portals(map_name: str) -> list[dict]:
+    """Return static + dynamic portals for a given source map."""
+    result = [p for p in PORTALS if p["from_map"] == map_name]
+    result.extend(p for p in _player_portals if p["from_map"] == map_name)
+    return result
+
+
+def get_player_portals() -> list[dict]:
+    """Return all registered player portals (for central map rendering)."""
+    return list(_player_portals)
+
 _collision_cache: dict[str, set[tuple[int, int]]] = {}
 _map_dims_cache: dict[str, tuple[int, int]] = {}
 
